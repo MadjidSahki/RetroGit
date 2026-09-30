@@ -677,3 +677,48 @@ fn access_denied_explains_org_oauth_restrictions() {
     assert_eq!(e.message, retrogit::strings::ERR_ACCESS_DENIED);
     assert_eq!(e.detail.as_deref(), Some("remote: Repository not found."));
 }
+
+mod highlight_cache {
+    use super::*;
+    use gitcore::{FileDiff, Side};
+
+    fn diff(path: &str, binary: bool) -> FileDiff {
+        FileDiff {
+            path: path.into(),
+            side: Side::Unstaged,
+            binary,
+            hunks: vec![],
+        }
+    }
+
+    #[test]
+    fn colors_are_dropped_when_the_diff_changes_and_kept_otherwise() {
+        let mut s = AppState::new(Config::default());
+        s.changes.shown = Some(("a.rs".into(), Side::Unstaged));
+        s.apply(Event::DiffLoaded(diff("a.rs", false)));
+        s.changes.diff_colors = Some(Some(vec![]));
+        s.apply(Event::DiffLoaded(diff("a.rs", false)));
+        assert!(
+            s.changes.diff_colors.is_some(),
+            "same diff: keep the colors"
+        );
+        s.apply(Event::DiffLoaded(diff("a.rs", true)));
+        assert!(s.changes.diff_colors.is_none(), "new diff: recompute");
+    }
+
+    #[test]
+    fn commit_file_colors_follow_the_commit_file_diff() {
+        let mut s = AppState::new(Config::default());
+        s.select_commit("c1");
+        s.history.detail_file = Some("a.rs".into());
+        s.history.detail_colors = Some(None);
+        s.apply(Event::CommitFileDiffLoaded {
+            id: "c1".into(),
+            diff: diff("a.rs", false),
+        });
+        assert!(s.history.detail_colors.is_none());
+        s.history.detail_colors = Some(None);
+        s.select_commit("c2");
+        assert!(s.history.detail_colors.is_none());
+    }
+}

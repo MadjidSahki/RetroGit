@@ -33,6 +33,8 @@ pub struct HistoryView {
     pub signature: Option<SignatureStatus>,
     pub detail_file: Option<String>,
     pub detail_diff: Option<FileDiff>,
+    /// Syntax colors of `detail_diff` (`Some(None)` = not highlightable).
+    pub detail_colors: Option<Option<crate::highlight::DiffColors>>,
     /// Share of the height given to the commit list.
     pub split: f32,
 }
@@ -50,6 +52,7 @@ impl Default for HistoryView {
             signature: None,
             detail_file: None,
             detail_diff: None,
+            detail_colors: None,
             split: 0.55,
         }
     }
@@ -123,6 +126,7 @@ impl AppState {
                     && h.detail_file.as_deref() == Some(diff.path.as_str())
                 {
                     h.detail_diff = Some(diff);
+                    h.detail_colors = None;
                 }
             }
             Event::BranchesLoaded(branches) => self.branches = branches,
@@ -185,6 +189,7 @@ impl AppState {
             h.signature = None;
             h.detail_file = None;
             h.detail_diff = None;
+            h.detail_colors = None;
         }
     }
 

@@ -24,6 +24,8 @@ pub struct ChangesView {
     /// File whose diff is displayed, and which side.
     pub shown: Option<(String, Side)>,
     pub diff: Option<FileDiff>,
+    /// Syntax colors of `diff`, computed once by the UI: `Some(None)` = not highlightable.
+    pub diff_colors: Option<Option<crate::highlight::DiffColors>>,
     /// Checked `(hunk, line)` pairs of `diff`; cleared whenever a new diff arrives.
     pub selected_lines: BTreeSet<(usize, usize)>,
     pub show_large: bool,
@@ -271,6 +273,7 @@ impl AppState {
                 {
                     // Background refreshes re-send the same diff: keep the user's selection.
                     if c.diff.as_ref() != Some(&diff) {
+                        c.diff_colors = None;
                         c.diff = Some(diff);
                         c.selected_lines.clear();
                         c.show_large = false;

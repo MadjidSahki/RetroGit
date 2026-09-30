@@ -150,6 +150,7 @@ pub const CONTINUE_REBASE: &str = "Continue rebase";
 pub const SIGNED_WITH: &str = "Signed with";
 pub const NOT_SIGNED: &str = "Commits will NOT be signed";
 pub const LOADING_HISTORY: &str = "Loading history...";
+pub const LOADING_DIFF: &str = "Loading diff...";
 pub const NO_HISTORY: &str = "No commits yet.";
 pub const SELECT_A_COMMIT: &str = "Select a commit to see its details.";
 pub const SIG_GOOD: &str = "Good signature";

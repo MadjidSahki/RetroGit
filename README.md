@@ -102,8 +102,6 @@ The UI thread never blocks: it sends commands to a single worker thread and appl
 events it sends back. When RetroGit runs `git` for a github.com remote, it hands the token
 to git through `GIT_ASKPASS` (the RetroGit binary itself answers), never on the command line.
 
-Design documents and implementation plans live in [`docs/superpowers`](docs/superpowers).
-
 ## Development
 
 ```bash

@@ -12,7 +12,7 @@ use crate::strings as s;
 const ADDED_BG: Color32 = Color32::from_rgb(0xE6, 0xFF, 0xE6);
 const REMOVED_BG: Color32 = Color32::from_rgb(0xFF, 0xE6, 0xE6);
 const HUNK_BG: Color32 = Color32::from_rgb(0xE0, 0xE0, 0xF0);
-const ROW_HEIGHT: f32 = 17.0;
+pub const ROW_HEIGHT: f32 = 17.0;
 
 /// One displayed row: a hunk header or a line of a hunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +119,9 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             ui.label(s::RESOLVE_CONFLICTS);
             return;
         }
+        if c.diff.is_some() && c.diff_colors.is_none() {
+            c.diff_colors = Some(c.diff.as_ref().and_then(crate::highlight::highlight_diff));
+        }
         let Some(diff) = c.diff.as_ref() else { return };
         if diff.binary && !whole_only {
             ui.label(s::BINARY_FILE);
@@ -220,15 +223,21 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                                     } else {
                                         ""
                                     };
-                                    ui.label(
-                                        RichText::new(format!(
-                                            "{} {} {sign} {text}{eof}",
-                                            num(line.old_no),
-                                            num(line.new_no)
-                                        ))
-                                        .font(mono.clone())
-                                        .color(win95::theme::BLACK),
+                                    let prefix = format!(
+                                        "{} {} {sign} ",
+                                        num(line.old_no),
+                                        num(line.new_no)
                                     );
+                                    let spans =
+                                        crate::highlight::line_spans(c.diff_colors.as_ref(), h, l);
+                                    ui.label(crate::highlight::colored_line(
+                                        &prefix,
+                                        text,
+                                        spans,
+                                        eof,
+                                        mono.clone(),
+                                        egui::Color32::TRANSPARENT,
+                                    ));
                                 });
                             });
                         }
