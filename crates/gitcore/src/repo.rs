@@ -53,6 +53,10 @@ impl Repo {
         }
     }
 
+    pub(crate) fn from_git2(inner: git2::Repository, path: PathBuf) -> Repo {
+        Repo { inner, path }
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
