@@ -42,7 +42,7 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         .map(|lc| format!(" · {} \"{}\"", lc.short_id, lc.summary))
         .unwrap_or_default();
     ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("{} · {branch}{last}", c.name)).strong());
+        ui.label(RichText::new(format!("{} · {branch}{last}", c.name)).color(win95::theme::NAVY));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.add(Button95::new(s::REFRESH)).clicked() {
                 cx.worker.send(Command::RefreshStatus);

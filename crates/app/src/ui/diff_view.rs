@@ -78,7 +78,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                 .iter()
                 .any(|f| f.path == path && matches!(f.staged, Some(Change::Renamed { .. })));
         ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("{path} {side_label}")).strong());
+            ui.label(RichText::new(format!("{path} {side_label}")).color(win95::theme::BLACK));
             let has_lines = !c.selected_lines.is_empty();
             if whole_only {
                 if ui.add(Button95::new(verb_file)).clicked() {

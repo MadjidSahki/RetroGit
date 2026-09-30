@@ -48,7 +48,7 @@ fn standard_tab(ui: &mut egui::Ui, cx: &mut Ctx<'_>, close: &mut bool) {
                 ui.label(
                     RichText::new(&user_code)
                         .font(win95::theme::font(26.0))
-                        .strong(),
+                        .color(win95::theme::BLACK),
                 );
             });
             ui.horizontal(|ui| {
