@@ -138,6 +138,10 @@ impl AppState {
                 if let Some(c) = self.clone.as_mut() {
                     c.progress = None;
                 }
+                self.messages.push_back(AppError::new(
+                    crate::protocol::Severity::Info,
+                    crate::strings::INFO_CLONE_CANCELLED,
+                ));
             }
             Event::RepoOpened(summary) => {
                 self.remember(&summary);

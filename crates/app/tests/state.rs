@@ -186,3 +186,16 @@ fn offline_does_not_open_sign_in() {
     assert_eq!(s.sign_in, None);
     assert_eq!(s.messages.len(), 1);
 }
+
+#[test]
+fn cancelled_clone_shows_an_info_message() {
+    let mut s = AppState::new(Config::default());
+    s.clone = Some(CloneDialog {
+        progress: Some(CloneProgress::default()),
+        ..Default::default()
+    });
+    s.apply(Event::CloneCancelled);
+    let m = s.messages.front().unwrap();
+    assert_eq!(m.severity, Severity::Info);
+    assert_eq!(m.message, retrogit::strings::INFO_CLONE_CANCELLED);
+}
