@@ -753,7 +753,7 @@ mod sync {
         git(&work, &["add", "mine.txt"]);
         git(&work, &["commit", "-q", "-m", "mine"]);
         w.send(Command::Push(gitcore::PushMode::Normal));
-        until(&w, |e| matches!(e, Event::PushRejected));
+        until(&w, |e| matches!(e, Event::PushRejected { .. }));
 
         w.send(Command::CreateBranch {
             name: "side".into(),
@@ -809,6 +809,68 @@ mod sync {
                     ok: true
                 }
             )
+        });
+    }
+
+    #[test]
+    fn force_push_is_offered_only_for_the_branch_whose_pushed_commit_was_amended() {
+        let Some((_tmp, work)) = remote_env() else {
+            return;
+        };
+        let server = mockito::Server::new();
+        let w = start(&server, Arc::new(MemoryStore::default()), "");
+        w.send(Command::OpenRepo(work.clone()));
+        until(&w, |e| {
+            matches!(
+                e,
+                Event::SyncFinished {
+                    op: SyncOp::Fetch,
+                    ..
+                }
+            )
+        });
+        std::fs::write(work.join("README.md"), "amended\n").unwrap();
+        w.send(Command::StageFiles(vec!["README.md".into()]));
+        w.send(Command::Commit {
+            message: "init (amended)".into(),
+            amend: true,
+        });
+        until(&w, |e| matches!(e, Event::Committed(_)));
+        w.send(Command::Push(gitcore::PushMode::Normal));
+        until(&w, |e| matches!(e, Event::PushRejected { can_force: true }));
+        w.send(Command::ForcePush);
+        until(&w, |e| {
+            matches!(
+                e,
+                Event::SyncFinished {
+                    op: SyncOp::Push,
+                    ok: true
+                }
+            )
+        });
+
+        // Another branch with a rejected push: no force offered (nothing was amended there).
+        push_from_other(&work, "theirs.txt");
+        w.send(Command::Fetch { background: false });
+        until(&w, |e| {
+            matches!(
+                e,
+                Event::SyncFinished {
+                    op: SyncOp::Fetch,
+                    ..
+                }
+            )
+        });
+        std::fs::write(work.join("mine.txt"), "mine\n").unwrap();
+        w.send(Command::StageFiles(vec!["mine.txt".into()]));
+        w.send(Command::Commit {
+            message: "mine".into(),
+            amend: false,
+        });
+        until(&w, |e| matches!(e, Event::Committed(_)));
+        w.send(Command::Push(gitcore::PushMode::Normal));
+        until(&w, |e| {
+            matches!(e, Event::PushRejected { can_force: false })
         });
     }
 }

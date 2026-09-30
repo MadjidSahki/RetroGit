@@ -93,6 +93,8 @@ pub enum Command {
     },
     Pull(PullMode),
     Push(PushMode),
+    /// Force-push after amending a pushed commit, leased on the remote commit recorded then.
+    ForcePush,
     AbortOperation,
     ContinueRebase,
 }
@@ -179,7 +181,10 @@ pub enum Event {
         ahead: usize,
         behind: usize,
     },
-    PushRejected,
+    /// `can_force`: HEAD rewrites a commit this branch had pushed (lease recorded).
+    PushRejected {
+        can_force: bool,
+    },
     /// Switching is blocked by local changes to these files.
     WouldOverwrite {
         branch: String,

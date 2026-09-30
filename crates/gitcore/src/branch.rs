@@ -73,6 +73,15 @@ impl Repo {
         Ok(out)
     }
 
+    /// Commit id the current branch's upstream points to (e.g. `origin/main`), if any.
+    pub fn upstream_oid(&self) -> Option<String> {
+        let head = self.git().head().ok()?;
+        let name = head.shorthand().ok()?;
+        let branch = self.git().find_branch(name, git2::BranchType::Local).ok()?;
+        let up = branch.upstream().ok()?;
+        up.get().target().map(|o| o.to_string())
+    }
+
     /// Current local branch, if HEAD is not detached.
     pub fn current_branch(&self) -> Option<Branch> {
         self.branches()

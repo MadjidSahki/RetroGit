@@ -52,14 +52,14 @@ pub enum PushMode {
     Normal,
     /// First push of a branch: `push -u origin <branch>`.
     SetUpstream,
-    /// After rewriting pushed commits (amend): `--force-with-lease`.
-    ForceWithLease,
 }
 
 /// Map a failed network command's output to an error.
 pub fn classify_net_failure(output: &str) -> GitError {
     let o = output.to_ascii_lowercase();
-    if o.contains("[rejected]") && (o.contains("non-fast-forward") || o.contains("fetch first")) {
+    if o.contains("[rejected]")
+        && (o.contains("non-fast-forward") || o.contains("fetch first") || o.contains("stale info"))
+    {
         GitError::PushRejected
     } else if o.contains("authentication failed")
         || o.contains("could not read username")
@@ -276,9 +276,41 @@ impl Repo {
             PushMode::SetUpstream => {
                 vec!["push", "--progress", "-u", "origin", branch.name.as_str()]
             }
-            PushMode::ForceWithLease => vec!["push", "--progress", "--force-with-lease"],
         };
         self.run_net(auth, &args, progress, cancel).map(|_| ())
+    }
+}
+
+impl Repo {
+    /// Force-push the current branch after rewriting pushed commits (amend), but only if the
+    /// remote branch is still at `expected` — the commit it pointed to when we rewrote.
+    /// A fetch in between cannot weaken the lease; `PushRejected` if someone pushed.
+    pub fn push_force_with_lease(
+        &self,
+        auth: &NetAuth,
+        expected: &str,
+        progress: impl FnMut(NetProgress),
+        cancel: &AtomicBool,
+    ) -> Result<(), GitError> {
+        let branch = self
+            .current_branch()
+            .ok_or_else(|| GitError::Unsupported("HEAD is detached".into()))?;
+        let upstream = branch
+            .upstream
+            .ok_or_else(|| GitError::Unsupported("this branch has no upstream".into()))?;
+        let remote_branch = upstream
+            .split_once('/')
+            .map(|(_, b)| b.to_string())
+            .unwrap_or(upstream);
+        let lease = format!("--force-with-lease=refs/heads/{remote_branch}:{expected}");
+        let refspec = format!("HEAD:refs/heads/{remote_branch}");
+        self.run_net(
+            auth,
+            &["push", "--progress", &lease, "origin", &refspec],
+            progress,
+            cancel,
+        )
+        .map(|_| ())
     }
 }
 

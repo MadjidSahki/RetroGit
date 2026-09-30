@@ -253,6 +253,12 @@ impl Worker {
         self.after_ref_change(&repo);
     }
 
+    /// Whether the current branch is the one whose pushed commit was amended.
+    fn lease_for(&self, repo: &Repo) -> Option<String> {
+        let (branch, oid) = self.lease.as_ref()?;
+        (repo.current_branch()?.name == *branch).then(|| oid.clone())
+    }
+
     pub(super) fn push(&mut self, mode: PushMode) {
         let Some((repo, result)) =
             self.network(SyncOp::Push, false, |r, a, p, c| r.push(a, mode, p, c))
@@ -260,16 +266,54 @@ impl Worker {
             return;
         };
         match result {
-            Ok(()) => self.emit(Event::SyncFinished {
-                op: SyncOp::Push,
-                ok: true,
-            }),
+            Ok(()) => {
+                self.lease = None;
+                self.emit(Event::SyncFinished {
+                    op: SyncOp::Push,
+                    ok: true,
+                });
+            }
             Err(GitError::PushRejected) => {
                 self.emit(Event::SyncFinished {
                     op: SyncOp::Push,
                     ok: false,
                 });
-                self.emit(Event::PushRejected);
+                let can_force = self.lease_for(&repo).is_some();
+                self.emit(Event::PushRejected { can_force });
+            }
+            Err(e) => self.net_failed(SyncOp::Push, false, &e),
+        }
+        self.after_ref_change(&repo);
+    }
+
+    pub(super) fn force_push(&mut self) {
+        let Some(repo) = self.open_current(Op::Sync) else {
+            return;
+        };
+        let Some(expected) = self.lease_for(&repo) else {
+            return self.fail(Op::Sync, AppError::from_git(&GitError::PushRejected));
+        };
+        drop(repo);
+        let Some((repo, result)) = self.network(SyncOp::Push, false, |r, a, p, c| {
+            r.push_force_with_lease(a, &expected, p, c)
+        }) else {
+            return;
+        };
+        match result {
+            Ok(()) => {
+                self.lease = None;
+                self.emit(Event::SyncFinished {
+                    op: SyncOp::Push,
+                    ok: true,
+                });
+            }
+            Err(GitError::PushRejected) => {
+                // Someone pushed after our amend: never force over their work.
+                self.emit(Event::SyncFinished {
+                    op: SyncOp::Push,
+                    ok: false,
+                });
+                self.emit(Event::PushRejected { can_force: false });
             }
             Err(e) => self.net_failed(SyncOp::Push, false, &e),
         }

@@ -132,6 +132,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
         token: None,
         repo: None,
         shown: None,
+        lease: None,
         refresh_pending: refresh_pending.clone(),
         cancel_flow: cancel_flow.clone(),
         cancel_clone: cancel_clone.clone(),
@@ -183,6 +184,9 @@ struct Worker {
     shown: Option<(String, Side)>,
     refresh_pending: Arc<AtomicBool>,
     cancel_net: Arc<AtomicBool>,
+    /// `(branch, remote commit)` recorded when a pushed commit of `branch` was amended:
+    /// the only case where RetroGit offers a force push, leased on that commit.
+    lease: Option<(String, String)>,
     cancel_flow: Arc<AtomicBool>,
     cancel_clone: Arc<AtomicBool>,
     emit: Box<dyn Fn(Event) + Send>,
@@ -247,6 +251,7 @@ impl Worker {
             Command::Fetch { background } => self.fetch(background),
             Command::Pull(mode) => self.pull(mode),
             Command::Push(mode) => self.push(mode),
+            Command::ForcePush => self.force_push(),
             Command::AbortOperation => self.abort_operation(),
             Command::ContinueRebase => self.continue_rebase(),
         }

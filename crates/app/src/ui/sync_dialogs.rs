@@ -1,6 +1,6 @@
 //! Dialogs of sub-project 3 and the network progress box.
 
-use gitcore::{PullMode, PushMode};
+use gitcore::PullMode;
 use win95::{Button95, Dialog, Icon, ProgressBar95, checkbox, combo_box, text_field};
 
 use super::Ctx;
@@ -75,10 +75,7 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             s::PUSH_REJECTED_TITLE,
             s::FORCE_PUSH_CONFIRM,
             dialog,
-            vec![(
-                s::FORCE,
-                Outcome::Send(Command::Push(PushMode::ForceWithLease)),
-            )],
+            vec![(s::FORCE, Outcome::Send(Command::ForcePush))],
         ),
         PendingDialog::WouldOverwrite { branch, files } => {
             let q = format!("{}\n\n{}", s::ERR_WOULD_OVERWRITE, files.join("\n"));

@@ -550,35 +550,21 @@ mod sync {
             op: SyncOp::Push,
             ok: false,
         });
-        s.apply(Event::PushRejected);
+        s.apply(Event::PushRejected { can_force: false });
         assert_eq!(s.sync.running, None);
         assert_eq!(
             s.dialog,
             Some(PendingDialog::PushRejected { can_force: false })
         );
-
-        s.changes.amend = true;
-        s.changes.head_pushed = true;
-        s.apply(Event::Committed(gitcore::CommitOutcome {
-            commit: gitcore::CommitInfo {
-                short_id: "a".into(),
-                summary: "s".into(),
-                author: "A".into(),
-                time: 0,
-            },
-            used_cli: true,
-        }));
-        s.apply(Event::PushRejected);
+        s.apply(Event::PushRejected { can_force: true });
         assert_eq!(
             s.dialog,
-            Some(PendingDialog::PushRejected { can_force: true }),
-            "force offered after amending a pushed commit"
+            Some(PendingDialog::PushRejected { can_force: true })
         );
         s.apply(Event::SyncFinished {
             op: SyncOp::Push,
             ok: true,
         });
-        assert!(!s.amended_pushed);
         assert_eq!(s.sync.note.as_deref(), Some("Pushed"));
 
         s.apply(Event::Diverged {

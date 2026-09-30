@@ -154,6 +154,7 @@ fn push_normal_rejected_publish_and_force_with_lease() {
         Some("origin/new-topic")
     );
 
+    let lease = r.upstream_oid().unwrap();
     std::fs::write(env.work.join("mine.txt"), "amended\n").unwrap();
     r.stage("mine.txt", &Selection::All, None).unwrap();
     r.commit("amended", true, CommitBackend::PreferCli).unwrap();
@@ -161,7 +162,7 @@ fn push_normal_rejected_publish_and_force_with_lease() {
         r.push(&auth, PushMode::Normal, |_| {}, &no_cancel()),
         Err(GitError::PushRejected)
     );
-    r.push(&auth, PushMode::ForceWithLease, |_| {}, &no_cancel())
+    r.push_force_with_lease(&auth, &lease, |_| {}, &no_cancel())
         .unwrap();
 }
 
@@ -211,5 +212,36 @@ fn cancel_returns_quickly_even_when_the_server_never_answers() {
         started.elapsed() < std::time::Duration::from_secs(4),
         "took {:?}",
         started.elapsed()
+    );
+}
+
+#[test]
+fn force_with_lease_never_overwrites_a_commit_we_have_not_seen_before_amending() {
+    let Some(env) = Env::new() else { return };
+    let r = env.repo();
+    let auth = NetAuth::default();
+    env.local_commit("mine.txt", "v1\n");
+    r.push(&auth, PushMode::Normal, |_| {}, &no_cancel())
+        .unwrap();
+    // Amending a pushed commit: remember what the remote branch was at that moment.
+    let lease = r.upstream_oid().unwrap();
+    std::fs::write(env.work.join("mine.txt"), "v2\n").unwrap();
+    r.stage("mine.txt", &Selection::All, None).unwrap();
+    r.commit("mine (amended)", true, CommitBackend::PreferCli)
+        .unwrap();
+    // A colleague pushes meanwhile, and a (background) fetch updates origin/main.
+    env.remote_commit("theirs.txt", "t\n");
+    r.fetch(&auth, |_| {}, &no_cancel()).unwrap();
+    assert_eq!(
+        r.push_force_with_lease(&auth, &lease, |_| {}, &no_cancel()),
+        Err(GitError::PushRejected)
+    );
+    let remote_log = git(
+        &env.root.join("origin.git"),
+        &["log", "--format=%s", "main"],
+    );
+    assert!(
+        remote_log.contains("remote theirs.txt"),
+        "the colleague's commit must survive: {remote_log}"
     );
 }

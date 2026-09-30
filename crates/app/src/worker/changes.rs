@@ -11,6 +11,7 @@ impl Worker {
         let new_repo = self.repo.as_ref() != Some(&summary.path);
         if new_repo {
             self.shown = None;
+            self.lease = None;
         }
         self.repo = Some(summary.path.clone());
         self.emit(if cloned {
@@ -132,8 +133,21 @@ impl Worker {
         let Some(repo) = self.open_current(Op::Commit) else {
             return;
         };
+        // Rewriting a pushed commit: remember where the remote branch was (force-push lease).
+        let lease = if amend && repo.head_is_pushed().unwrap_or(false) {
+            repo.current_branch()
+                .zip(repo.upstream_oid())
+                .map(|(b, oid)| (b.name, oid))
+        } else {
+            None
+        };
         match repo.commit(message, amend, self.deps.commit_backend) {
-            Ok(outcome) => self.emit(Event::Committed(outcome)),
+            Ok(outcome) => {
+                if lease.is_some() {
+                    self.lease = lease;
+                }
+                self.emit(Event::Committed(outcome));
+            }
             Err(e) => self.fail(Op::Commit, AppError::from_git(&e)),
         }
         self.after_ref_change(&repo);

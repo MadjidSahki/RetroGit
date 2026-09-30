@@ -146,9 +146,6 @@ impl AppState {
                         }
                         .to_string(),
                     );
-                    if op == SyncOp::Push {
-                        self.amended_pushed = false;
-                    }
                 }
             }
             Event::Pulled(outcome) => {
@@ -168,10 +165,8 @@ impl AppState {
             Event::Diverged { ahead, behind } => {
                 self.dialog = Some(PendingDialog::Diverged { ahead, behind })
             }
-            Event::PushRejected => {
-                self.dialog = Some(PendingDialog::PushRejected {
-                    can_force: self.amended_pushed,
-                });
+            Event::PushRejected { can_force } => {
+                self.dialog = Some(PendingDialog::PushRejected { can_force })
             }
             Event::WouldOverwrite { branch, files } => {
                 self.dialog = Some(PendingDialog::WouldOverwrite { branch, files });

@@ -158,8 +158,6 @@ pub struct AppState {
     pub sync: SyncView,
     /// At most one sub-project 3 dialog at a time.
     pub dialog: Option<PendingDialog>,
-    /// HEAD was amended after being pushed: a rejected push may offer force-with-lease.
-    pub amended_pushed: bool,
     pub operation: Option<gitcore::Operation>,
     pub signing: Option<gitcore::SigningConfig>,
 }
@@ -190,7 +188,6 @@ impl AppState {
             branches: Vec::new(),
             sync: SyncView::default(),
             dialog: None,
-            amended_pushed: false,
             operation: None,
             signing: None,
         }
@@ -281,9 +278,6 @@ impl AppState {
                 }
             }
             Event::Committed(outcome) => {
-                if self.changes.amend && self.changes.head_pushed {
-                    self.amended_pushed = true;
-                }
                 let c = &mut self.changes;
                 c.committing = false;
                 c.summary.clear();
@@ -322,7 +316,7 @@ impl AppState {
             | Event::SyncFinished { .. }
             | Event::Pulled(_)
             | Event::Diverged { .. }
-            | Event::PushRejected
+            | Event::PushRejected { .. }
             | Event::WouldOverwrite { .. }
             | Event::NotMerged(_)) => self.apply_sync(ev),
             Event::Error { during, error } => {
@@ -383,7 +377,6 @@ impl AppState {
             self.branches.clear();
             self.sync = SyncView::default();
             self.dialog = None;
-            self.amended_pushed = false;
             self.operation = None;
             self.signing = None;
         }
