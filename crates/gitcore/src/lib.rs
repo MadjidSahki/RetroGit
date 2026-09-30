@@ -3,6 +3,7 @@
 mod clone;
 mod commit;
 mod diff;
+mod discard;
 mod error;
 mod ignore;
 mod repo;

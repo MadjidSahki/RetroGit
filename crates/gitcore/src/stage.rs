@@ -255,7 +255,7 @@ impl Repo {
     }
 
     /// Run `git <args> -- <paths>` with literal pathspecs, in chunks (command-line limits).
-    fn git_on_paths(&self, args: &[&str], paths: &[&str]) -> Result<(), GitError> {
+    pub(crate) fn git_on_paths(&self, args: &[&str], paths: &[&str]) -> Result<(), GitError> {
         for chunk in paths.chunks(200) {
             let out = crate::commit::git_command()
                 .arg("--literal-pathspecs")
