@@ -102,8 +102,6 @@ The UI thread never blocks: it sends commands to a single worker thread and appl
 events it sends back. When RetroGit runs `git` for a github.com remote, it hands the token
 to git through `GIT_ASKPASS` (the RetroGit binary itself answers), never on the command line.
 
-Design documents and implementation plans live in [`docs/superpowers`](docs/superpowers).
-
 ## Development
 
 ```bash
@@ -115,9 +113,17 @@ cargo test --workspace
 Tests use temporary repositories, a local bare remote and a mock HTTP server: no network
 access is needed. Tests that need the `git` command line are skipped when it is not installed.
 
-Every push, on any branch, is built and tested on macOS and Windows. `main` is protected:
-changes land through pull requests only, and each merge into `main` publishes a new release
-`v<major>.<minor>.<run number>` with both binaries (only if both platforms pass).
+`main` is protected: changes land through pull requests only. Every pull request is built
+and tested on macOS and Windows; each merge into `main` is built again and publishes a new
+release `v<major>.<minor>.<run number>` with both binaries (only if both platforms pass).
+
+## Credits
+
+Syntax highlighting uses [syntect](https://github.com/trishume/syntect) with the syntax
+definitions and theme of [bat](https://github.com/sharkdp/bat) (through
+[two-face](https://codeberg.org/CosmicHarper/two-face)). The pixel font is
+[W95FA](https://fontsarena.com/w95fa-by-alina-sava/) by Alina Sava (SIL OFL 1.1).
+Licenses of embedded third-party data: [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## Known limitations
 

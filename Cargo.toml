@@ -26,6 +26,8 @@ dirs = "7"
 log = "0.4"
 notify = "8"
 trash = "5"
+syntect = { version = "5.3", default-features = false, features = ["regex-fancy"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
 mockito = "1"
 tempfile = "3"
 

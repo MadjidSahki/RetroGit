@@ -33,6 +33,8 @@ pub struct HistoryView {
     pub signature: Option<SignatureStatus>,
     pub detail_file: Option<String>,
     pub detail_diff: Option<FileDiff>,
+    /// Syntax colors of `detail_diff` (computed in the background).
+    pub detail_colors: crate::highlight::Colors,
     /// Share of the height given to the commit list.
     pub split: f32,
 }
@@ -50,6 +52,7 @@ impl Default for HistoryView {
             signature: None,
             detail_file: None,
             detail_diff: None,
+            detail_colors: crate::highlight::Colors::NotRequested,
             split: 0.55,
         }
     }
@@ -123,6 +126,7 @@ impl AppState {
                     && h.detail_file.as_deref() == Some(diff.path.as_str())
                 {
                     h.detail_diff = Some(diff);
+                    h.detail_colors = crate::highlight::Colors::NotRequested;
                 }
             }
             Event::BranchesLoaded(branches) => self.branches = branches,
@@ -172,6 +176,27 @@ impl AppState {
                 self.dialog = Some(PendingDialog::WouldOverwrite { branch, files });
             }
             Event::NotMerged(name) => self.dialog = Some(PendingDialog::DeleteNotMerged { name }),
+            Event::ColorsLoaded {
+                target,
+                diff,
+                colors,
+            } => {
+                use crate::highlight::{Colors, Target};
+                let value = match colors {
+                    Some(c) => Colors::Ready(c),
+                    None => Colors::Plain,
+                };
+                // Results for a diff that is no longer displayed are dropped.
+                match target {
+                    Target::Changes if self.changes.diff.as_ref() == Some(&diff) => {
+                        self.changes.diff_colors = value
+                    }
+                    Target::History if self.history.detail_diff.as_ref() == Some(&diff) => {
+                        self.history.detail_colors = value
+                    }
+                    _ => {}
+                }
+            }
             _ => {}
         }
     }
@@ -185,6 +210,7 @@ impl AppState {
             h.signature = None;
             h.detail_file = None;
             h.detail_diff = None;
+            h.detail_colors = crate::highlight::Colors::NotRequested;
         }
     }
 

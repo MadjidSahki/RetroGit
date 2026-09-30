@@ -24,6 +24,8 @@ pub struct ChangesView {
     /// File whose diff is displayed, and which side.
     pub shown: Option<(String, Side)>,
     pub diff: Option<FileDiff>,
+    /// Syntax colors of `diff` (computed in the background).
+    pub diff_colors: crate::highlight::Colors,
     /// Checked `(hunk, line)` pairs of `diff`; cleared whenever a new diff arrives.
     pub selected_lines: BTreeSet<(usize, usize)>,
     pub show_large: bool,
@@ -271,6 +273,7 @@ impl AppState {
                 {
                     // Background refreshes re-send the same diff: keep the user's selection.
                     if c.diff.as_ref() != Some(&diff) {
+                        c.diff_colors = crate::highlight::Colors::NotRequested;
                         c.diff = Some(diff);
                         c.selected_lines.clear();
                         c.show_large = false;
@@ -318,7 +321,8 @@ impl AppState {
             | Event::Diverged { .. }
             | Event::PushRejected { .. }
             | Event::WouldOverwrite { .. }
-            | Event::NotMerged(_)) => self.apply_sync(ev),
+            | Event::NotMerged(_)
+            | Event::ColorsLoaded { .. }) => self.apply_sync(ev),
             Event::Error { during, error } => {
                 self.on_error(during);
                 self.messages.push_back(error);

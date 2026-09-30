@@ -677,3 +677,71 @@ fn access_denied_explains_org_oauth_restrictions() {
     assert_eq!(e.message, retrogit::strings::ERR_ACCESS_DENIED);
     assert_eq!(e.detail.as_deref(), Some("remote: Repository not found."));
 }
+
+mod highlight_cache {
+    use super::*;
+    use gitcore::{FileDiff, Side};
+    use retrogit::highlight::{Colors, Target};
+
+    fn diff(path: &str, binary: bool) -> FileDiff {
+        FileDiff {
+            path: path.into(),
+            side: Side::Unstaged,
+            binary,
+            hunks: vec![],
+        }
+    }
+
+    #[test]
+    fn colors_follow_the_displayed_diff() {
+        let mut s = AppState::new(Config::default());
+        s.changes.shown = Some(("a.rs".into(), Side::Unstaged));
+        s.apply(Event::DiffLoaded(diff("a.rs", false)));
+        assert_eq!(s.changes.diff_colors, Colors::NotRequested);
+        s.changes.diff_colors = Colors::Pending;
+        s.apply(Event::DiffLoaded(diff("a.rs", false)));
+        assert_eq!(s.changes.diff_colors, Colors::Pending, "same diff: keep");
+        s.apply(Event::ColorsLoaded {
+            target: Target::Changes,
+            diff: diff("a.rs", false),
+            colors: Some(vec![]),
+        });
+        assert_eq!(s.changes.diff_colors, Colors::Ready(vec![]));
+        s.apply(Event::ColorsLoaded {
+            target: Target::Changes,
+            diff: diff("old.rs", false),
+            colors: None,
+        });
+        assert_eq!(
+            s.changes.diff_colors,
+            Colors::Ready(vec![]),
+            "result for another diff is ignored"
+        );
+        s.apply(Event::DiffLoaded(diff("a.rs", true)));
+        assert_eq!(
+            s.changes.diff_colors,
+            Colors::NotRequested,
+            "new diff: recompute"
+        );
+    }
+
+    #[test]
+    fn commit_file_colors_follow_the_commit_file_diff() {
+        let mut s = AppState::new(Config::default());
+        s.select_commit("c1");
+        s.history.detail_file = Some("a.rs".into());
+        s.apply(Event::CommitFileDiffLoaded {
+            id: "c1".into(),
+            diff: diff("a.rs", false),
+        });
+        assert_eq!(s.history.detail_colors, Colors::NotRequested);
+        s.apply(Event::ColorsLoaded {
+            target: Target::History,
+            diff: diff("a.rs", false),
+            colors: None,
+        });
+        assert_eq!(s.history.detail_colors, Colors::Plain);
+        s.select_commit("c2");
+        assert_eq!(s.history.detail_colors, Colors::NotRequested);
+    }
+}

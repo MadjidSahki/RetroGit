@@ -227,6 +227,16 @@ fn signature_text(s: Option<&SignatureStatus>) -> (String, Color32) {
 
 fn detail(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let mut open_file: Option<String> = None;
+    {
+        let h = &mut cx.state.history;
+        if let Some(d) = &h.detail_diff
+            && h.detail_colors == crate::highlight::Colors::NotRequested
+        {
+            cx.highlighter
+                .request(crate::highlight::Target::History, d.clone());
+            h.detail_colors = crate::highlight::Colors::Pending;
+        }
+    }
     bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 4, |ui| {
         ui.set_min_size(ui.available_size());
         let h = &cx.state.history;
@@ -248,51 +258,40 @@ fn detail(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             ui.label(RichText::new(sig).color(sig_color));
         });
         ui.separator();
-        ScrollArea::vertical()
-            .id_salt("commit_detail")
-            .auto_shrink([false, false])
+        // Left: message and changed files (own scroll). Right: diff of the selected file
+        // (own scroll, both directions, only visible rows are laid out).
+        egui::Panel::left("commit_files")
+            .frame(egui::Frame::NONE)
+            .resizable(true)
+            .default_size(260.0)
+            .min_size(140.0)
+            .max_size((ui.available_width() - 200.0).max(140.0))
             .show(ui, |ui| {
-                ui.add(
-                    egui::Label::new(RichText::new(&d.message).color(win95::theme::BLACK)).wrap(),
-                );
-                ui.add_space(6.0);
-                ui.label(s::FILES);
-                for f in &d.files {
-                    let label = super::changes::describe(&f.path, &f.change);
-                    let selected = h.detail_file.as_deref() == Some(f.path.as_str());
-                    if ui.selectable_label(selected, label).clicked() {
-                        open_file = Some(f.path.clone());
-                    }
-                }
-                if let Some(diff) = &h.detail_diff {
-                    ui.add_space(6.0);
-                    if diff.binary {
-                        ui.label(s::BINARY_FILE);
-                    }
-                    let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
-                    for hunk in &diff.hunks {
-                        ui.label(
-                            RichText::new(&hunk.header)
-                                .font(mono.clone())
-                                .color(win95::theme::NAVY),
+                ScrollArea::vertical()
+                    .id_salt("commit_files_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(RichText::new(&d.message).color(win95::theme::BLACK))
+                                .wrap(),
                         );
-                        for l in &hunk.lines {
-                            let (sign, bg) = match l.kind {
-                                LineKind::Added => ("+", Color32::from_rgb(0xE6, 0xFF, 0xE6)),
-                                LineKind::Removed => ("-", Color32::from_rgb(0xFF, 0xE6, 0xE6)),
-                                LineKind::Context => (" ", win95::theme::WHITE),
-                            };
-                            let text = format!("{sign} {}", l.text.trim_end_matches(['\n', '\r']));
-                            ui.label(
-                                RichText::new(text)
-                                    .font(mono.clone())
-                                    .color(win95::theme::BLACK)
-                                    .background_color(bg),
-                            );
+                        ui.add_space(6.0);
+                        ui.label(s::FILES);
+                        for f in &d.files {
+                            let label = super::changes::describe(&f.path, &f.change);
+                            let selected = h.detail_file.as_deref() == Some(f.path.as_str());
+                            if ui.selectable_label(selected, label).clicked() {
+                                open_file = Some(f.path.clone());
+                            }
                         }
-                    }
-                }
+                    });
             });
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin {
+                left: 6,
+                ..Default::default()
+            }))
+            .show(ui, |ui| commit_file_diff(ui, h));
     });
     if let Some(path) = open_file {
         let h = &mut cx.state.history;
@@ -302,6 +301,80 @@ fn detail(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             cx.worker.send(Command::LoadCommitFileDiff { id, path });
         }
     }
+}
+
+/// Read-only diff of the file selected in the commit detail.
+fn commit_file_diff(ui: &mut egui::Ui, h: &crate::state::HistoryView) {
+    let Some(diff) = &h.detail_diff else {
+        if h.detail_file.is_some() {
+            ui.label(s::LOADING_DIFF);
+        }
+        return;
+    };
+    if diff.binary {
+        ui.label(s::BINARY_FILE);
+        return;
+    }
+    if diff.hunks.is_empty() {
+        ui.label(s::NO_DIFF);
+        return;
+    }
+    let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
+    let colors = &h.detail_colors;
+    let rows = super::diff_view::rows(diff);
+    ScrollArea::both()
+        .id_salt(("commit_file_diff", &h.selected, &diff.path))
+        .auto_shrink([false, false])
+        .show_rows(ui, super::diff_view::ROW_HEIGHT, rows.len(), |ui, range| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for row in &rows[range] {
+                match *row {
+                    super::diff_view::Row::Hunk(hi) => {
+                        let header = crate::highlight::colored_line(
+                            "",
+                            &diff.hunks[hi].header,
+                            None,
+                            "",
+                            mono.clone(),
+                            Color32::TRANSPARENT,
+                        );
+                        let mut header = header;
+                        for section in &mut header.sections {
+                            section.format.color = win95::theme::NAVY;
+                        }
+                        crate::highlight::diff_row(
+                            ui,
+                            header,
+                            super::diff_view::ROW_HEIGHT,
+                            Color32::from_rgb(0xE0, 0xE0, 0xF0),
+                        );
+                    }
+                    super::diff_view::Row::Line(hi, li) => {
+                        let l = &diff.hunks[hi].lines[li];
+                        let (sign, bg) = match l.kind {
+                            LineKind::Added => ("+", Color32::from_rgb(0xE6, 0xFF, 0xE6)),
+                            LineKind::Removed => ("-", Color32::from_rgb(0xFF, 0xE6, 0xE6)),
+                            LineKind::Context => (" ", win95::theme::WHITE),
+                        };
+                        let num = |n: Option<u32>| {
+                            n.map(|v| format!("{v:>5}"))
+                                .unwrap_or_else(|| "     ".into())
+                        };
+                        let prefix = format!("{} {} {sign} ", num(l.old_no), num(l.new_no));
+                        let text = l.text.trim_end_matches(['\n', '\r']);
+                        let job = crate::highlight::colored_line(
+                            &prefix,
+                            text,
+                            colors.line(hi, li),
+                            "",
+                            mono.clone(),
+                            Color32::TRANSPARENT,
+                        );
+                        crate::highlight::diff_row(ui, job, super::diff_view::ROW_HEIGHT, bg);
+                    }
+                }
+            }
+        });
 }
 
 #[cfg(test)]

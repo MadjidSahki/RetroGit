@@ -12,7 +12,7 @@ use crate::strings as s;
 const ADDED_BG: Color32 = Color32::from_rgb(0xE6, 0xFF, 0xE6);
 const REMOVED_BG: Color32 = Color32::from_rgb(0xFF, 0xE6, 0xE6);
 const HUNK_BG: Color32 = Color32::from_rgb(0xE0, 0xE0, 0xF0);
-const ROW_HEIGHT: f32 = 17.0;
+pub const ROW_HEIGHT: f32 = 17.0;
 
 /// One displayed row: a hunk header or a line of a hunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +42,7 @@ enum Action {
 
 pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let mut action: Option<Action> = None;
+    let cx_highlighter = cx.highlighter;
     let c = &mut cx.state.changes;
     bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 4, |ui| {
         ui.set_min_size(ui.available_size());
@@ -118,6 +119,12 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         if conflicted {
             ui.label(s::RESOLVE_CONFLICTS);
             return;
+        }
+        if let Some(d) = &c.diff
+            && c.diff_colors == crate::highlight::Colors::NotRequested
+        {
+            cx_highlighter.request(crate::highlight::Target::Changes, d.clone());
+            c.diff_colors = crate::highlight::Colors::Pending;
         }
         let Some(diff) = c.diff.as_ref() else { return };
         if diff.binary && !whole_only {
@@ -220,14 +227,26 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                                     } else {
                                         ""
                                     };
-                                    ui.label(
-                                        RichText::new(format!(
-                                            "{} {} {sign} {text}{eof}",
-                                            num(line.old_no),
-                                            num(line.new_no)
-                                        ))
-                                        .font(mono.clone())
-                                        .color(win95::theme::BLACK),
+                                    let prefix = format!(
+                                        "{} {} {sign} ",
+                                        num(line.old_no),
+                                        num(line.new_no)
+                                    );
+                                    let spans = c.diff_colors.line(h, l);
+                                    let job = crate::highlight::colored_line(
+                                        &prefix,
+                                        text,
+                                        spans,
+                                        eof,
+                                        mono.clone(),
+                                        egui::Color32::TRANSPARENT,
+                                    );
+                                    // The row frame already paints the background.
+                                    crate::highlight::diff_row(
+                                        ui,
+                                        job,
+                                        ROW_HEIGHT,
+                                        egui::Color32::TRANSPARENT,
                                     );
                                 });
                             });

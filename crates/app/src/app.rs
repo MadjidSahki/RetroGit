@@ -18,12 +18,27 @@ pub struct RetroGitApp {
     /// `None` inside means watching failed for that path (not retried every frame).
     watcher: Option<(PathBuf, Option<Watcher>)>,
     was_focused: bool,
+    highlighter: crate::highlight::Service,
+    highlighted: std::sync::mpsc::Receiver<crate::highlight::Highlighted>,
 }
 
 impl RetroGitApp {
-    pub fn new(state: AppState, worker: WorkerHandle, config_path: Option<PathBuf>) -> RetroGitApp {
+    /// `ctx` is used to wake the UI up when background syntax colors are ready.
+    pub fn new(
+        state: AppState,
+        worker: WorkerHandle,
+        config_path: Option<PathBuf>,
+        ctx: egui::Context,
+    ) -> RetroGitApp {
         worker.send(Command::ValidateToken);
+        let (tx, highlighted) = std::sync::mpsc::channel();
+        let highlighter = crate::highlight::Service::start(move |h| {
+            let _ = tx.send(h);
+            ctx.request_repaint();
+        });
         RetroGitApp {
+            highlighter,
+            highlighted,
             state,
             worker,
             config_path,
@@ -72,6 +87,13 @@ impl eframe::App for RetroGitApp {
         while let Ok(ev) = self.worker.events.try_recv() {
             self.state.apply(ev);
         }
+        while let Ok(h) = self.highlighted.try_recv() {
+            self.state.apply(crate::protocol::Event::ColorsLoaded {
+                target: h.target,
+                diff: h.diff,
+                colors: h.colors,
+            });
+        }
         if self.state.config_dirty {
             self.save_config();
         }
@@ -102,6 +124,7 @@ impl eframe::App for RetroGitApp {
         let mut cx = Ctx {
             state: &mut self.state,
             worker: &self.worker,
+            highlighter: &self.highlighter,
         };
         ui::main_window::show(ui, &mut cx);
         ui::clone_dialog::show(&egui_ctx, &mut cx);
