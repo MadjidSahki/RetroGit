@@ -1,10 +1,11 @@
 name: CI
 
-# Every push to main is tested on macOS and Windows and, if everything passes, published
-# as a new GitHub Release (v<major>.<minor from Cargo.toml>.<run number>).
+# Every push (any branch) is built and tested on macOS and Windows.
+# Only pushes to main (i.e. merged pull requests: main is protected) publish a new
+# GitHub Release v<major>.<minor from Cargo.toml>.<run number>.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
 
 concurrency:
   group: release-${{ github.ref }}
@@ -56,6 +57,7 @@ jobs:
 
   release:
     needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write

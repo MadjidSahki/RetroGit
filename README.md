@@ -115,8 +115,9 @@ cargo test --workspace
 Tests use temporary repositories, a local bare remote and a mock HTTP server: no network
 access is needed. Tests that need the `git` command line are skipped when it is not installed.
 
-Every push to `main` runs the CI on macOS and Windows and, if it passes, publishes a new
-release `v<major>.<minor>.<run number>` with both binaries.
+Every push, on any branch, is built and tested on macOS and Windows. `main` is protected:
+changes land through pull requests only, and each merge into `main` publishes a new release
+`v<major>.<minor>.<run number>` with both binaries (only if both platforms pass).
 
 ## Known limitations
 
