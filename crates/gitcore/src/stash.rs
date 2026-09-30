@@ -3,8 +3,10 @@ use crate::{GitError, Repo};
 impl Repo {
     /// Put local changes (untracked files included) aside. `Ok(false)` if there was nothing.
     pub fn stash_push(&self, message: &str) -> Result<bool, GitError> {
-        let out = self.git_ok(&["stash", "push", "--include-untracked", "-m", message])?;
-        Ok(!out.text.contains("No local changes to save"))
+        // Compare refs/stash before and after instead of reading (translatable) messages.
+        let before = self.git().refname_to_id("refs/stash").ok();
+        self.git_ok(&["stash", "push", "--include-untracked", "-m", message])?;
+        Ok(self.git().refname_to_id("refs/stash").ok() != before)
     }
 
     /// Re-apply the last stash. On conflicts the stash is kept and `StashConflict` returned.

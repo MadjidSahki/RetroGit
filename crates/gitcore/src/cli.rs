@@ -23,6 +23,9 @@ impl Repo {
             .args(args)
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_EDITOR", "true")
+            // Messages are parsed: keep them untranslated (Git for Windows, Homebrew builds).
+            .env("LC_ALL", "C")
+            .env("LANGUAGE", "C")
             .stdin(Stdio::null())
             .output()
             .map_err(|e| GitError::Other(format!("cannot run git: {e}")))?;
@@ -45,5 +48,28 @@ impl Repo {
         } else {
             Err(GitError::Other(out.text))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    #[test]
+    fn git_runs_with_untranslated_messages() {
+        if !crate::git_available() {
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        git2::Repository::init(d.path()).unwrap();
+        let r = crate::Repo::open(d.path()).unwrap();
+        // RetroGit parses git's messages: they must not be translated (Git for Windows, Homebrew).
+        let out = r.run_git(&["-c", "alias.showenv=!env", "showenv"]).unwrap();
+        assert!(
+            out.stdout.lines().any(|l| l == "LC_ALL=C"),
+            "{}",
+            out.stdout
+        );
+        assert!(out.stdout.lines().any(|l| l == "LANGUAGE=C"));
     }
 }

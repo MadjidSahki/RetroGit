@@ -120,6 +120,8 @@ impl Repo {
         for (k, v) in &settings.env {
             cmd.env(k, v);
         }
+        // Output is parsed (rejections, auth failures): keep it untranslated.
+        cmd.env("LC_ALL", "C").env("LANGUAGE", "C");
         // Own process group, so cancelling can kill git *and* its helpers (remote-https, ssh).
         #[cfg(unix)]
         {
