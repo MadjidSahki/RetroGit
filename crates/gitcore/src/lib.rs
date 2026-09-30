@@ -11,7 +11,9 @@ mod error;
 mod graph;
 mod ignore;
 mod log;
+mod net;
 mod ops;
+mod remote;
 mod repo;
 mod signing;
 mod stage;
@@ -22,7 +24,13 @@ pub use branch::{Branch, parse_overwritten_files};
 pub use commit_detail::{ChangedFile, CommitDetail, SignatureStatus, parse_signature_status};
 pub use graph::{Edge, GraphRow, GraphState, layout};
 pub use log::{LogEntry, RefKind, RefLabel};
+pub use net::{
+    ASKPASS_TOKEN_VAR, NetAuth, NetSettings, askpass_answer, net_settings, set_askpass_program,
+};
 pub use ops::Operation;
+pub use remote::{
+    NetProgress, PullMode, PullOutcome, PushMode, classify_net_failure, parse_progress,
+};
 pub use signing::{SigningConfig, SigningFormat};
 
 pub use clone::{CloneProgress, CloneRequest, Credentials, clone};
