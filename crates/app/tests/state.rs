@@ -405,3 +405,45 @@ mod discard {
         );
     }
 }
+
+mod recents {
+    use super::*;
+
+    #[test]
+    fn recents_are_listed_alphabetically_and_opening_does_not_reorder() {
+        let mut s = AppState::new(Config::default());
+        for p in ["/w/zeta", "/w/Alpha", "/w/beta"] {
+            s.apply(Event::RepoOpened(RepoSummary {
+                name: p.rsplit('/').next().unwrap().into(),
+                ..summary(p)
+            }));
+        }
+        let names = |s: &AppState| {
+            s.recents_sorted()
+                .into_iter()
+                .map(|r| r.name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&s), ["Alpha", "beta", "zeta"]);
+        s.apply(Event::RepoOpened(RepoSummary {
+            name: "zeta".into(),
+            ..summary("/w/zeta")
+        }));
+        assert_eq!(names(&s), ["Alpha", "beta", "zeta"]);
+        assert_eq!(
+            s.selected_recent(),
+            Some(2),
+            "the open repo is the highlighted row"
+        );
+    }
+
+    #[test]
+    fn same_name_is_ordered_by_path_and_no_repo_means_no_highlight() {
+        let mut s = AppState::new(Config::default());
+        s.config.add_recent("app", std::path::Path::new("/b/app"));
+        s.config.add_recent("app", std::path::Path::new("/a/app"));
+        let paths: Vec<_> = s.recents_sorted().into_iter().map(|r| r.path).collect();
+        assert_eq!(paths, [PathBuf::from("/a/app"), PathBuf::from("/b/app")]);
+        assert_eq!(s.selected_recent(), None);
+    }
+}

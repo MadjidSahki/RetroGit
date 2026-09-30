@@ -175,12 +175,8 @@ const RECENT_COLUMNS: &[Column] = &[Column {
 
 fn recents(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     ui.label(s::REPOSITORIES);
-    let recent = cx.state.config.recent.clone();
-    let selected = cx
-        .state
-        .current
-        .as_ref()
-        .and_then(|c| recent.iter().position(|r| r.path == c.path));
+    let recent = cx.state.recents_sorted();
+    let selected = cx.state.selected_recent();
     let missing = &cx.state.missing;
     let mut remove: Option<usize> = None;
     let height = ui.available_height();

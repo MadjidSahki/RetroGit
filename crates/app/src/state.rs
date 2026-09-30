@@ -343,6 +343,27 @@ impl AppState {
         self.config_dirty = true;
     }
 
+    /// Recent repositories as shown in the side list: alphabetical by name
+    /// (case-insensitive), then by path. Opening a repo never reorders it.
+    pub fn recents_sorted(&self) -> Vec<crate::config::RecentRepo> {
+        let mut list = self.config.recent.clone();
+        list.sort_by(|a, b| {
+            a.name
+                .to_lowercase()
+                .cmp(&b.name.to_lowercase())
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        list
+    }
+
+    /// Row of `recents_sorted()` holding the open repository.
+    pub fn selected_recent(&self) -> Option<usize> {
+        let current = self.current.as_ref()?;
+        self.recents_sorted()
+            .iter()
+            .position(|r| r.path == current.path)
+    }
+
     pub fn remove_recent(&mut self, path: &Path) {
         self.config.remove_recent(path);
         self.missing.remove(path);
