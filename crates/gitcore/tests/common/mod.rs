@@ -7,6 +7,11 @@ pub fn make_repo(dir: &Path, commits: usize) -> git2::Repository {
     let mut opts = git2::RepositoryInitOptions::new();
     opts.initial_head("main");
     let repo = git2::Repository::init_opts(dir, &opts).unwrap();
+    // Tests must not depend on the developer's ~/.gitconfig (e.g. core.autocrlf=input).
+    repo.config()
+        .unwrap()
+        .set_str("core.autocrlf", "false")
+        .unwrap();
     {
         let sig =
             git2::Signature::new("Ada", "ada@example.com", &git2::Time::new(1_700_000_000, 0))

@@ -1,12 +1,18 @@
 //! RetroGit's internal Git API. No `git2` type is ever exposed publicly.
 
 mod clone;
+mod diff;
 mod error;
 mod repo;
+mod stage;
+mod status;
 
 pub use clone::{CloneProgress, CloneRequest, Credentials, clone};
+pub use diff::{DiffLine, FileDiff, Hunk, LineKind, Side};
 pub use error::GitError;
 pub use repo::{CommitInfo, Head, Repo, RepoSummary};
+pub use stage::{Direction, Selection, apply_selection, selectable_lines};
+pub use status::{Change, FileStatus};
 
 /// Bound libgit2's network waits (default: infinite) so a stalled clone eventually fails
 /// and can be cleaned up. Call once at startup, before any network operation.

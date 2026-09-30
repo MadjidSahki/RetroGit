@@ -12,6 +12,16 @@ pub enum GitError {
     Auth(String),
     #[error("network error: {0}")]
     Network(String),
+    /// The file changed since its diff was displayed; nothing was written.
+    #[error("the file changed since its diff was shown")]
+    StaleSelection,
+    #[error("{0}")]
+    Unsupported(String),
+    /// `git commit` exited with an error (hook, signing...). `output` is its stdout+stderr.
+    #[error("commit rejected")]
+    CommitRejected { output: String },
+    #[error("user.name / user.email are not configured")]
+    MissingIdentity,
     #[error("{0}")]
     Other(String),
 }

@@ -112,6 +112,12 @@ impl AppError {
             GitError::Network(d) => {
                 AppError::new(Severity::Warning, s::ERR_NO_NETWORK).with_detail(d)
             }
+            GitError::StaleSelection => AppError::new(Severity::Info, s::INFO_STALE_SELECTION),
+            GitError::Unsupported(d) => AppError::new(Severity::Warning, d),
+            GitError::CommitRejected { output } => {
+                AppError::new(Severity::Error, s::ERR_COMMIT_REJECTED).with_detail(output)
+            }
+            GitError::MissingIdentity => AppError::new(Severity::Error, s::ERR_MISSING_IDENTITY),
             GitError::Other(d) => AppError::new(Severity::Error, d),
         }
     }

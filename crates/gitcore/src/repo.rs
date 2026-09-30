@@ -57,6 +57,10 @@ impl Repo {
         Repo { inner, path }
     }
 
+    pub(crate) fn git(&self) -> &git2::Repository {
+        &self.inner
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
