@@ -250,6 +250,25 @@ mod changes {
     }
 
     #[test]
+    fn an_identical_diff_from_a_background_refresh_keeps_the_selection() {
+        let mut s = AppState::new(Config::default());
+        s.changes.shown = Some(("a.txt".into(), Side::Unstaged));
+        s.apply(Event::DiffLoaded(diff("a.txt", Side::Unstaged)));
+        s.changes.selected_lines.insert((0, 1));
+        s.changes.show_large = true;
+        s.apply(Event::DiffLoaded(diff("a.txt", Side::Unstaged)));
+        assert_eq!(s.changes.selected_lines.len(), 1);
+        assert!(s.changes.show_large);
+        let mut changed = diff("a.txt", Side::Unstaged);
+        changed.binary = true;
+        s.apply(Event::DiffLoaded(changed));
+        assert!(
+            s.changes.selected_lines.is_empty(),
+            "a different diff invalidates the selection"
+        );
+    }
+
+    #[test]
     fn status_without_the_shown_file_closes_its_diff() {
         let mut s = AppState::new(Config::default());
         s.changes.shown = Some(("a.txt".into(), Side::Unstaged));

@@ -227,9 +227,12 @@ impl AppState {
                     .as_ref()
                     .is_some_and(|(p, side)| *p == diff.path && *side == diff.side)
                 {
-                    c.diff = Some(diff);
-                    c.selected_lines.clear();
-                    c.show_large = false;
+                    // Background refreshes re-send the same diff: keep the user's selection.
+                    if c.diff.as_ref() != Some(&diff) {
+                        c.diff = Some(diff);
+                        c.selected_lines.clear();
+                        c.show_large = false;
+                    }
                 }
             }
             Event::Committed(outcome) => {
