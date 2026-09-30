@@ -79,6 +79,12 @@ pub fn net_settings(
     s
 }
 
+/// Whether the user chose their own SSH program (`GIT_SSH_COMMAND`, `GIT_SSH` such as
+/// PuTTY's plink, or `core.sshCommand`): then RetroGit does not impose OpenSSH BatchMode.
+pub fn user_ssh_configured(git_ssh_command: bool, git_ssh: bool, core_ssh_command: bool) -> bool {
+    git_ssh_command || git_ssh || core_ssh_command
+}
+
 pub(crate) fn askpass_program() -> Option<&'static Path> {
     ASKPASS_PROGRAM.get().map(PathBuf::as_path)
 }
@@ -140,6 +146,14 @@ mod tests {
     fn a_custom_ssh_command_is_left_alone() {
         let s = net_settings("git@github.com:o/r.git", &NetAuth::default(), None, true);
         assert!(s.env.iter().all(|(k, _)| k != "GIT_SSH_COMMAND"));
+    }
+
+    #[test]
+    fn plink_users_keep_their_ssh_program() {
+        assert!(user_ssh_configured(false, true, false), "GIT_SSH=plink.exe");
+        assert!(user_ssh_configured(true, false, false));
+        assert!(user_ssh_configured(false, false, true));
+        assert!(!user_ssh_configured(false, false, false));
     }
 
     #[test]

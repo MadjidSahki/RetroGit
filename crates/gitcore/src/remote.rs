@@ -99,13 +99,15 @@ impl Repo {
         if !crate::git_available() {
             return Err(GitError::GitMissing);
         }
-        let ssh_configured = std::env::var_os("GIT_SSH_COMMAND").is_some()
-            || self
-                .git()
+        let ssh_configured = crate::net::user_ssh_configured(
+            std::env::var_os("GIT_SSH_COMMAND").is_some(),
+            std::env::var_os("GIT_SSH").is_some(),
+            self.git()
                 .config()
                 .ok()
                 .and_then(|c| c.get_string("core.sshCommand").ok())
-                .is_some();
+                .is_some(),
+        );
         let settings = net_settings(
             &self.origin_url().unwrap_or_default(),
             auth,
