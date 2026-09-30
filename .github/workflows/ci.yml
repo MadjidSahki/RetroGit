@@ -1,21 +1,29 @@
 name: CI
 
+# Every push to main is tested on macOS and Windows and, if everything passes, published
+# as a new GitHub Release (v<major>.<minor from Cargo.toml>.<run number>).
 on:
   push:
-  pull_request:
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - os: macos-14
             target: aarch64-apple-darwin
             bin: retrogit
+            asset: RetroGit-macos-arm64.zip
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             bin: retrogit.exe
+            asset: RetroGit-windows-x64.zip
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +36,44 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo build --release -p retrogit --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" README.md dist/
+          cd dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a -tzip "${{ matrix.asset }}" "${{ matrix.bin }}" README.md
+          else
+            zip -9 "${{ matrix.asset }}" "${{ matrix.bin }}" README.md
+          fi
       - uses: actions/upload-artifact@v4
         with:
-          name: retrogit-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/${{ matrix.bin }}
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version
+        id: version
+        run: |
+          base=$(grep -m1 '^version' Cargo.toml | sed -E 's/version = "([0-9]+)\.([0-9]+)\..*"/\1.\2/')
+          echo "tag=v${base}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" dist/*.zip \
+            --target "$GITHUB_SHA" \
+            --title "RetroGit ${{ steps.version.outputs.tag }}" \
+            --generate-notes
