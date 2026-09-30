@@ -364,3 +364,18 @@ fn apply_selection_with_empty_selection_returns_base() {
     let all = apply_selection(b"a\nb\nc\n", &diff, &Selection::All, Direction::Stage).unwrap();
     assert_eq!(all, b"a\nc\nd\n");
 }
+
+#[test]
+fn partial_staging_keeps_non_utf8_bytes() {
+    let d = tempfile::tempdir().unwrap();
+    let repo = common::make_repo(d.path(), 1);
+    std::fs::write(d.path().join("f.txt"), b"a\n").unwrap();
+    commit_all(&repo, "base");
+    std::fs::write(d.path().join("f.txt"), b"a\ncaf\xE9\n").unwrap(); // Latin-1 "café"
+    let r = Repo::open(d.path()).unwrap();
+    r.stage("f.txt", &Selection::Hunks(vec![0]), None).unwrap();
+    let repo = git2::Repository::open(d.path()).unwrap(); // re-read the index from disk
+    let idx = repo.index().unwrap();
+    let e = idx.get_path(Path::new("f.txt"), 0).unwrap();
+    assert_eq!(repo.find_blob(e.id).unwrap().content(), b"a\ncaf\xE9\n");
+}

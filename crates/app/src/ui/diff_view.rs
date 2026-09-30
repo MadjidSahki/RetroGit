@@ -233,6 +233,7 @@ mod tests {
             old_no: None,
             new_no: None,
             text: "x\n".into(),
+            raw: b"x\n".to_vec(),
             no_newline_at_eof: false,
         }
     }

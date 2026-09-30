@@ -92,7 +92,7 @@ pub fn apply_selection(
                 cursor += 1;
             } else if line.kind == other_kind && selection.picks(h, i) {
                 // Absent from base: inserted only if selected.
-                push_line(&mut out, line.text.as_bytes());
+                push_line(&mut out, &line.raw);
             }
         }
     }

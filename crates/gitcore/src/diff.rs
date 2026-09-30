@@ -22,8 +22,10 @@ pub struct DiffLine {
     pub kind: LineKind,
     pub old_no: Option<u32>,
     pub new_no: Option<u32>,
-    /// Raw line content, including its line ending when it has one.
+    /// Line content for display (lossy UTF-8), including its line ending when it has one.
     pub text: String,
+    /// Exact bytes of the line (what staging writes: never lossy).
+    pub raw: Vec<u8>,
     /// The line is the last of its file and has no trailing newline.
     pub no_newline_at_eof: bool,
 }
@@ -101,13 +103,14 @@ impl Repo {
                         // "\ No newline at end of file" markers: encoded in `text` already.
                         _ => continue,
                     };
-                    let text = String::from_utf8_lossy(line.content()).into_owned();
+                    let raw = line.content().to_vec();
                     lines.push(DiffLine {
                         kind,
                         old_no: line.old_lineno(),
                         new_no: line.new_lineno(),
-                        no_newline_at_eof: !text.ends_with('\n'),
-                        text,
+                        no_newline_at_eof: raw.last() != Some(&b'\n'),
+                        text: String::from_utf8_lossy(&raw).into_owned(),
+                        raw,
                     });
                 }
                 out.hunks.push(Hunk {
