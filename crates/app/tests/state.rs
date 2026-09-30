@@ -199,3 +199,160 @@ fn cancelled_clone_shows_an_info_message() {
     assert_eq!(m.severity, Severity::Info);
     assert_eq!(m.message, retrogit::strings::INFO_CLONE_CANCELLED);
 }
+
+mod changes {
+    use super::*;
+    use gitcore::{Change, CommitInfo, CommitOutcome, FileDiff, FileStatus, Side};
+
+    fn file(path: &str, staged: Option<Change>, unstaged: Option<Change>) -> FileStatus {
+        FileStatus {
+            path: path.into(),
+            staged,
+            unstaged,
+        }
+    }
+
+    fn diff(path: &str, side: Side) -> FileDiff {
+        FileDiff {
+            path: path.into(),
+            side,
+            binary: false,
+            hunks: vec![],
+        }
+    }
+
+    fn outcome(used_cli: bool) -> CommitOutcome {
+        CommitOutcome {
+            commit: CommitInfo {
+                short_id: "a1b2c3d".into(),
+                summary: "s".into(),
+                author: "Ada".into(),
+                time: 0,
+            },
+            used_cli,
+        }
+    }
+
+    #[test]
+    fn new_diff_clears_the_line_selection_and_ignores_stale_diffs() {
+        let mut s = AppState::new(Config::default());
+        s.changes.shown = Some(("a.txt".into(), Side::Unstaged));
+        s.changes.selected_lines.insert((0, 1));
+        s.apply(Event::DiffLoaded(diff("b.txt", Side::Unstaged)));
+        assert!(
+            s.changes.diff.is_none(),
+            "diff of another file must be ignored"
+        );
+        assert_eq!(s.changes.selected_lines.len(), 1);
+        s.apply(Event::DiffLoaded(diff("a.txt", Side::Unstaged)));
+        assert!(s.changes.diff.is_some());
+        assert!(s.changes.selected_lines.is_empty());
+    }
+
+    #[test]
+    fn status_without_the_shown_file_closes_its_diff() {
+        let mut s = AppState::new(Config::default());
+        s.changes.shown = Some(("a.txt".into(), Side::Unstaged));
+        s.changes.diff = Some(diff("a.txt", Side::Unstaged));
+        s.apply(Event::StatusLoaded(vec![file(
+            "a.txt",
+            Some(Change::Modified),
+            None,
+        )]));
+        assert_eq!(s.changes.shown, None);
+        assert_eq!(s.changes.diff, None);
+    }
+
+    #[test]
+    fn commit_button_rules() {
+        let mut s = AppState::new(Config::default());
+        s.changes.summary = "Fix".into();
+        assert!(!s.changes.can_commit(), "nothing staged");
+        s.apply(Event::StatusLoaded(vec![file(
+            "a.txt",
+            Some(Change::Modified),
+            None,
+        )]));
+        assert!(s.changes.can_commit());
+        s.changes.summary = "  ".into();
+        assert!(!s.changes.can_commit(), "empty summary");
+        s.apply(Event::StatusLoaded(vec![]));
+        s.changes.summary = "Reword".into();
+        s.changes.amend = true;
+        assert!(s.changes.can_commit(), "amend needs no staged change");
+        s.changes.committing = true;
+        assert!(!s.changes.can_commit());
+    }
+
+    #[test]
+    fn commit_message_joins_summary_and_description() {
+        let mut c = retrogit::state::ChangesView {
+            summary: " Fix bug ".into(),
+            ..Default::default()
+        };
+        assert_eq!(c.commit_message(), "Fix bug");
+        c.description = "\nWhy it broke\n".into();
+        assert_eq!(c.commit_message(), "Fix bug\n\nWhy it broke");
+    }
+
+    #[test]
+    fn committed_resets_the_form_and_warns_once_without_git() {
+        let mut s = AppState::new(Config::default());
+        s.changes.summary = "x".into();
+        s.changes.description = "y".into();
+        s.changes.amend = true;
+        s.changes.committing = true;
+        s.apply(Event::Committed(outcome(false)));
+        let c = &s.changes;
+        assert!(c.summary.is_empty() && c.description.is_empty() && !c.amend && !c.committing);
+        assert_eq!(c.last_commit_note.as_deref(), Some("Committed a1b2c3d"));
+        assert_eq!(s.messages.len(), 1);
+        s.apply(Event::Committed(outcome(false)));
+        assert_eq!(s.messages.len(), 1, "warning only once");
+    }
+
+    #[test]
+    fn commit_error_keeps_the_message() {
+        let mut s = AppState::new(Config::default());
+        s.changes.summary = "keep me".into();
+        s.changes.committing = true;
+        s.apply(Event::Error {
+            during: Op::Commit,
+            error: err(),
+        });
+        assert!(!s.changes.committing);
+        assert_eq!(s.changes.summary, "keep me");
+    }
+
+    #[test]
+    fn amend_info_prefills_only_empty_fields() {
+        let mut s = AppState::new(Config::default());
+        s.changes.amend = true;
+        s.apply(Event::AmendInfo {
+            message: Some("Title\n\nBody text".into()),
+            pushed: true,
+        });
+        assert_eq!(
+            (s.changes.summary.as_str(), s.changes.description.as_str()),
+            ("Title", "Body text")
+        );
+        assert!(s.changes.head_pushed);
+        s.changes.summary = "Mine".into();
+        s.apply(Event::AmendInfo {
+            message: Some("Other".into()),
+            pushed: false,
+        });
+        assert_eq!(s.changes.summary, "Mine");
+    }
+
+    #[test]
+    fn opening_another_repo_resets_the_changes_view() {
+        let mut s = AppState::new(Config::default());
+        s.apply(Event::RepoOpened(summary("/tmp/a")));
+        s.changes.summary = "draft".into();
+        s.apply(Event::RepoOpened(summary("/tmp/a")));
+        assert_eq!(s.changes.summary, "draft", "same repo keeps the draft");
+        s.apply(Event::RepoOpened(summary("/tmp/b")));
+        assert!(s.changes.summary.is_empty());
+    }
+}

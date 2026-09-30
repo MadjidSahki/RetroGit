@@ -13,6 +13,13 @@ fn main() -> eframe::Result {
         logging::init(&dir.join("RetroGit").join("retrogit.log"));
     }
     log::info!("RetroGit {} starting", env!("CARGO_PKG_VERSION"));
+    // Resolved in the background so a slow shell never delays the window.
+    std::thread::spawn(|| {
+        if let Some(path) = retrogit::env_path::login_shell_path(std::time::Duration::from_secs(10))
+        {
+            gitcore::set_git_search_path(path);
+        }
+    });
     if let Err(e) = gitcore::configure_network_timeouts() {
         log::warn!("could not set git network timeouts: {e}");
     }
@@ -50,6 +57,7 @@ fn main() -> eframe::Result {
                 client: github::Client::github_com(),
                 store: Arc::new(github::KeyringStore::new("RetroGit", "github.com")),
                 client_id: GITHUB_CLIENT_ID.to_string(),
+                commit_backend: gitcore::CommitBackend::PreferCli,
             };
             let worker = spawn(deps, move || repaint.request_repaint());
             Ok(Box::new(RetroGitApp::new(

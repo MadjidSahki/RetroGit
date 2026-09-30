@@ -1,12 +1,14 @@
 //! The single background thread doing all network and Git work.
 
+mod changes;
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
-use gitcore::{CloneRequest, Credentials, GitError, Repo};
+use gitcore::{CloneRequest, CommitBackend, Credentials, GitError, Repo, Side};
 use github::{Client, DeviceFlow, GithubError, Step, TokenStore};
 
 use crate::logging;
@@ -18,6 +20,7 @@ pub struct WorkerDeps {
     pub store: Arc<dyn TokenStore>,
     /// Empty = Device Flow unavailable (PAT only).
     pub client_id: String,
+    pub commit_backend: CommitBackend,
 }
 
 /// UI-side handle. Cancellation flags bypass the command queue so they act immediately.
@@ -27,6 +30,7 @@ pub struct WorkerHandle {
     cancel_flow: Arc<AtomicBool>,
     cancel_clone: Arc<AtomicBool>,
     busy: Arc<AtomicBool>,
+    refresh_pending: Arc<AtomicBool>,
 }
 
 impl WorkerHandle {
@@ -34,10 +38,23 @@ impl WorkerHandle {
         match cmd {
             Command::StartDeviceFlow => self.cancel_flow.store(false, Ordering::SeqCst),
             Command::Clone { .. } => self.cancel_clone.store(false, Ordering::SeqCst),
+            // At most one refresh waiting in the queue.
+            Command::RefreshStatus if self.refresh_pending.swap(true, Ordering::SeqCst) => return,
             _ => {}
         }
         if self.tx.send(cmd).is_err() {
             log::error!("worker thread is gone");
+        }
+    }
+
+    /// Thread-safe "please refresh the status" callback (for the file watcher).
+    pub fn refresher(&self) -> impl Fn() + Send + 'static {
+        let tx = self.tx.clone();
+        let pending = self.refresh_pending.clone();
+        move || {
+            if !pending.swap(true, Ordering::SeqCst) {
+                let _ = tx.send(Command::RefreshStatus);
+            }
         }
     }
 
@@ -96,9 +113,13 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
     let cancel_clone = Arc::new(AtomicBool::new(false));
     let busy = Arc::new(AtomicBool::new(false));
     let worker_busy = busy.clone();
+    let refresh_pending = Arc::new(AtomicBool::new(false));
     let mut worker = Worker {
         deps,
         token: None,
+        repo: None,
+        shown: None,
+        refresh_pending: refresh_pending.clone(),
         cancel_flow: cancel_flow.clone(),
         cancel_clone: cancel_clone.clone(),
         emit: Box::new(move |ev| {
@@ -135,12 +156,18 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
         cancel_flow,
         cancel_clone,
         busy,
+        refresh_pending,
     }
 }
 
 struct Worker {
     deps: WorkerDeps,
     token: Option<String>,
+    /// Repository opened last (target of all sub-project 2 commands).
+    repo: Option<std::path::PathBuf>,
+    /// File whose diff the UI displays; its diff is re-sent after every change.
+    shown: Option<(String, Side)>,
+    refresh_pending: Arc<AtomicBool>,
     cancel_flow: Arc<AtomicBool>,
     cancel_clone: Arc<AtomicBool>,
     emit: Box<dyn Fn(Event) + Send>,
@@ -165,9 +192,27 @@ impl Worker {
             Command::ListRepos => self.list_repos(),
             Command::Clone { url, dest } => self.clone(url, dest),
             Command::OpenRepo(path) => match Repo::open(&path).and_then(|r| r.summary()) {
-                Ok(summary) => self.emit(Event::RepoOpened(summary)),
+                Ok(summary) => self.opened(summary, false),
                 Err(e) => self.fail(Op::Open(path), AppError::from_git(&e)),
             },
+            Command::RefreshStatus => {
+                self.refresh_pending.store(false, Ordering::SeqCst);
+                self.refresh();
+            }
+            Command::LoadDiff { path, side } => self.load_diff(path, side),
+            Command::Stage {
+                path,
+                selection,
+                shown,
+            } => self.stage(&path, &selection, shown.as_ref(), true),
+            Command::Unstage {
+                path,
+                selection,
+                shown,
+            } => self.stage(&path, &selection, shown.as_ref(), false),
+            Command::Commit { message, amend } => self.commit(&message, amend),
+            Command::AddToGitignore(pattern) => self.add_to_gitignore(&pattern),
+            Command::LoadAmendInfo => self.amend_info(),
         }
     }
 
@@ -313,7 +358,7 @@ impl Worker {
             self.emit(Event::CloneProgress(p));
         }
         match result.and_then(|repo| repo.summary()) {
-            Ok(summary) => self.emit(Event::CloneDone(summary)),
+            Ok(summary) => self.opened(summary, true),
             Err(GitError::Cancelled) => self.emit(Event::CloneCancelled),
             Err(e @ GitError::Auth(_)) => self.clone_auth_failed(&e),
             Err(e) => self.fail(Op::Clone, AppError::from_git(&e)),

@@ -14,6 +14,7 @@ fn start(server: &mockito::Server, store: Arc<MemoryStore>, client_id: &str) -> 
         client: Client::with_bases(&server.url(), &server.url()),
         store,
         client_id: client_id.into(),
+        commit_backend: gitcore::CommitBackend::Git2,
     };
     spawn(deps, || {})
 }
@@ -388,4 +389,147 @@ fn clone_auth_failure_with_valid_token_points_to_sso() {
         Some("https://github.com/settings/tokens")
     );
     assert_eq!(store.load(), Ok(Some("ghp_pat".into())));
+}
+
+fn repo_for_changes() -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    make_source_repo(d.path());
+    let repo = git2::Repository::open(d.path()).unwrap();
+    // make_source_repo commits without writing the index file: sync it with HEAD.
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.reset(head.as_object(), git2::ResetType::Mixed, None)
+        .unwrap();
+    let mut cfg = repo.config().unwrap();
+    cfg.set_str("user.name", "Ada").unwrap();
+    cfg.set_str("user.email", "ada@example.com").unwrap();
+    d
+}
+
+#[test]
+fn open_stage_commit_flow() {
+    let server = mockito::Server::new();
+    let d = repo_for_changes();
+    std::fs::write(d.path().join("README.md"), "hello\nworld\n").unwrap();
+    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    w.send(Command::OpenRepo(d.path().to_path_buf()));
+    let evs = until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+    assert!(evs.iter().any(|e| matches!(e, Event::RepoOpened(_))));
+    let Some(Event::StatusLoaded(files)) = evs.last() else {
+        unreachable!()
+    };
+    assert_eq!(files.len(), 1);
+    assert!(
+        files[0].unstaged.is_some() && files[0].staged.is_none(),
+        "{files:?}"
+    );
+
+    w.send(Command::LoadDiff {
+        path: "README.md".into(),
+        side: gitcore::Side::Unstaged,
+    });
+    let evs = until(&w, |e| matches!(e, Event::DiffLoaded(_)));
+    let Some(Event::DiffLoaded(diff)) = evs.last() else {
+        unreachable!()
+    };
+    assert_eq!(diff.hunks.len(), 1);
+
+    w.send(Command::Stage {
+        path: "README.md".into(),
+        selection: gitcore::Selection::All,
+        shown: None,
+    });
+    let evs = until(&w, |e| matches!(e, Event::DiffLoaded(_)));
+    let status = evs.iter().find_map(|e| match e {
+        Event::StatusLoaded(f) => Some(f.clone()),
+        _ => None,
+    });
+    assert!(status.unwrap()[0].staged.is_some());
+
+    w.send(Command::Commit {
+        message: "Say world".into(),
+        amend: false,
+    });
+    let evs = until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, Event::Committed(o) if o.commit.summary == "Say world"))
+    );
+    assert!(evs.iter().any(|e| matches!(e, Event::RepoOpened(s) if s.last_commit.as_ref().unwrap().summary == "Say world")));
+    let Some(Event::StatusLoaded(files)) = evs.last() else {
+        unreachable!()
+    };
+    assert!(files.is_empty());
+
+    w.send(Command::LoadAmendInfo);
+    until(
+        &w,
+        |e| matches!(e, Event::AmendInfo { message: Some(m), pushed: false } if m == "Say world"),
+    );
+}
+
+#[test]
+fn stale_selection_reports_and_resyncs() {
+    let server = mockito::Server::new();
+    let d = repo_for_changes();
+    std::fs::write(d.path().join("README.md"), "hello\nnew\n").unwrap();
+    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    w.send(Command::OpenRepo(d.path().to_path_buf()));
+    until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+    w.send(Command::LoadDiff {
+        path: "README.md".into(),
+        side: gitcore::Side::Unstaged,
+    });
+    let evs = until(&w, |e| matches!(e, Event::DiffLoaded(_)));
+    let Some(Event::DiffLoaded(shown)) = evs.last().cloned() else {
+        unreachable!()
+    };
+    std::fs::write(d.path().join("README.md"), "hello\nnew\nmore\n").unwrap();
+    w.send(Command::Stage {
+        path: "README.md".into(),
+        selection: gitcore::Selection::Lines(vec![(0, 1)]),
+        shown: Some(shown),
+    });
+    let evs = until(&w, |e| matches!(e, Event::DiffLoaded(_)));
+    assert!(evs.iter().any(|e| matches!(e, Event::Error { during: Op::Changes, error } if error.message == retrogit::strings::INFO_STALE_SELECTION)));
+}
+
+#[test]
+fn changes_commands_without_an_open_repo_do_nothing() {
+    let server = mockito::Server::new();
+    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    w.send(Command::RefreshStatus);
+    w.send(Command::ValidateToken);
+    // The first event is the reply to ValidateToken: RefreshStatus was ignored.
+    let evs = until(&w, |e| matches!(e, Event::SignedOut));
+    assert_eq!(evs.len(), 1);
+}
+
+#[test]
+fn refresh_requests_are_deduplicated_while_one_is_pending() {
+    let mut server = mockito::Server::new();
+    let _c = mock_device_code(&mut server);
+    let _t = server
+        .mock("POST", "/login/oauth/access_token")
+        .with_body(r#"{"error":"authorization_pending"}"#)
+        .create();
+    let d = repo_for_changes();
+    let w = start(&server, Arc::new(MemoryStore::default()), "Iv1.test");
+    w.send(Command::OpenRepo(d.path().to_path_buf()));
+    until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+    // Keep the worker busy (waiting for authorization) while refreshes pile up.
+    w.send(Command::StartDeviceFlow);
+    until(&w, |e| matches!(e, Event::DeviceCode { .. }));
+    let refresh = w.refresher();
+    for _ in 0..10 {
+        refresh();
+        w.send(Command::RefreshStatus);
+    }
+    w.cancel_device_flow();
+    w.send(Command::ValidateToken); // marker: replies SignedOut
+    let evs = until(&w, |e| matches!(e, Event::SignedOut));
+    let refreshes = evs
+        .iter()
+        .filter(|e| matches!(e, Event::StatusLoaded(_)))
+        .count();
+    assert_eq!(refreshes, 1, "{evs:?}");
 }

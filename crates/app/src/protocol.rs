@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use gitcore::{CloneProgress, GitError, RepoSummary};
+use gitcore::{
+    CloneProgress, CommitOutcome, FileDiff, FileStatus, GitError, RepoSummary, Selection, Side,
+};
 use github::{DeviceFlowFailure, GithubError, RepoInfo, TokenStoreError, User};
 
 use crate::strings as s;
@@ -14,8 +16,35 @@ pub enum Command {
     SavePat(String),
     SignOut,
     ListRepos,
-    Clone { url: String, dest: PathBuf },
+    Clone {
+        url: String,
+        dest: PathBuf,
+    },
     OpenRepo(PathBuf),
+    // --- Sub-project 2: all apply to the repository opened last. ---
+    RefreshStatus,
+    LoadDiff {
+        path: String,
+        side: Side,
+    },
+    /// `shown` is the diff the selection was made on (stale-selection check).
+    Stage {
+        path: String,
+        selection: Selection,
+        shown: Option<FileDiff>,
+    },
+    Unstage {
+        path: String,
+        selection: Selection,
+        shown: Option<FileDiff>,
+    },
+    Commit {
+        message: String,
+        amend: bool,
+    },
+    AddToGitignore(String),
+    /// Reply: `Event::AmendInfo`.
+    LoadAmendInfo,
 }
 
 /// Which operation an error belongs to, so the state can reset the right thing.
@@ -25,6 +54,9 @@ pub enum Op {
     Repos,
     Clone,
     Open(PathBuf),
+    /// Status, diff, staging, .gitignore.
+    Changes,
+    Commit,
     Internal,
 }
 
@@ -44,6 +76,14 @@ pub enum Event {
     CloneDone(RepoSummary),
     CloneCancelled,
     RepoOpened(RepoSummary),
+    StatusLoaded(Vec<FileStatus>),
+    DiffLoaded(FileDiff),
+    Committed(CommitOutcome),
+    /// Last commit message and whether HEAD is already on its upstream.
+    AmendInfo {
+        message: Option<String>,
+        pushed: bool,
+    },
     Error {
         during: Op,
         error: AppError,
