@@ -19,13 +19,16 @@ jobs:
       matrix:
         include:
           - os: macos-14
+            name: macOS
             target: aarch64-apple-darwin
             bin: retrogit
             asset: RetroGit-macos-arm64.zip
           - os: windows-latest
+            name: Windows
             target: x86_64-pc-windows-msvc
             bin: retrogit.exe
             asset: RetroGit-windows-x64.zip
+    name: build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
