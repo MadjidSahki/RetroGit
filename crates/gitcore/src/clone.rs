@@ -1,3 +1,4 @@
+use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,10 +36,13 @@ pub struct CloneProgress {
     pub received_bytes: usize,
     pub indexed_deltas: usize,
     pub total_deltas: usize,
+    /// Files written to the working tree (after the download).
+    pub checkout_done: usize,
+    pub checkout_total: usize,
 }
 
 impl CloneProgress {
-    /// Overall completion between 0.0 and 1.0 (objects count for 80 %, deltas for 20 %).
+    /// Overall completion between 0.0 and 1.0 (objects 70 %, deltas 20 %, checkout 10 %).
     pub fn fraction(&self) -> f32 {
         let objects = ratio(self.received_objects, self.total_objects);
         let deltas = if self.total_deltas == 0 {
@@ -50,7 +54,12 @@ impl CloneProgress {
         } else {
             ratio(self.indexed_deltas, self.total_deltas)
         };
-        0.8 * objects + 0.2 * deltas
+        let checkout = if self.checkout_total == 0 {
+            if deltas >= 1.0 { 1.0 } else { 0.0 }
+        } else {
+            ratio(self.checkout_done, self.checkout_total)
+        };
+        0.7 * objects + 0.2 * deltas + 0.1 * checkout
     }
 }
 
@@ -68,10 +77,22 @@ fn ratio(a: usize, b: usize) -> f32 {
 /// this function created is removed again.
 pub fn clone(
     req: &CloneRequest,
-    mut progress: impl FnMut(CloneProgress),
+    progress: impl FnMut(CloneProgress),
     cancel: &AtomicBool,
 ) -> Result<Repo, GitError> {
     let created_dest = prepare_destination(&req.dest)?;
+
+    // Download and checkout both report through the same callback.
+    let progress = RefCell::new(progress);
+    let current = Cell::new(CloneProgress::default());
+    let report = |update: &dyn Fn(&mut CloneProgress)| {
+        let mut p = current.get();
+        update(&mut p);
+        current.set(p);
+        if let Ok(mut f) = progress.try_borrow_mut() {
+            f(p);
+        }
+    };
 
     let mut callbacks = git2::RemoteCallbacks::new();
     if let Some(creds) = req.credentials.clone() {
@@ -90,26 +111,47 @@ pub fn clone(
         });
     }
     callbacks.transfer_progress(|p| {
-        progress(CloneProgress {
-            received_objects: p.received_objects(),
-            total_objects: p.total_objects(),
-            received_bytes: p.received_bytes(),
-            indexed_deltas: p.indexed_deltas(),
-            total_deltas: p.total_deltas(),
+        report(&|c| {
+            c.received_objects = p.received_objects();
+            c.total_objects = p.total_objects();
+            c.received_bytes = p.received_bytes();
+            c.indexed_deltas = p.indexed_deltas();
+            c.total_deltas = p.total_deltas();
         });
         !cancel.load(Ordering::Relaxed)
     });
+    // Called during the server-side "counting/compressing" phase, when no objects arrive yet.
+    callbacks.sideband_progress(|_| !cancel.load(Ordering::Relaxed));
     let mut fetch = git2::FetchOptions::new();
     fetch.remote_callbacks(callbacks);
+    // Honour http.proxy / HTTPS_PROXY like the REST client does (libgit2 default: no proxy).
+    let mut proxy = git2::ProxyOptions::new();
+    proxy.auto();
+    fetch.proxy_options(proxy);
+
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    // libgit2 consults notify while planning the checkout (before writing files): a cancel
+    // pressed right after the download skips the checkout entirely.
+    checkout.notify_on(git2::CheckoutNotificationType::UPDATED);
+    checkout.notify(|_, _, _, _, _| !cancel.load(Ordering::Relaxed));
+    checkout.progress(|_path, done, total| {
+        report(&|c| {
+            c.checkout_done = done;
+            c.checkout_total = total;
+        });
+    });
 
     let result = git2::build::RepoBuilder::new()
         .fetch_options(fetch)
+        .with_checkout(checkout)
         .clone(&req.url, &req.dest);
     match result {
         Ok(inner) if !cancel.load(Ordering::Relaxed) => {
             Ok(Repo::from_git2(inner, req.dest.clone()))
         }
-        Ok(_) => {
+        Ok(inner) => {
+            // Close libgit2's file handles first: Windows cannot delete open files.
+            drop(inner);
             cleanup(&req.dest, created_dest);
             Err(GitError::Cancelled)
         }

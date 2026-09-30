@@ -169,3 +169,51 @@ fn rejected_credentials_fail_fast_with_auth_error_and_clean_up() {
     assert!(!dest.exists());
     m.assert();
 }
+
+#[test]
+fn checkout_progress_is_reported() {
+    let src = tempfile::tempdir().unwrap();
+    common::make_repo(src.path(), 5);
+    let out = tempfile::tempdir().unwrap();
+    let mut last = CloneProgress::default();
+    clone(
+        &request(src.path(), out.path().join("demo")),
+        |p| last = p,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert!(last.checkout_total >= 5, "{last:?}");
+    assert_eq!(last.checkout_done, last.checkout_total);
+}
+
+#[test]
+fn cancel_during_checkout_reports_cancelled_and_cleans_up() {
+    let src = tempfile::tempdir().unwrap();
+    common::make_repo(src.path(), 30);
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("demo");
+    let cancel = AtomicBool::new(false);
+    let mut total = 0;
+    let err = clone(
+        &request(src.path(), dest.clone()),
+        |p| {
+            if p.checkout_total > 0 {
+                total = p.checkout_total;
+                cancel.store(true, Ordering::Relaxed);
+            }
+        },
+        &cancel,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(err, GitError::Cancelled);
+    assert!(!dest.exists());
+    // The cancel happened during checkout (libgit2 cannot abort a checkout mid-way, so the
+    // clone is rolled back right after it).
+    assert!(total >= 30);
+}
+
+#[test]
+fn network_timeouts_can_be_configured() {
+    gitcore::configure_network_timeouts().unwrap();
+}

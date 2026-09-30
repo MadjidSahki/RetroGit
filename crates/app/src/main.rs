@@ -13,6 +13,9 @@ fn main() -> eframe::Result {
         logging::init(&dir.join("RetroGit").join("retrogit.log"));
     }
     log::info!("RetroGit {} starting", env!("CARGO_PKG_VERSION"));
+    if let Err(e) = gitcore::configure_network_timeouts() {
+        log::warn!("could not set git network timeouts: {e}");
+    }
 
     let config_path = Config::default_path();
     let config = config_path

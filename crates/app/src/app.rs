@@ -77,7 +77,7 @@ impl eframe::App for RetroGitApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        if !self.worker.shutdown(std::time::Duration::from_secs(3)) {
+        if !self.worker.shutdown(std::time::Duration::from_secs(10)) {
             log::warn!("worker still busy at exit");
         }
         self.save_config();
