@@ -449,12 +449,13 @@ fn partial_stage_of_a_conflicted_file_is_refused() {
 fn stage_files_and_unstage_files_in_one_call() {
     let d = tempfile::tempdir().unwrap();
     common::make_repo(d.path(), 1);
-    for name in ["a.txt", "b.txt", "-dash.txt", "star*.txt"] {
+    // `[a]` would be a glob matching "bra.txt"; `*` is not a valid file name on Windows.
+    for name in ["a.txt", "b.txt", "-dash.txt", "br[a].txt"] {
         std::fs::write(d.path().join(name), "x\n").unwrap();
     }
-    std::fs::write(d.path().join("starX.txt"), "must not be staged by a glob\n").unwrap();
+    std::fs::write(d.path().join("bra.txt"), "must not be staged by a glob\n").unwrap();
     let r = Repo::open(d.path()).unwrap();
-    r.stage_files(&["a.txt", "b.txt", "-dash.txt", "star*.txt"])
+    r.stage_files(&["a.txt", "b.txt", "-dash.txt", "br[a].txt"])
         .unwrap();
     let staged: Vec<String> = r
         .status()
@@ -463,8 +464,8 @@ fn stage_files_and_unstage_files_in_one_call() {
         .filter(|f| f.staged.is_some())
         .map(|f| f.path)
         .collect();
-    assert_eq!(staged, vec!["-dash.txt", "a.txt", "b.txt", "star*.txt"]);
-    r.unstage_files(&["a.txt", "b.txt", "-dash.txt", "star*.txt"])
+    assert_eq!(staged, vec!["-dash.txt", "a.txt", "b.txt", "br[a].txt"]);
+    r.unstage_files(&["a.txt", "b.txt", "-dash.txt", "br[a].txt"])
         .unwrap();
     assert!(r.status().unwrap().iter().all(|f| f.staged.is_none()));
 }
