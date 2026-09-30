@@ -25,4 +25,4 @@ pub use status_bar::status_bar;
 pub use tabs::tabs;
 pub use text_field::text_field;
 pub use title_bar::{TitleAction, TitleBar};
-pub use window_frame::resize_edges;
+pub use window_frame::{above_dialogs, resize_edges};

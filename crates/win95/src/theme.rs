@@ -66,7 +66,6 @@ fn apply_style(style: &mut egui::Style) {
 
     let v = &mut style.visuals;
     v.dark_mode = false;
-    v.override_text_color = Some(BLACK);
     v.panel_fill = SILVER;
     v.window_fill = SILVER;
     v.faint_bg_color = SILVER;

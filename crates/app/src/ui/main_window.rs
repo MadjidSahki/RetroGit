@@ -46,7 +46,11 @@ fn title(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     };
     let focused = ui.input(|i| i.viewport().focused.unwrap_or(true));
     let maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
-    match TitleBar::new(&text).active(focused).show(ui) {
+    // Drawn above dialogs so the window can still be moved/minimized/closed while one is open.
+    let action = win95::above_dialogs(ui, "main_title", win95::title_bar::HEIGHT, |ui| {
+        TitleBar::new(&text).active(focused).show(ui)
+    });
+    match action {
         TitleAction::StartDrag => ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag),
         TitleAction::Minimize => ui.ctx().send_viewport_cmd(ViewportCommand::Minimized(true)),
         TitleAction::ToggleMaximize => ui
