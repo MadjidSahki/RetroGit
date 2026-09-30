@@ -9,12 +9,12 @@ use retrogit::worker::{WorkerDeps, spawn};
 use retrogit::{GITHUB_CLIENT_ID, logging, strings};
 
 fn main() -> eframe::Result {
-    // `git` runs us as GIT_ASKPASS: answer and exit before any GUI setup.
-    let args: Vec<String> = std::env::args().collect();
-    if args.get(1).map(String::as_str) == Some("--askpass") {
-        let prompt = args.get(2).map(String::as_str).unwrap_or("");
-        let token = std::env::var(gitcore::ASKPASS_TOKEN_VAR).unwrap_or_default();
-        println!("{}", gitcore::askpass_answer(prompt, &token));
+    // `git` runs us as GIT_ASKPASS with the prompt as the only argument; the token variable
+    // is only ever set in the environment of the git processes we start. Answer and exit
+    // before any GUI setup.
+    if let Ok(token) = std::env::var(gitcore::ASKPASS_TOKEN_VAR) {
+        let prompt = std::env::args().nth(1).unwrap_or_default();
+        println!("{}", gitcore::askpass_answer(&prompt, &token));
         return Ok(());
     }
     if let Some(dir) = dirs::data_local_dir() {
