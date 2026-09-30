@@ -375,3 +375,33 @@ mod changes {
         assert!(s.changes.summary.is_empty());
     }
 }
+
+mod discard {
+    use super::*;
+    use retrogit::protocol::Command;
+
+    #[test]
+    fn discard_is_sent_only_after_confirmation() {
+        let mut s = AppState::new(Config::default());
+        let cmd = Command::DiscardFiles(vec!["a.txt".into()]);
+        s.changes
+            .request_discard(cmd.clone(), "Discard a.txt?".into());
+        assert_eq!(
+            s.changes
+                .pending_discard
+                .as_ref()
+                .map(|p| p.question.as_str()),
+            Some("Discard a.txt?")
+        );
+        s.changes.cancel_discard();
+        assert!(s.changes.pending_discard.is_none());
+        s.changes
+            .request_discard(cmd.clone(), "Discard a.txt?".into());
+        assert_eq!(s.changes.confirm_discard(), Some(cmd));
+        assert_eq!(
+            s.changes.confirm_discard(),
+            None,
+            "a confirmation is used once"
+        );
+    }
+}

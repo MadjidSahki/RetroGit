@@ -32,6 +32,9 @@ pub fn rows(diff: &FileDiff) -> Vec<Row> {
 
 enum Action {
     Lines,
+    DiscardLines,
+    DiscardHunk(usize),
+    DiscardFile,
     Hunk(usize),
     File,
     ShowLarge,
@@ -92,6 +95,18 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             {
                 action = Some(Action::Lines);
             }
+            if side == Side::Unstaged
+                && !conflicted
+                && ui
+                    .add(
+                        Button95::new(s::DISCARD_LINES)
+                            .min_size(egui::vec2(150.0, 20.0))
+                            .enabled(has_lines),
+                    )
+                    .clicked()
+            {
+                action = Some(Action::DiscardLines);
+            }
         });
         ui.separator();
         if conflicted {
@@ -101,9 +116,14 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         let Some(diff) = c.diff.as_ref() else { return };
         if diff.binary && !whole_only {
             ui.label(s::BINARY_FILE);
-            if ui.add(Button95::new(verb_file)).clicked() {
-                action = Some(Action::File);
-            }
+            ui.horizontal(|ui| {
+                if ui.add(Button95::new(verb_file)).clicked() {
+                    action = Some(Action::File);
+                }
+                if side == Side::Unstaged && ui.add(Button95::new(s::DISCARD)).clicked() {
+                    action = Some(Action::DiscardFile);
+                }
+            });
             return;
         }
         if diff.hunks.is_empty() {
@@ -146,6 +166,16 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                                             .clicked()
                                     {
                                         action = Some(Action::Hunk(h));
+                                    }
+                                    if side == Side::Unstaged
+                                        && ui
+                                            .add(
+                                                Button95::new(s::DISCARD_HUNK)
+                                                    .min_size(egui::vec2(90.0, 16.0)),
+                                            )
+                                            .clicked()
+                                    {
+                                        action = Some(Action::DiscardHunk(h));
                                     }
                                 });
                             });
@@ -205,8 +235,41 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         return;
     };
     let shown = cx.state.changes.diff.clone();
+    // Destructive actions wait for a confirmation.
+    let discard = match &action {
+        Some(Action::DiscardLines) => {
+            let n = cx.state.changes.selected_lines.len();
+            let sel = Selection::Lines(cx.state.changes.selected_lines.iter().copied().collect());
+            Some((sel, super::discard::lines_question(&path, n)))
+        }
+        Some(Action::DiscardHunk(h)) => Some((
+            Selection::Hunks(vec![*h]),
+            super::discard::hunk_question(&path),
+        )),
+        Some(Action::DiscardFile) => {
+            let files: Vec<_> = cx
+                .state
+                .changes
+                .files
+                .iter()
+                .filter(|f| f.path == path)
+                .cloned()
+                .collect();
+            Some((Selection::All, super::discard::files_question(&files)))
+        }
+        _ => None,
+    };
+    if let Some((selection, question)) = discard {
+        let cmd = Command::Discard {
+            path,
+            selection,
+            shown,
+        };
+        cx.state.changes.request_discard(cmd, question);
+        return;
+    }
     let selection = match action {
-        None => return,
+        None | Some(Action::DiscardLines | Action::DiscardHunk(_) | Action::DiscardFile) => return,
         Some(Action::ShowLarge) => {
             cx.state.changes.show_large = true;
             return;

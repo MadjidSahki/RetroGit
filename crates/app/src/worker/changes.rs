@@ -82,6 +82,27 @@ impl Worker {
         self.refresh();
     }
 
+    pub(super) fn discard(&mut self, path: &str, selection: &Selection, shown: Option<&FileDiff>) {
+        let Some(repo) = self.open_current(Op::Changes) else {
+            return;
+        };
+        if let Err(e) = repo.discard(path, selection, shown) {
+            self.fail(Op::Changes, AppError::from_git(&e));
+        }
+        self.refresh();
+    }
+
+    pub(super) fn discard_files(&mut self, paths: &[String]) {
+        let Some(repo) = self.open_current(Op::Changes) else {
+            return;
+        };
+        let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+        if let Err(e) = repo.discard_files(&refs) {
+            self.fail(Op::Changes, AppError::from_git(&e));
+        }
+        self.refresh();
+    }
+
     pub(super) fn stage_files(&mut self, paths: &[String], stage: bool) {
         let Some(repo) = self.open_current(Op::Changes) else {
             return;

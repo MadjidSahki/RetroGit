@@ -567,3 +567,34 @@ fn stage_all_is_one_operation_with_one_refresh() {
     };
     assert!(files.iter().all(|f| f.staged.is_none()));
 }
+
+#[test]
+fn discard_commands_revert_the_working_tree_and_refresh() {
+    let server = mockito::Server::new();
+    let d = repo_for_changes();
+    std::fs::write(d.path().join("README.md"), "hello\nnoise\n").unwrap();
+    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    w.send(Command::OpenRepo(d.path().to_path_buf()));
+    until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+    w.send(Command::Discard {
+        path: "README.md".into(),
+        selection: gitcore::Selection::Hunks(vec![0]),
+        shown: None,
+    });
+    let evs = until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+    let Some(Event::StatusLoaded(files)) = evs.last() else {
+        unreachable!()
+    };
+    assert!(files.is_empty(), "{files:?}");
+    assert_eq!(
+        std::fs::read_to_string(d.path().join("README.md")).unwrap(),
+        "hello\n"
+    );
+    std::fs::write(d.path().join("README.md"), "changed\n").unwrap();
+    w.send(Command::DiscardFiles(vec!["README.md".into()]));
+    until(&w, |e| matches!(e, Event::StatusLoaded(f) if f.is_empty()));
+    assert_eq!(
+        std::fs::read_to_string(d.path().join("README.md")).unwrap(),
+        "hello\n"
+    );
+}

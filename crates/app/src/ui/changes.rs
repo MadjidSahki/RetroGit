@@ -120,6 +120,23 @@ pub fn all_files_command(files: &[FileStatus], side: Side) -> Command {
     }
 }
 
+/// Unstaged files whose changes can be thrown away (not conflicts).
+fn discardable(files: &[FileStatus]) -> Vec<FileStatus> {
+    files
+        .iter()
+        .filter(|f| f.unstaged != Some(Change::Conflicted))
+        .cloned()
+        .collect()
+}
+
+fn request_discard_files(cx: &mut Ctx<'_>, files: &[FileStatus]) {
+    let question = super::discard::files_question(files);
+    let paths = files.iter().map(|f| f.path.clone()).collect();
+    cx.state
+        .changes
+        .request_discard(Command::DiscardFiles(paths), question);
+}
+
 fn select_file(cx: &mut Ctx<'_>, path: &str, side: Side) {
     let c = &mut cx.state.changes;
     if c.shown.as_ref() != Some(&(path.to_string(), side)) {
@@ -161,6 +178,15 @@ fn group(ui: &mut egui::Ui, cx: &mut Ctx<'_>, files: &[FileStatus], side: Side, 
             if ui.add(b).clicked() {
                 cx.worker.send(all_files_command(files, side));
             }
+            if side == Side::Unstaged {
+                let discardable = discardable(files);
+                let b = Button95::new(s::DISCARD_ALL)
+                    .min_size(egui::vec2(80.0, 20.0))
+                    .enabled(!discardable.is_empty());
+                if ui.add(b).clicked() {
+                    request_discard_files(cx, &discardable);
+                }
+            }
         });
     });
     let selected = cx
@@ -188,6 +214,11 @@ fn group(ui: &mut egui::Ui, cx: &mut Ctx<'_>, files: &[FileStatus], side: Side, 
                 menu_action = Some((row, MenuAction::Toggle));
             }
             if side == Side::Unstaged {
+                if files[row].unstaged != Some(Change::Conflicted)
+                    && ui.button(s::DISCARD_MENU).clicked()
+                {
+                    menu_action = Some((row, MenuAction::Discard));
+                }
                 if ui.button(s::IGNORE_FILE).clicked() {
                     menu_action = Some((row, MenuAction::IgnorePath));
                 }
@@ -218,12 +249,16 @@ fn group(ui: &mut egui::Ui, cx: &mut Ctx<'_>, files: &[FileStatus], side: Side, 
             .worker
             .send(Command::AddToGitignore(files[row].path.clone())),
         Some((_, MenuAction::Ignore(pattern))) => cx.worker.send(Command::AddToGitignore(pattern)),
+        Some((row, MenuAction::Discard)) => {
+            request_discard_files(cx, std::slice::from_ref(&files[row]))
+        }
         None => {}
     }
 }
 
 enum MenuAction {
     Toggle,
+    Discard,
     IgnorePath,
     Ignore(String),
 }

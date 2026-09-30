@@ -38,6 +38,14 @@ pub enum Command {
         selection: Selection,
         shown: Option<FileDiff>,
     },
+    /// Revert unstaged working-tree changes (needs a confirmation in the UI).
+    Discard {
+        path: String,
+        selection: Selection,
+        shown: Option<FileDiff>,
+    },
+    /// Whole files back to their index version; untracked files go to the trash.
+    DiscardFiles(Vec<String>),
     /// Whole files, one index operation and one refresh (Stage all / Unstage all).
     StageFiles(Vec<String>),
     UnstageFiles(Vec<String>),

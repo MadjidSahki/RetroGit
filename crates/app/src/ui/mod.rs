@@ -4,6 +4,7 @@ pub mod about;
 pub mod changes;
 pub mod clone_dialog;
 pub mod diff_view;
+pub mod discard;
 pub mod main_window;
 pub mod message;
 pub mod sign_in;

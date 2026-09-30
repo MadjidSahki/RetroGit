@@ -210,6 +210,12 @@ impl Worker {
                 selection,
                 shown,
             } => self.stage(&path, &selection, shown.as_ref(), false),
+            Command::Discard {
+                path,
+                selection,
+                shown,
+            } => self.discard(&path, &selection, shown.as_ref()),
+            Command::DiscardFiles(paths) => self.discard_files(&paths),
             Command::StageFiles(paths) => self.stage_files(&paths, true),
             Command::UnstageFiles(paths) => self.stage_files(&paths, false),
             Command::Commit { message, amend } => self.commit(&message, amend),

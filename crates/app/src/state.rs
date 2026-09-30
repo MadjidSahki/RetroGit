@@ -34,6 +34,15 @@ pub struct ChangesView {
     pub last_commit_note: Option<String>,
     /// Ask the UI to focus the Summary field on the next frame (Repository > Commit...).
     pub focus_summary: bool,
+    /// Discard waiting for the user's confirmation.
+    pub pending_discard: Option<PendingDiscard>,
+}
+
+/// A destructive command and the question shown before running it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingDiscard {
+    pub question: String,
+    pub command: crate::protocol::Command,
 }
 
 impl ChangesView {
@@ -54,6 +63,19 @@ impl ChangesView {
         } else {
             format!("{summary}\n\n{description}")
         }
+    }
+
+    pub fn request_discard(&mut self, command: crate::protocol::Command, question: String) {
+        self.pending_discard = Some(PendingDiscard { question, command });
+    }
+
+    pub fn cancel_discard(&mut self) {
+        self.pending_discard = None;
+    }
+
+    /// The confirmed command, once.
+    pub fn confirm_discard(&mut self) -> Option<crate::protocol::Command> {
+        self.pending_discard.take().map(|p| p.command)
     }
 
     pub fn can_commit(&self) -> bool {
