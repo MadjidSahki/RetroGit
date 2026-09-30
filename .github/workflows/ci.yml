@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            bin: retrogit
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin: retrogit.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo build --release -p retrogit --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: retrogit-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.bin }}
