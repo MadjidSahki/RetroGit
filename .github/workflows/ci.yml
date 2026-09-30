@@ -1,15 +1,18 @@
 name: CI
 
-# Every push (any branch) is built and tested on macOS and Windows.
-# Only pushes to main (i.e. merged pull requests: main is protected) publish a new
-# GitHub Release v<major>.<minor from Cargo.toml>.<run number>.
+# Runs only for pull requests into main (build + tests on macOS and Windows) and for
+# pushes to main, i.e. merged pull requests (main is protected). Only the latter publish
+# a GitHub Release v<major>.<minor from Cargo.toml>.<run number>.
 on:
+  pull_request:
+    branches: [main]
   push:
-    branches: ["**"]
+    branches: [main]
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: ci-${{ github.ref }}
+  # A new commit on a PR cancels its previous run; runs on main always complete.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
