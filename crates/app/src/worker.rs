@@ -190,7 +190,12 @@ impl Worker {
                 let _ = self.deps.store.clear();
                 self.emit(Event::SignedOut);
             }
-            Err(e) => self.fail(Op::Auth, AppError::from_github(&e)),
+            Err(e) => {
+                // Keep the token: the network may come back (VPN, Wi-Fi).
+                self.token = Some(token);
+                self.fail(Op::Auth, AppError::from_github(&e));
+                self.emit(Event::Offline);
+            }
         }
     }
 
@@ -268,13 +273,15 @@ impl Worker {
             return self.emit(Event::SignedOut);
         };
         match self.deps.client.list_repos(&token) {
-            Ok(repos) => self.emit(Event::ReposLoaded(repos)),
-            Err(GithubError::Unauthorized) => {
-                self.token = None;
-                let _ = self.deps.store.clear();
-                self.fail(Op::Repos, AppError::from_github(&GithubError::Unauthorized));
-                self.emit(Event::SignedOut);
+            Ok(listing) => {
+                self.emit(Event::ReposLoaded(listing.repos));
+                if !listing.sso_hidden_orgs.is_empty() {
+                    let mut warning = AppError::new(Severity::Warning, s::ERR_SSO_PARTIAL);
+                    warning.link = Some(self.sso_settings_link());
+                    self.fail(Op::Repos, warning);
+                }
             }
+            Err(GithubError::Unauthorized) => self.drop_token(Op::Repos),
             Err(e) => self.fail(Op::Repos, AppError::from_github(&e)),
         }
     }
@@ -308,8 +315,43 @@ impl Worker {
         match result.and_then(|repo| repo.summary()) {
             Ok(summary) => self.emit(Event::CloneDone(summary)),
             Err(GitError::Cancelled) => self.emit(Event::CloneCancelled),
+            Err(e @ GitError::Auth(_)) => self.clone_auth_failed(&e),
             Err(e) => self.fail(Op::Clone, AppError::from_git(&e)),
         }
+    }
+}
+
+impl Worker {
+    /// Where the user grants SSO access: the OAuth App's connection page, or token settings.
+    fn sso_settings_link(&self) -> String {
+        if self.deps.client_id.is_empty() {
+            "https://github.com/settings/tokens".to_string()
+        } else {
+            format!(
+                "https://github.com/settings/connections/applications/{}",
+                self.deps.client_id
+            )
+        }
+    }
+
+    /// The token was rejected: forget it everywhere and ask to sign in again.
+    fn drop_token(&mut self, during: Op) {
+        self.token = None;
+        let _ = self.deps.store.clear();
+        self.fail(during, AppError::from_github(&GithubError::Unauthorized));
+        self.emit(Event::SignedOut);
+    }
+
+    /// Git refused our credentials: a revoked token or a missing SSO authorization.
+    fn clone_auth_failed(&mut self, e: &GitError) {
+        if let Some(token) = self.token.clone()
+            && self.deps.client.current_user(&token) == Err(GithubError::Unauthorized)
+        {
+            return self.drop_token(Op::Clone);
+        }
+        let mut error = AppError::from_git(e);
+        error.link = Some(self.sso_settings_link());
+        self.fail(Op::Clone, error);
     }
 }
 

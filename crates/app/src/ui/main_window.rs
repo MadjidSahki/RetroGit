@@ -75,7 +75,12 @@ fn menu(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                     cx.worker.send(Command::SignOut);
                 }
             } else if ui.button(s::SIGN_IN_MENU).clicked() {
-                cx.state.sign_in.get_or_insert_with(Default::default);
+                if cx.state.auth == Auth::Offline {
+                    cx.state.auth = Auth::Checking;
+                    cx.worker.send(Command::ValidateToken);
+                } else {
+                    cx.state.sign_in.get_or_insert_with(Default::default);
+                }
             }
             ui.separator();
             if ui.button(s::CLONE_MENU).clicked() {
@@ -209,6 +214,7 @@ fn status(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let who = match &cx.state.auth {
         Auth::SignedIn(u) => format!("Signed in: @{}", u.login),
         Auth::Checking => s::CHECKING.to_string(),
+        Auth::Offline => s::OFFLINE.to_string(),
         _ => s::NOT_SIGNED_IN.to_string(),
     };
     let activity = if cx.state.repos_loading {

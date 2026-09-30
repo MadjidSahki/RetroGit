@@ -173,3 +173,16 @@ fn filter_is_case_insensitive_on_owner_and_name() {
     assert_eq!(filter_repos(&repos, "exampleorg"), vec![0]);
     assert_eq!(filter_repos(&repos, "zzz"), Vec::<usize>::new());
 }
+
+#[test]
+fn offline_does_not_open_sign_in() {
+    let mut s = AppState::new(Config::default());
+    s.apply(Event::Error {
+        during: Op::Auth,
+        error: err(),
+    });
+    s.apply(Event::Offline);
+    assert_eq!(s.auth, Auth::Offline);
+    assert_eq!(s.sign_in, None);
+    assert_eq!(s.messages.len(), 1);
+}

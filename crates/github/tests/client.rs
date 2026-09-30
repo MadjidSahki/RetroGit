@@ -137,7 +137,9 @@ fn list_repos_follows_pagination() {
         .match_query(Matcher::UrlEncoded("page".into(), "2".into()))
         .with_body(serde_json::to_string(&page2).unwrap())
         .create();
-    let repos = client(&server).list_repos("t").unwrap();
+    let listing = client(&server).list_repos("t").unwrap();
+    assert!(listing.sso_hidden_orgs.is_empty());
+    let repos = listing.repos;
     assert_eq!(repos.len(), 130);
     assert_eq!(repos[0].owner, "ExampleOrg");
     assert_eq!(repos[0].full_name, "ExampleOrg/repo0");
@@ -177,5 +179,25 @@ fn device_code_request_and_poll() {
     assert_eq!(
         c.poll_token("Iv1.test", "dc1").unwrap(),
         PollResponse::Pending
+    );
+}
+
+#[test]
+fn list_repos_reports_orgs_hidden_by_missing_sso_authorization() {
+    let mut server = mockito::Server::new();
+    server
+        .mock("GET", "/user/repos")
+        .match_query(Matcher::Any)
+        .with_header(
+            "X-GitHub-SSO",
+            "partial-results; organizations=21955855,20582480",
+        )
+        .with_body(serde_json::to_string(&vec![repo_json(1)]).unwrap())
+        .create();
+    let listing = client(&server).list_repos("t").unwrap();
+    assert_eq!(listing.repos.len(), 1);
+    assert_eq!(
+        listing.sso_hidden_orgs,
+        vec!["21955855".to_string(), "20582480".to_string()]
     );
 }

@@ -33,6 +33,7 @@ pub const LAST_COMMIT: &str = "Last commit:";
 pub const READY: &str = "Ready";
 pub const NOT_SIGNED_IN: &str = "Not signed in";
 pub const CHECKING: &str = "Checking GitHub session...";
+pub const OFFLINE: &str = "Offline - GitHub unreachable";
 
 pub const SIGN_IN_TITLE: &str = "Sign in to GitHub";
 pub const TAB_STANDARD: &str = "Standard";
@@ -74,6 +75,7 @@ pub const ERR_NO_NETWORK: &str = "Could not reach GitHub. Check your network con
 pub const ERR_UNAUTHORIZED: &str = "GitHub rejected your session. Please sign in again.";
 pub const ERR_PAT_REJECTED: &str = "GitHub rejected this token.";
 pub const ERR_SSO: &str = "Your organization requires SSO authorization for this token. Open the link below, authorize, then try again.";
+pub const ERR_SSO_PARTIAL: &str = "Some organization repositories are hidden because RetroGit is not authorized for their SSO. Open the link below, grant access (or authorize your token for SSO), then click Refresh.";
 pub const ERR_RATE_LIMIT: &str = "GitHub API rate limit reached. Try again in a few minutes.";
 pub const ERR_DEVICE_EXPIRED: &str = "The sign-in code expired. Click Sign in to get a new one.";
 pub const ERR_DEVICE_DENIED: &str = "Authorization was denied on github.com.";

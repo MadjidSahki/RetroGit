@@ -271,3 +271,121 @@ fn clone_then_open_report_summaries() {
         )
     });
 }
+
+fn signed_in_with_pat(
+    server: &mut mockito::Server,
+    store: Arc<MemoryStore>,
+    client_id: &str,
+) -> (WorkerHandle, mockito::Mock) {
+    let user = mock_user(server, "ghp_pat");
+    let w = start(server, store, client_id);
+    w.send(Command::SavePat("ghp_pat".into()));
+    until(&w, |e| matches!(e, Event::SignedIn(_)));
+    (w, user)
+}
+
+#[test]
+fn repos_hidden_by_sso_are_listed_with_a_warning_and_link() {
+    let mut server = mockito::Server::new();
+    let _r = server
+        .mock("GET", "/user/repos")
+        .match_query(Matcher::Any)
+        .with_header("X-GitHub-SSO", "partial-results; organizations=42")
+        .with_body("[]")
+        .create();
+    let (w, _u) = signed_in_with_pat(&mut server, Arc::new(MemoryStore::default()), "Ov23test");
+    w.send(Command::ListRepos);
+    let evs = until(&w, |e| {
+        matches!(
+            e,
+            Event::Error {
+                during: Op::Repos,
+                ..
+            }
+        )
+    });
+    assert!(evs.iter().any(|e| matches!(e, Event::ReposLoaded(_))));
+    let Some(Event::Error { error, .. }) = evs.last() else {
+        unreachable!()
+    };
+    assert_eq!(
+        error.link.as_deref(),
+        Some("https://github.com/settings/connections/applications/Ov23test")
+    );
+}
+
+#[test]
+fn offline_start_keeps_the_token_for_later_calls() {
+    let mut server = mockito::Server::new();
+    let _u = server.mock("GET", "/user").with_status(503).create();
+    let _r = server
+        .mock("GET", "/user/repos")
+        .match_query(Matcher::Any)
+        .match_header("authorization", "Bearer gho_kept")
+        .with_body("[]")
+        .create();
+    let store = Arc::new(MemoryStore::with_token("gho_kept"));
+    let w = start(&server, store.clone(), "");
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::Offline));
+    assert_eq!(store.load(), Ok(Some("gho_kept".into())));
+    w.send(Command::ListRepos);
+    until(&w, |e| matches!(e, Event::ReposLoaded(_)));
+}
+
+fn git_401(server: &mut mockito::Server) -> mockito::Mock {
+    server
+        .mock("GET", Matcher::Regex("^/org/demo.git/".into()))
+        .with_status(401)
+        .with_header("WWW-Authenticate", "Basic realm=\"GitHub\"")
+        .create()
+}
+
+#[test]
+fn clone_auth_failure_with_revoked_token_signs_out() {
+    let mut server = mockito::Server::new();
+    let store = Arc::new(MemoryStore::default());
+    let (w, user_ok) = signed_in_with_pat(&mut server, store.clone(), "");
+    user_ok.remove();
+    let _u = server.mock("GET", "/user").with_status(401).create();
+    let _g = git_401(&mut server);
+    let out = tempfile::tempdir().unwrap();
+    w.send(Command::Clone {
+        url: format!("{}/org/demo.git", server.url()),
+        dest: out.path().join("demo"),
+    });
+    let evs = until(&w, |e| matches!(e, Event::SignedOut));
+    assert!(evs.iter().any(|e| matches!(e, Event::Error { during: Op::Clone, error } if error.message == retrogit::strings::ERR_UNAUTHORIZED)));
+    assert_eq!(store.load(), Ok(None));
+}
+
+#[test]
+fn clone_auth_failure_with_valid_token_points_to_sso() {
+    let mut server = mockito::Server::new();
+    let store = Arc::new(MemoryStore::default());
+    let (w, _user_ok) = signed_in_with_pat(&mut server, store.clone(), "");
+    let _g = git_401(&mut server);
+    let out = tempfile::tempdir().unwrap();
+    w.send(Command::Clone {
+        url: format!("{}/org/demo.git", server.url()),
+        dest: out.path().join("demo"),
+    });
+    let evs = until(&w, |e| {
+        matches!(
+            e,
+            Event::Error {
+                during: Op::Clone,
+                ..
+            }
+        )
+    });
+    let Some(Event::Error { error, .. }) = evs.last() else {
+        unreachable!()
+    };
+    assert_eq!(error.message, retrogit::strings::ERR_GIT_AUTH);
+    assert_eq!(
+        error.link.as_deref(),
+        Some("https://github.com/settings/tokens")
+    );
+    assert_eq!(store.load(), Ok(Some("ghp_pat".into())));
+}

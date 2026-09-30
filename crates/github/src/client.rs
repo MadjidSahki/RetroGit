@@ -27,6 +27,15 @@ pub struct RepoInfo {
     pub updated_at: String,
 }
 
+/// Result of listing repositories.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RepoListing {
+    pub repos: Vec<RepoInfo>,
+    /// IDs of organizations whose repos GitHub left out because the token is not
+    /// SSO-authorized for them (`X-GitHub-SSO: partial-results; organizations=...`).
+    pub sso_hidden_orgs: Vec<String>,
+}
+
 #[derive(Deserialize)]
 struct RawRepo {
     full_name: String,
@@ -135,18 +144,22 @@ impl Client {
     }
 
     /// All repositories the user can access, following pagination.
-    pub fn list_repos(&self, token: &str) -> Result<Vec<RepoInfo>, GithubError> {
+    pub fn list_repos(&self, token: &str) -> Result<RepoListing, GithubError> {
         let mut url = format!("{}{}", self.api_base, REPOS_PATH);
-        let mut out = Vec::new();
+        let mut out = RepoListing::default();
         loop {
             let mut resp = self.api_get(&url, token)?;
-            let next = resp
-                .headers()
-                .get("link")
-                .and_then(|v| v.to_str().ok())
-                .and_then(next_link);
+            let next = header(&resp, "link").and_then(next_link);
+            for org in header(&resp, "x-github-sso")
+                .map(partial_sso_orgs)
+                .unwrap_or_default()
+            {
+                if !out.sso_hidden_orgs.contains(&org) {
+                    out.sso_hidden_orgs.push(org);
+                }
+            }
             let page: Vec<RawRepo> = resp.body_mut().read_json()?;
-            out.extend(page.into_iter().map(RepoInfo::from));
+            out.repos.extend(page.into_iter().map(RepoInfo::from));
             match next {
                 Some(n) => url = n,
                 None => return Ok(out),
@@ -168,6 +181,23 @@ impl Client {
 
 fn header<'a>(resp: &'a Response<Body>, name: &str) -> Option<&'a str> {
     resp.headers().get(name).and_then(|v| v.to_str().ok())
+}
+
+/// `partial-results; organizations=1,2` => `["1", "2"]`.
+fn partial_sso_orgs(value: &str) -> Vec<String> {
+    if !value.trim_start().starts_with("partial-results") {
+        return Vec::new();
+    }
+    value
+        .split("organizations=")
+        .nth(1)
+        .map(|ids| {
+            ids.split(',')
+                .map(|i| i.trim().to_string())
+                .filter(|i| !i.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Map non-2xx statuses to typed errors.

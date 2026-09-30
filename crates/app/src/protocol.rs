@@ -32,6 +32,8 @@ pub enum Op {
 pub enum Event {
     SignedIn(User),
     SignedOut,
+    /// A token is stored but GitHub could not be reached; it is kept for later calls.
+    Offline,
     DeviceCode {
         user_code: String,
         verification_uri: String,

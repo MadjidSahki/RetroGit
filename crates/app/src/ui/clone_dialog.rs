@@ -29,7 +29,11 @@ const COLUMNS: &[Column] = &[
 
 /// Open the clone dialog (or the sign-in dialog if needed) and fetch repos once.
 pub fn open(cx: &mut Ctx<'_>) {
-    if !matches!(cx.state.auth, Auth::SignedIn(_)) {
+    if cx.state.auth == Auth::Offline {
+        // Token kept from an offline start: retry the session, then list repos with it.
+        cx.state.auth = Auth::Checking;
+        cx.worker.send(Command::ValidateToken);
+    } else if !matches!(cx.state.auth, Auth::SignedIn(_)) {
         cx.state.sign_in.get_or_insert_with(Default::default);
         return;
     }

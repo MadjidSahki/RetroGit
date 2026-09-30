@@ -14,6 +14,8 @@ pub enum Auth {
     /// Validating the stored token at startup.
     Checking,
     SignedOut,
+    /// Token stored but GitHub unreachable at startup.
+    Offline,
     /// Device Flow requested, code not received yet.
     Starting,
     /// Device Flow code shown, waiting for the user on github.com.
@@ -100,6 +102,9 @@ impl AppState {
                 self.repos.clear();
                 self.clone = None;
                 self.sign_in.get_or_insert_with(SignInDialog::default);
+            }
+            Event::Offline => {
+                self.auth = Auth::Offline;
             }
             Event::DeviceCode {
                 user_code,

@@ -6,7 +6,7 @@ mod error;
 mod link;
 mod token_store;
 
-pub use client::{Client, RepoInfo, User};
+pub use client::{Client, RepoInfo, RepoListing, User};
 pub use device_flow::{DeviceCode, DeviceFlow, DeviceFlowFailure, PollResponse, Step};
 pub use error::GithubError;
 pub use link::next_link;
