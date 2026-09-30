@@ -129,17 +129,27 @@ impl GraphState {
         while self.lanes.last().is_some_and(Option::is_none) {
             self.lanes.pop();
         }
-        let down = self
-            .lanes
-            .iter()
-            .enumerate()
-            .filter_map(|(i, l)| l.as_ref().map(|(_, c)| (i, *c)))
-            .map(|(i, c)| Edge {
-                from: if targets.contains(&i) { column } else { i },
-                to: i,
-                color: c,
-            })
-            .collect();
+        // Lanes that were already running (and did not end here) continue straight down;
+        // the commit's parents get a segment from the dot. Both can apply to one lane.
+        let passing = |i: usize| before.get(i).is_some_and(|l| l.is_some() && !waiting(l));
+        let mut down = Vec::new();
+        for (i, l) in self.lanes.iter().enumerate() {
+            let Some((_, c)) = l else { continue };
+            if passing(i) {
+                down.push(Edge {
+                    from: i,
+                    to: i,
+                    color: *c,
+                });
+            }
+            if targets.contains(&i) {
+                down.push(Edge {
+                    from: column,
+                    to: i,
+                    color: *c,
+                });
+            }
+        }
         GraphRow {
             column,
             color,
@@ -285,6 +295,37 @@ mod tests {
         ]);
         assert_eq!(cols(&rows), vec![0, 1, 0, 1, 0]);
         assert!(rows.iter().all(|r| r.width() <= 2));
+    }
+
+    #[test]
+    fn a_lane_passing_a_merge_row_is_not_interrupted() {
+        // A (lane 0) waits for P; B merges Q and P; Q and P follow.
+        let rows = layout(&[
+            e("A", &["P"]),
+            e("B", &["Q", "P"]),
+            e("Q", &["P"]),
+            e("P", &[]),
+        ]);
+        let b = &rows[1];
+        assert_eq!(b.column, 1);
+        assert!(b.up.contains(&Edge {
+            from: 0,
+            to: 0,
+            color: 0
+        }));
+        assert!(
+            b.down.contains(&Edge {
+                from: 0,
+                to: 0,
+                color: 0
+            }),
+            "lane 0 must continue below B: {:?}",
+            b.down
+        );
+        assert!(
+            b.down.iter().any(|e| e.from == 1 && e.to == 0),
+            "B's second parent joins lane 0"
+        );
     }
 
     #[test]
