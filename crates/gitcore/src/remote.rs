@@ -61,11 +61,12 @@ pub fn classify_net_failure(output: &str) -> GitError {
         && (o.contains("non-fast-forward") || o.contains("fetch first") || o.contains("stale info"))
     {
         GitError::PushRejected
+    } else if o.contains("repository not found") || o.contains("returned error: 403") {
+        GitError::AccessDenied(output.trim().to_string())
     } else if o.contains("authentication failed")
         || o.contains("could not read username")
         || o.contains("terminal prompts disabled")
         || o.contains("permission denied (publickey")
-        || o.contains("returned error: 403")
         || o.contains("returned error: 401")
     {
         GitError::Auth(output.trim().to_string())
@@ -77,6 +78,26 @@ pub fn classify_net_failure(output: &str) -> GitError {
         GitError::Network(output.trim().to_string())
     } else {
         GitError::Other(output.trim().to_string())
+    }
+}
+
+/// Run with RetroGit's token; if the server refuses it (e.g. the organization restricts the
+/// OAuth App), try once more with the user's own git credentials (Keychain, credential
+/// manager), like `git` in a terminal. If that fails too, the first error is returned.
+pub fn retry_without_token<T>(
+    auth: &NetAuth,
+    mut run: impl FnMut(&NetAuth) -> Result<T, GitError>,
+) -> Result<T, GitError> {
+    match run(auth) {
+        Err(GitError::AccessDenied(first)) if auth.github_token.is_some() => {
+            match run(&NetAuth::default()) {
+                Err(GitError::AccessDenied(_) | GitError::Auth(_)) => {
+                    Err(GitError::AccessDenied(first))
+                }
+                other => other,
+            }
+        }
+        other => other,
     }
 }
 
@@ -206,16 +227,11 @@ impl Repo {
     pub fn fetch(
         &self,
         auth: &NetAuth,
-        progress: impl FnMut(NetProgress),
+        mut progress: impl FnMut(NetProgress),
         cancel: &AtomicBool,
     ) -> Result<(), GitError> {
-        self.run_net(
-            auth,
-            &["fetch", "--prune", "--progress", "origin"],
-            progress,
-            cancel,
-        )
-        .map(|_| ())
+        let args = ["fetch", "--prune", "--progress", "origin"];
+        retry_without_token(auth, |a| self.run_net(a, &args, &mut progress, cancel)).map(|_| ())
     }
 
     /// Fetch, then integrate the upstream according to `mode`.
@@ -269,7 +285,7 @@ impl Repo {
         &self,
         auth: &NetAuth,
         mode: PushMode,
-        progress: impl FnMut(NetProgress),
+        mut progress: impl FnMut(NetProgress),
         cancel: &AtomicBool,
     ) -> Result<(), GitError> {
         let branch = self
@@ -281,7 +297,7 @@ impl Repo {
                 vec!["push", "--progress", "-u", "origin", branch.name.as_str()]
             }
         };
-        self.run_net(auth, &args, progress, cancel).map(|_| ())
+        retry_without_token(auth, |a| self.run_net(a, &args, &mut progress, cancel)).map(|_| ())
     }
 }
 
@@ -293,7 +309,7 @@ impl Repo {
         &self,
         auth: &NetAuth,
         expected: &str,
-        progress: impl FnMut(NetProgress),
+        mut progress: impl FnMut(NetProgress),
         cancel: &AtomicBool,
     ) -> Result<(), GitError> {
         let branch = self
@@ -308,13 +324,14 @@ impl Repo {
             .unwrap_or(upstream);
         let lease = format!("--force-with-lease=refs/heads/{remote_branch}:{expected}");
         let refspec = format!("HEAD:refs/heads/{remote_branch}");
-        self.run_net(
-            auth,
-            &["push", "--progress", &lease, "origin", &refspec],
-            progress,
-            cancel,
-        )
-        .map(|_| ())
+        let args = [
+            "push",
+            "--progress",
+            lease.as_str(),
+            "origin",
+            refspec.as_str(),
+        ];
+        retry_without_token(auth, |a| self.run_net(a, &args, &mut progress, cancel)).map(|_| ())
     }
 }
 
@@ -367,6 +384,67 @@ mod tests {
         assert_eq!(parse_progress("From github.com:o/r"), None);
         assert_eq!(parse_progress("To github.com:o/r.git"), None);
         assert_eq!(parse_progress(""), None);
+    }
+
+    #[test]
+    fn repository_not_found_and_403_mean_access_denied() {
+        let nf = "remote: Repository not found.\nfatal: repository 'https://github.com/O/r.git/' not found";
+        assert!(matches!(
+            classify_net_failure(nf),
+            GitError::AccessDenied(_)
+        ));
+        let forbidden = "fatal: unable to access 'https://github.com/O/r.git/': The requested URL returned error: 403";
+        assert!(matches!(
+            classify_net_failure(forbidden),
+            GitError::AccessDenied(_)
+        ));
+    }
+
+    #[test]
+    fn a_refused_token_is_retried_once_with_the_users_git_credentials() {
+        let auth = NetAuth {
+            github_token: Some("gho_x".into()),
+        };
+        let mut calls = Vec::new();
+        let r = retry_without_token(&auth, |a| {
+            calls.push(a.github_token.is_some());
+            if a.github_token.is_some() {
+                Err(GitError::AccessDenied("not found".into()))
+            } else {
+                Ok(42)
+            }
+        });
+        assert_eq!(r, Ok(42));
+        assert_eq!(calls, vec![true, false]);
+    }
+
+    #[test]
+    fn if_the_retry_fails_too_the_first_error_is_kept() {
+        let auth = NetAuth {
+            github_token: Some("gho_x".into()),
+        };
+        let r: Result<(), _> = retry_without_token(&auth, |a| {
+            if a.github_token.is_some() {
+                Err(GitError::AccessDenied("org restricts the app".into()))
+            } else {
+                Err(GitError::Auth("could not read Username".into()))
+            }
+        });
+        assert_eq!(
+            r,
+            Err(GitError::AccessDenied("org restricts the app".into()))
+        );
+        // Without a token there is nothing to retry; other errors are not retried.
+        let mut n = 0;
+        let _: Result<(), _> = retry_without_token(&NetAuth::default(), |_| {
+            n += 1;
+            Err(GitError::AccessDenied("x".into()))
+        });
+        let _: Result<(), _> = retry_without_token(&auth, |_| {
+            n += 1;
+            Err(GitError::PushRejected)
+        });
+        assert_eq!(n, 2);
     }
 
     #[test]

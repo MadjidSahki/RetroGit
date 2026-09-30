@@ -188,6 +188,7 @@ pub const ERR_PUSH_REJECTED: &str =
     "The remote has changes you don't have. Pull first, then push again.";
 pub const ERR_STASH_CONFLICT: &str = "Re-applying your changes caused conflicts. Resolve them in the Changes tab; your changes are also kept in the stash.";
 pub const ERR_SIGNING_REQUIRES_GIT: &str = "Commit signing is enabled but git was not found: RetroGit will not create an unsigned commit. Install Git.";
+pub const ERR_ACCESS_DENIED: &str = "GitHub refused access to this repository with the RetroGit sign-in and with your own git credentials. If the organization restricts third-party OAuth apps, ask an owner to approve RetroGit (link below) or sign in with a personal access token (Advanced tab).";
 pub const ERR_GIT_MISSING: &str = "Install Git to use this feature.";
 pub const ERR_NET_AUTH_HELP: &str = "Git could not authenticate. For SSH remotes, add your key to ssh-agent (ssh-add). For HTTPS remotes outside github.com, configure a credential helper.";
 pub const INFO_CONFLICTS: &str = "There are conflicts. Resolve them in your editor, stage the files, then commit (or continue the rebase).";

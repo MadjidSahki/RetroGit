@@ -217,6 +217,9 @@ impl Worker {
             if matches!(e, GitError::Auth(_)) {
                 error.message = format!("{}\n\n{}", s::ERR_NET_AUTH_HELP, error.message);
             }
+            if matches!(e, GitError::AccessDenied(_)) {
+                error.link = Some(self.sso_settings_link());
+            }
             self.fail(Op::Sync, error);
         }
         self.emit(Event::SyncFinished { op, ok: false });

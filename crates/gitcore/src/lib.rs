@@ -30,6 +30,7 @@ pub use net::{
 pub use ops::Operation;
 pub use remote::{
     NetProgress, PullMode, PullOutcome, PushMode, classify_net_failure, parse_progress,
+    retry_without_token,
 };
 pub use signing::{SigningConfig, SigningFormat};
 

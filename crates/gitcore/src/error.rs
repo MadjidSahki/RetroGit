@@ -40,6 +40,10 @@ pub enum GitError {
     SigningRequiresGit,
     #[error("this feature needs the git command line")]
     GitMissing,
+    /// The server refused access ("Repository not found", HTTP 403): wrong account, missing
+    /// SSO authorization, or an organization blocking the OAuth App.
+    #[error("access denied: {0}")]
+    AccessDenied(String),
     #[error("{0}")]
     Other(String),
 }

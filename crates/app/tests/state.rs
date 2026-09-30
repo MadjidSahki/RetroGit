@@ -668,3 +668,12 @@ mod sync {
         }
     }
 }
+
+#[test]
+fn access_denied_explains_org_oauth_restrictions() {
+    let e = AppError::from_git(&gitcore::GitError::AccessDenied(
+        "remote: Repository not found.".into(),
+    ));
+    assert_eq!(e.message, retrogit::strings::ERR_ACCESS_DENIED);
+    assert_eq!(e.detail.as_deref(), Some("remote: Repository not found."));
+}
