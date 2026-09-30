@@ -172,6 +172,10 @@ impl Worker {
         ) -> Result<T, GitError>,
     ) -> Option<(Repo, Result<T, GitError>)> {
         let repo = self.open_current(Op::Sync)?;
+        // A Cancel pressed for an earlier operation must not kill this one (the automatic
+        // fetch at open is started here, not through `WorkerHandle::send`).
+        self.cancel_net
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         self.emit(Event::SyncStarted { op, background });
         let auth = self.net_auth();
         let mut throttle = Throttle::new(Duration::from_millis(100));

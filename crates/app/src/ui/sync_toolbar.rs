@@ -91,6 +91,13 @@ pub fn toolbar(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             PushMode::Normal
         }));
     }
+    // The automatic fetch has no progress box: offer its Cancel here.
+    if cx.state.sync.running.is_some()
+        && cx.state.sync.background
+        && ui.add(Button95::new(s::CANCEL).min_size(size)).clicked()
+    {
+        cx.worker.cancel_network();
+    }
     if cx.state.current.is_none() {
         return;
     }

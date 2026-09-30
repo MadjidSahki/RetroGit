@@ -37,6 +37,9 @@ pub fn askpass_answer(prompt: &str, token: &str) -> String {
     }
 }
 
+/// SSH for network commands: never prompt, give up on unreachable hosts after 15 s.
+pub const SSH_COMMAND: &str = "ssh -o BatchMode=yes -o ConnectTimeout=15";
+
 /// Extra arguments (before the subcommand) and environment for a network command.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NetSettings {
@@ -53,10 +56,13 @@ pub fn net_settings(
 ) -> NetSettings {
     let mut s = NetSettings::default();
     s.env.push(("GIT_TERMINAL_PROMPT".into(), "0".into()));
+    // Give up on a stalled HTTP transfer (< 1 KB/s for 30 s) instead of waiting forever.
+    s.env
+        .push(("GIT_HTTP_LOW_SPEED_LIMIT".into(), "1000".into()));
+    s.env.push(("GIT_HTTP_LOW_SPEED_TIME".into(), "30".into()));
     if !ssh_configured {
         // Fail fast instead of waiting for a passphrase nobody can type.
-        s.env
-            .push(("GIT_SSH_COMMAND".into(), "ssh -o BatchMode=yes".into()));
+        s.env.push(("GIT_SSH_COMMAND".into(), SSH_COMMAND.into()));
     }
     if let (true, Some(token), Some(program)) = (
         url.starts_with("https://github.com/"),
@@ -121,7 +127,11 @@ mod tests {
             );
             assert!(
                 s.env
-                    .contains(&("GIT_SSH_COMMAND".into(), "ssh -o BatchMode=yes".into()))
+                    .contains(&("GIT_SSH_COMMAND".into(), SSH_COMMAND.into()))
+            );
+            assert!(
+                s.env
+                    .contains(&("GIT_HTTP_LOW_SPEED_TIME".into(), "30".into()))
             );
         }
     }

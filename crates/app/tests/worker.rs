@@ -791,4 +791,24 @@ mod sync {
             "keep me\n"
         );
     }
+
+    #[test]
+    fn an_old_cancel_does_not_kill_the_next_automatic_fetch() {
+        let Some((_tmp, work)) = remote_env() else {
+            return;
+        };
+        let server = mockito::Server::new();
+        let w = start(&server, Arc::new(MemoryStore::default()), "");
+        w.cancel_network(); // e.g. the user cancelled a push earlier
+        w.send(Command::OpenRepo(work.clone()));
+        until(&w, |e| {
+            matches!(
+                e,
+                Event::SyncFinished {
+                    op: SyncOp::Fetch,
+                    ok: true
+                }
+            )
+        });
+    }
 }
