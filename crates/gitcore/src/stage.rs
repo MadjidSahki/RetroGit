@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::diff::{FileDiff, LineKind, Side};
+use crate::status::Change;
 use crate::{GitError, Repo};
 
 /// What to stage or unstage in one file.
@@ -153,6 +154,20 @@ impl Repo {
             };
         }
 
+        // Whole-file only: conflicts (a partial stage would "resolve" them with made-up
+        // content) and renames (unstaging part of the new path would split the rename).
+        if let Some(file) = self.status()?.into_iter().find(|f| f.path == path) {
+            if file.unstaged == Some(Change::Conflicted) {
+                return Err(GitError::Unsupported("resolve conflicts first".into()));
+            }
+            if matches!(file.staged, Some(Change::Renamed { .. }))
+                && direction == Direction::Unstage
+            {
+                return Err(GitError::Unsupported(
+                    "renamed files can only be unstaged as a whole".into(),
+                ));
+            }
+        }
         let side = match direction {
             Direction::Stage => Side::Unstaged,
             Direction::Unstage => Side::Staged,

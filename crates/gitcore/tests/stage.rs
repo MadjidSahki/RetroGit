@@ -379,3 +379,68 @@ fn partial_staging_keeps_non_utf8_bytes() {
     let e = idx.get_path(Path::new("f.txt"), 0).unwrap();
     assert_eq!(repo.find_blob(e.id).unwrap().content(), b"a\ncaf\xE9\n");
 }
+
+#[test]
+fn partial_unstage_of_a_staged_rename_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let repo = common::make_repo(d.path(), 1);
+    std::fs::rename(d.path().join("file0.txt"), d.path().join("moved.txt")).unwrap();
+    let r = Repo::open(d.path()).unwrap();
+    r.stage("file0.txt", &Selection::All, None).unwrap();
+    r.stage("moved.txt", &Selection::All, None).unwrap();
+    let before = r.status().unwrap();
+    assert!(matches!(
+        before[0].staged,
+        Some(gitcore::Change::Renamed { .. })
+    ));
+    let err = r
+        .unstage("moved.txt", &Selection::Hunks(vec![0]), None)
+        .err();
+    assert!(matches!(err, Some(GitError::Unsupported(_))), "{err:?}");
+    assert_eq!(r.status().unwrap(), before);
+    drop(repo);
+}
+
+#[test]
+fn partial_stage_of_a_conflicted_file_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let repo = common::make_repo(d.path(), 1);
+    std::fs::write(d.path().join("c.txt"), "base\n").unwrap();
+    commit_all(&repo, "base");
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("other", &base, false).unwrap();
+    std::fs::write(d.path().join("c.txt"), "ours\n").unwrap();
+    commit_all(&repo, "ours");
+    repo.set_head("refs/heads/other").unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    std::fs::write(d.path().join("c.txt"), "theirs\n").unwrap();
+    commit_all(&repo, "theirs");
+    repo.set_head("refs/heads/main").unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    let theirs = repo
+        .find_branch("other", git2::BranchType::Local)
+        .unwrap()
+        .get()
+        .peel_to_commit()
+        .unwrap();
+    let annotated = repo.find_annotated_commit(theirs.id()).unwrap();
+    repo.merge(&[&annotated], None, None).unwrap();
+    let r = Repo::open(d.path()).unwrap();
+    assert!(
+        r.status()
+            .unwrap()
+            .iter()
+            .any(|f| f.unstaged == Some(gitcore::Change::Conflicted))
+    );
+    let err = r.stage("c.txt", &Selection::Hunks(vec![0]), None).err();
+    assert!(matches!(err, Some(GitError::Unsupported(_))), "{err:?}");
+    assert!(
+        git2::Repository::open(d.path())
+            .unwrap()
+            .index()
+            .unwrap()
+            .has_conflicts()
+    );
+}

@@ -69,10 +69,19 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             .files
             .iter()
             .any(|f| f.path == path && f.unstaged == Some(Change::Conflicted));
+        // A staged rename can only be unstaged as a whole (both paths together).
+        let whole_only = side == Side::Staged
+            && c.files
+                .iter()
+                .any(|f| f.path == path && matches!(f.staged, Some(Change::Renamed { .. })));
         ui.horizontal(|ui| {
             ui.label(RichText::new(format!("{path} {side_label}")).strong());
             let has_lines = !c.selected_lines.is_empty();
-            if !conflicted
+            if whole_only {
+                if ui.add(Button95::new(verb_file)).clicked() {
+                    action = Some(Action::File);
+                }
+            } else if !conflicted
                 && ui
                     .add(
                         Button95::new(verb_lines)
@@ -90,7 +99,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             return;
         }
         let Some(diff) = c.diff.as_ref() else { return };
-        if diff.binary {
+        if diff.binary && !whole_only {
             ui.label(s::BINARY_FILE);
             if ui.add(Button95::new(verb_file)).clicked() {
                 action = Some(Action::File);
@@ -128,12 +137,13 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                                             .font(mono.clone())
                                             .color(win95::theme::NAVY),
                                     );
-                                    if ui
-                                        .add(
-                                            Button95::new(verb_hunk)
-                                                .min_size(egui::vec2(90.0, 16.0)),
-                                        )
-                                        .clicked()
+                                    if !whole_only
+                                        && ui
+                                            .add(
+                                                Button95::new(verb_hunk)
+                                                    .min_size(egui::vec2(90.0, 16.0)),
+                                            )
+                                            .clicked()
                                     {
                                         action = Some(Action::Hunk(h));
                                     }
@@ -151,7 +161,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                                 ui.set_min_width(ui.available_width());
                                 ui.horizontal(|ui| {
                                     ui.set_height(ROW_HEIGHT);
-                                    if line.kind == LineKind::Context {
+                                    if line.kind == LineKind::Context || whole_only {
                                         ui.add_space(13.0);
                                     } else {
                                         let mut on = c.selected_lines.contains(&(h, l));
@@ -207,19 +217,30 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         Some(Action::Hunk(h)) => Selection::Hunks(vec![h]),
         Some(Action::File) => Selection::All,
     };
-    let cmd = match side {
-        Side::Unstaged => Command::Stage {
-            path,
-            selection,
-            shown,
-        },
-        Side::Staged => Command::Unstage {
-            path,
-            selection,
-            shown,
-        },
+    // Whole-file actions touch both paths of a rename.
+    let paths = match (
+        &selection,
+        cx.state.changes.files.iter().find(|f| f.path == path),
+    ) {
+        (Selection::All, Some(file)) => super::changes::paths_of(file, side),
+        _ => vec![path],
     };
-    cx.worker.send(cmd);
+    for path in paths {
+        let (selection, shown) = (selection.clone(), shown.clone());
+        let cmd = match side {
+            Side::Unstaged => Command::Stage {
+                path,
+                selection,
+                shown,
+            },
+            Side::Staged => Command::Unstage {
+                path,
+                selection,
+                shown,
+            },
+        };
+        cx.worker.send(cmd);
+    }
 }
 
 #[cfg(test)]
