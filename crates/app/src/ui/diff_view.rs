@@ -72,6 +72,11 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             .files
             .iter()
             .any(|f| f.path == path && f.unstaged == Some(Change::Conflicted));
+        // Untracked files can only be discarded as a whole (to the trash).
+        let untracked = c
+            .files
+            .iter()
+            .any(|f| f.path == path && f.unstaged == Some(Change::Untracked));
         // A staged rename can only be unstaged as a whole (both paths together).
         let whole_only = side == Side::Staged
             && c.files
@@ -97,6 +102,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             }
             if side == Side::Unstaged
                 && !conflicted
+                && !untracked
                 && ui
                     .add(
                         Button95::new(s::DISCARD_LINES)
@@ -168,6 +174,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                                         action = Some(Action::Hunk(h));
                                     }
                                     if side == Side::Unstaged
+                                        && !untracked
                                         && ui
                                             .add(
                                                 Button95::new(s::DISCARD_HUNK)

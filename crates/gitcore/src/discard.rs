@@ -21,9 +21,19 @@ impl Repo {
         }
         let rel = Path::new(path);
         let file = self.workdir()?.join(rel);
-        if file.symlink_metadata().is_err() {
+        let meta = file.symlink_metadata().map_err(|_| {
+            GitError::Unsupported("deleted files can only be restored as a whole".into())
+        })?;
+        if meta.file_type().is_symlink() {
             return Err(GitError::Unsupported(
-                "deleted files can only be restored as a whole".into(),
+                "symbolic links can only be discarded as a whole".into(),
+            ));
+        }
+        let index = self.git().index().map_err(|e| GitError::from_git2(&e))?;
+        if index.get_path(rel, 0).is_none() {
+            // Partial discard would delete lines for good; whole-file discard uses the trash.
+            return Err(GitError::Unsupported(
+                "untracked files can only be discarded as a whole".into(),
             ));
         }
         if let Some(f) = self.status()?.into_iter().find(|f| f.path == path)
@@ -79,7 +89,8 @@ impl Repo {
         if !untracked.is_empty() {
             let dir = self.workdir()?;
             let files: Vec<_> = untracked.iter().map(|p| dir.join(p)).collect();
-            trash::delete_all(&files)
+            trash_context()
+                .delete_all(&files)
                 .map_err(|e| GitError::Other(format!("cannot move to the trash: {e}")))?;
         }
         if tracked.is_empty() {
@@ -88,9 +99,15 @@ impl Repo {
         if crate::git_available() {
             return self.git_on_paths(&["checkout"], &tracked);
         }
+        self.discard_files_git2(&tracked)
+    }
+
+    /// libgit2-only restore of tracked files (used when `git` is missing).
+    pub fn discard_files_git2(&self, paths: &[&str]) -> Result<(), GitError> {
         let mut opts = git2::build::CheckoutBuilder::new();
-        opts.force();
-        for p in &tracked {
+        // Literal paths: "[id].tsx" must not match (and overwrite) "i.tsx".
+        opts.force().disable_pathspec_match(true);
+        for p in paths {
             opts.path(p);
         }
         self.git()
@@ -99,7 +116,21 @@ impl Repo {
     }
 }
 
+/// OS trash. On macOS, use NSFileManager rather than the default Finder/AppleScript
+/// method (which asks for Automation permission and plays a sound per call).
+fn trash_context() -> trash::TrashContext {
+    #[allow(unused_mut)]
+    let mut ctx = trash::TrashContext::default();
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        ctx.set_delete_method(DeleteMethod::NsFileManager);
+    }
+    ctx
+}
+
 /// Replace `file` with `content` via a temporary file, keeping its permissions.
+/// The temporary file never survives a failure.
 fn write_atomically(file: &Path, content: &[u8]) -> std::io::Result<()> {
     let perms = std::fs::metadata(file)?.permissions();
     let name = file
@@ -107,7 +138,18 @@ fn write_atomically(file: &Path, content: &[u8]) -> std::io::Result<()> {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let tmp = file.with_file_name(format!(".{name}.retrogit-tmp"));
-    std::fs::write(&tmp, content)?;
-    std::fs::set_permissions(&tmp, perms)?;
-    std::fs::rename(&tmp, file)
+    let result = (|| {
+        std::fs::write(&tmp, content)?;
+        // Copying a read-only flag would make the rename fail on Windows: the executable
+        // bit only matters on Unix.
+        #[cfg(unix)]
+        std::fs::set_permissions(&tmp, perms.clone())?;
+        std::fs::rename(&tmp, file)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    #[cfg(not(unix))]
+    let _ = perms;
+    result
 }

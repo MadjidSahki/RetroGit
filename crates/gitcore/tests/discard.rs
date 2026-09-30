@@ -164,3 +164,59 @@ fn stale_or_unsupported_discards_write_nothing() {
         Err(GitError::Unsupported(_))
     ));
 }
+
+#[test]
+fn partial_discard_of_an_untracked_file_is_refused_and_keeps_it() {
+    let (d, r) = setup(b"a\n", b"a\n");
+    std::fs::write(d.path().join("notes.txt"), b"one\ntwo\n").unwrap();
+    let err = r
+        .discard("notes.txt", &Selection::Hunks(vec![0]), None)
+        .err();
+    assert!(matches!(err, Some(GitError::Unsupported(_))), "{err:?}");
+    assert_eq!(read(d.path(), "notes.txt"), b"one\ntwo\n");
+}
+
+#[test]
+fn libgit2_discard_treats_paths_literally() {
+    let d = tempfile::tempdir().unwrap();
+    let repo = common::make_repo(d.path(), 1);
+    for name in ["[id].tsx", "i.tsx"] {
+        std::fs::write(d.path().join(name), b"v1\n").unwrap();
+    }
+    let mut idx = repo.index().unwrap();
+    idx.add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    idx.write().unwrap();
+    for name in ["[id].tsx", "i.tsx"] {
+        std::fs::write(d.path().join(name), b"v2\n").unwrap();
+    }
+    let r = Repo::open(d.path()).unwrap();
+    r.discard_files_git2(&["[id].tsx"]).unwrap();
+    assert_eq!(read(d.path(), "[id].tsx"), b"v1\n");
+    assert_eq!(
+        read(d.path(), "i.tsx"),
+        b"v2\n",
+        "a glob must not match other files"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn partial_discard_of_a_symlink_is_refused() {
+    let (d, r) = setup(b"target line\n", b"target line\n");
+    let repo = git2::Repository::open(d.path()).unwrap();
+    std::os::unix::fs::symlink("f.txt", d.path().join("link")).unwrap();
+    let mut idx = repo.index().unwrap();
+    idx.add_path(Path::new("link")).unwrap();
+    idx.write().unwrap();
+    std::fs::remove_file(d.path().join("link")).unwrap();
+    std::os::unix::fs::symlink("elsewhere.txt", d.path().join("link")).unwrap();
+    let err = r.discard("link", &Selection::Hunks(vec![0]), None).err();
+    assert!(matches!(err, Some(GitError::Unsupported(_))), "{err:?}");
+    assert!(
+        std::fs::symlink_metadata(d.path().join("link"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+}
