@@ -1,10 +1,11 @@
 name: CI
 
-# Every push to main is tested on macOS and Windows and, if everything passes, published
-# as a new GitHub Release (v<major>.<minor from Cargo.toml>.<run number>).
+# Every push (any branch) is built and tested on macOS and Windows.
+# Only pushes to main (i.e. merged pull requests: main is protected) publish a new
+# GitHub Release v<major>.<minor from Cargo.toml>.<run number>.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
 
 concurrency:
   group: release-${{ github.ref }}
@@ -18,13 +19,16 @@ jobs:
       matrix:
         include:
           - os: macos-14
+            name: macOS
             target: aarch64-apple-darwin
             bin: retrogit
             asset: RetroGit-macos-arm64.zip
           - os: windows-latest
+            name: Windows
             target: x86_64-pc-windows-msvc
             bin: retrogit.exe
             asset: RetroGit-windows-x64.zip
+    name: build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +60,7 @@ jobs:
 
   release:
     needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write

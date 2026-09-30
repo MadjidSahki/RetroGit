@@ -402,6 +402,8 @@ fn repo_for_changes() -> tempfile::TempDir {
     let mut cfg = repo.config().unwrap();
     cfg.set_str("user.name", "Ada").unwrap();
     cfg.set_str("user.email", "ada@example.com").unwrap();
+    // Independent of the machine's global config (Windows runners use autocrlf=true).
+    cfg.set_str("core.autocrlf", "false").unwrap();
     d
 }
 
@@ -623,6 +625,7 @@ mod sync {
             ("user.email", "ada@example.com"),
             ("commit.gpgsign", "false"),
             ("core.hooksPath", ".git/hooks"),
+            ("core.autocrlf", "false"),
         ] {
             git(dir, &["config", k, v]);
         }
@@ -640,6 +643,8 @@ mod sync {
         git(
             &root,
             &[
+                "-c",
+                "core.autocrlf=false",
                 "clone",
                 "-q",
                 "--bare",
@@ -647,7 +652,17 @@ mod sync {
                 "origin.git",
             ],
         );
-        git(&root, &["clone", "-q", "origin.git", "work"]);
+        git(
+            &root,
+            &[
+                "-c",
+                "core.autocrlf=false",
+                "clone",
+                "-q",
+                "origin.git",
+                "work",
+            ],
+        );
         let work = root.join("work");
         configure(&work);
         Some((tmp, work))
@@ -658,7 +673,14 @@ mod sync {
         let other = root.join(format!("other-{file}"));
         git(
             root,
-            &["clone", "-q", "origin.git", other.to_str().unwrap()],
+            &[
+                "-c",
+                "core.autocrlf=false",
+                "clone",
+                "-q",
+                "origin.git",
+                other.to_str().unwrap(),
+            ],
         );
         configure(&other);
         std::fs::write(other.join(file), "remote\n").unwrap();

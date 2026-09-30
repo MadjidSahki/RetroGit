@@ -59,6 +59,8 @@ impl Env {
         git(
             &root,
             &[
+                "-c",
+                "core.autocrlf=false",
                 "clone",
                 "-q",
                 "--bare",
@@ -67,7 +69,17 @@ impl Env {
             ],
         );
         let work = root.join("work");
-        git(&root, &["clone", "-q", "origin.git", "work"]);
+        git(
+            &root,
+            &[
+                "-c",
+                "core.autocrlf=false",
+                "clone",
+                "-q",
+                "origin.git",
+                "work",
+            ],
+        );
         configure(&work);
         Some(Env {
             _tmp: tmp,
@@ -85,7 +97,14 @@ impl Env {
         let other = self.root.join(format!("other-{file}"));
         git(
             &self.root,
-            &["clone", "-q", "origin.git", other.to_str().unwrap()],
+            &[
+                "-c",
+                "core.autocrlf=false",
+                "clone",
+                "-q",
+                "origin.git",
+                other.to_str().unwrap(),
+            ],
         );
         configure(&other);
         std::fs::write(other.join(file), content).unwrap();
