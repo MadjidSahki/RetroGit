@@ -114,18 +114,55 @@ pub fn colored_line(
         ..Default::default()
     };
     job.append(prefix, 0.0, fmt(win95::theme::BLACK));
+    // Tab stops are counted from the start of the code, after the line-number prefix.
+    let mut col = 0;
     match spans {
         Some(spans) => {
             for span in spans {
-                job.append(&span.text, 0.0, fmt(span.color));
+                let (t, next) = expand_tabs_from(&span.text, col);
+                col = next;
+                job.append(&t, 0.0, fmt(span.color));
             }
         }
-        None => job.append(text, 0.0, fmt(win95::theme::BLACK)),
+        None => job.append(&expand_tabs(text), 0.0, fmt(win95::theme::BLACK)),
     }
+    let _ = col;
     if !suffix.is_empty() {
         job.append(suffix, 0.0, fmt(win95::theme::GRAY));
     }
     job
+}
+
+/// Replace tabs by spaces up to the next multiple of 4 (egui draws a tab as a single
+/// small gap, which breaks indentation in a fixed-width view).
+pub fn expand_tabs(text: &str) -> String {
+    expand_tabs_from(text, 0).0
+}
+
+/// Like `expand_tabs`, starting at column `col`; returns the text and the column after it.
+fn expand_tabs_from(text: &str, mut col: usize) -> (String, usize) {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c == '\t' {
+            let n = 4 - col % 4;
+            out.extend(std::iter::repeat_n(' ', n));
+            col += n;
+        } else {
+            out.push(c);
+            col += 1;
+        }
+    }
+    (out, col)
+}
+
+/// One full-width diff row, text left-aligned (never centered), no wrapping.
+pub fn diff_row(ui: &mut egui::Ui, job: egui::text::LayoutJob, height: f32) -> egui::Response {
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let width = ui.available_width().max(galley.size().x);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let pos = egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.0);
+    ui.painter().galley(pos, galley, win95::theme::BLACK);
+    resp
 }
 
 /// Colors for one line of a diff, if highlighting succeeded for that diff.
@@ -226,6 +263,64 @@ mod tests {
         assert_eq!(plain.text, "> raw");
         assert_eq!(line_spans(None, 0, 0), None);
         assert_eq!(line_spans(Some(&None), 0, 0), None);
+    }
+
+    #[test]
+    fn tabs_become_spaces_to_the_next_stop() {
+        assert_eq!(expand_tabs("\tlet x;"), "    let x;");
+        assert_eq!(expand_tabs("ab\tc"), "ab  c");
+        assert_eq!(expand_tabs("    four"), "    four");
+        let spans = [
+            Span {
+                text: "\tfn".into(),
+                color: Color32::RED,
+            },
+            Span {
+                text: "\tx".into(),
+                color: Color32::BLUE,
+            },
+        ];
+        let job = colored_line(
+            "",
+            "",
+            Some(&spans),
+            "",
+            egui::FontId::monospace(13.0),
+            Color32::WHITE,
+        );
+        assert_eq!(job.text, "    fn  x", "tab stops continue across spans");
+    }
+
+    #[test]
+    fn diff_rows_are_left_aligned_and_keep_indentation() {
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let font = egui::FontId::monospace(13.0);
+            for text in ["x", "        indented"] {
+                let job = colored_line("", text, None, "", font.clone(), Color32::WHITE);
+                diff_row(ui, job, 17.0);
+            }
+        });
+        out.textures_delta.clear();
+        // Where the text was actually drawn.
+        let xs: Vec<f32> = out
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => Some(t.pos.x),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(xs.len(), 2, "{xs:?}");
+        assert!(
+            xs[0] < 20.0,
+            "rows must start at the left edge, text drawn at x={}",
+            xs[0]
+        );
+        assert_eq!(
+            xs[0], xs[1],
+            "every row starts at the same x; spaces carry the indentation"
+        );
     }
 
     #[test]

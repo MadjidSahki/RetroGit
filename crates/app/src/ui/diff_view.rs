@@ -230,14 +230,15 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                                     );
                                     let spans =
                                         crate::highlight::line_spans(c.diff_colors.as_ref(), h, l);
-                                    ui.label(crate::highlight::colored_line(
+                                    let job = crate::highlight::colored_line(
                                         &prefix,
                                         text,
                                         spans,
                                         eof,
                                         mono.clone(),
                                         egui::Color32::TRANSPARENT,
-                                    ));
+                                    );
+                                    crate::highlight::diff_row(ui, job, ROW_HEIGHT);
                                 });
                             });
                         }

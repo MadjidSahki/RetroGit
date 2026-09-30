@@ -329,15 +329,19 @@ fn commit_file_diff(ui: &mut egui::Ui, h: &crate::state::HistoryView) {
             for row in &rows[range] {
                 match *row {
                     super::diff_view::Row::Hunk(hi) => {
-                        ui.add_sized(
-                            [ui.available_width(), super::diff_view::ROW_HEIGHT],
-                            egui::Label::new(
-                                RichText::new(&diff.hunks[hi].header)
-                                    .font(mono.clone())
-                                    .color(win95::theme::NAVY),
-                            )
-                            .extend(),
+                        let header = crate::highlight::colored_line(
+                            "",
+                            &diff.hunks[hi].header,
+                            None,
+                            "",
+                            mono.clone(),
+                            Color32::TRANSPARENT,
                         );
+                        let mut header = header;
+                        for section in &mut header.sections {
+                            section.format.color = win95::theme::NAVY;
+                        }
+                        crate::highlight::diff_row(ui, header, super::diff_view::ROW_HEIGHT);
                     }
                     super::diff_view::Row::Line(hi, li) => {
                         let l = &diff.hunks[hi].lines[li];
@@ -361,10 +365,7 @@ fn commit_file_diff(ui: &mut egui::Ui, h: &crate::state::HistoryView) {
                             mono.clone(),
                             bg,
                         );
-                        ui.add_sized(
-                            [ui.available_width(), super::diff_view::ROW_HEIGHT],
-                            egui::Label::new(job).extend(),
-                        );
+                        crate::highlight::diff_row(ui, job, super::diff_view::ROW_HEIGHT);
                     }
                 }
             }
