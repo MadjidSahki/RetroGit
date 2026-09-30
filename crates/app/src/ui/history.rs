@@ -216,7 +216,7 @@ fn signature_text(s: Option<&SignatureStatus>) -> (String, Color32) {
     match s {
         None => (s::SIG_CHECKING.into(), win95::theme::GRAY),
         Some(SignatureStatus::Good { signer }) => (
-            format!("🔒 {} {signer}", s::SIG_GOOD),
+            format!("{} ({signer})", s::SIG_GOOD),
             Color32::from_rgb(0, 0x80, 0),
         ),
         Some(SignatureStatus::Bad) => (s::SIG_BAD.into(), Color32::from_rgb(0xC0, 0, 0)),

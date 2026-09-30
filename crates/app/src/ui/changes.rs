@@ -102,7 +102,7 @@ pub fn signing_label(cfg: Option<&gitcore::SigningConfig>) -> (String, egui::Col
                 .map(|k| format!(" key {k}"))
                 .unwrap_or_default();
             (
-                format!("🔒 {} {kind}{key}", s::SIGNED_WITH),
+                format!("{} {kind}{key}", s::SIGNED_WITH),
                 egui::Color32::from_rgb(0, 0x60, 0),
             )
         }
@@ -113,13 +113,13 @@ pub fn signing_label(cfg: Option<&gitcore::SigningConfig>) -> (String, egui::Col
     }
 }
 
-/// `[M]`, `[A]`, ... and the displayed path (`old → new` for renames).
+/// `[M]`, `[A]`, ... and the displayed path (`old -> new` for renames).
 pub fn describe(path: &str, change: &Change) -> String {
     let (code, shown) = match change {
         Change::Added => ("A", path.to_string()),
         Change::Modified => ("M", path.to_string()),
         Change::Deleted => ("D", path.to_string()),
-        Change::Renamed { from } => ("R", format!("{from} → {path}")),
+        Change::Renamed { from } => ("R", format!("{from} -> {path}")),
         Change::TypeChange => ("T", path.to_string()),
         Change::Untracked => ("?", path.to_string()),
         Change::Conflicted => ("!", path.to_string()),
@@ -428,7 +428,7 @@ mod tests {
                     from: "old.rs".into()
                 }
             ),
-            "[R] old.rs → new.rs"
+            "[R] old.rs -> new.rs"
         );
         assert_eq!(describe("x", &Change::Untracked), "[?] x");
     }
@@ -456,10 +456,7 @@ mod tests {
             format: gitcore::SigningFormat::Gpg,
             key: Some("ABCD1234".into()),
         };
-        assert_eq!(
-            signing_label(Some(&cfg)).0,
-            "🔒 Signed with GPG key ABCD1234"
-        );
+        assert_eq!(signing_label(Some(&cfg)).0, "Signed with GPG key ABCD1234");
         let off = gitcore::SigningConfig {
             enabled: false,
             ..cfg

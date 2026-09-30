@@ -216,7 +216,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                                     };
                                     let text = line.text.trim_end_matches(['\n', '\r']);
                                     let eof = if line.no_newline_at_eof {
-                                        "  ⏎̸"
+                                        "  \\ no newline at end of file"
                                     } else {
                                         ""
                                     };

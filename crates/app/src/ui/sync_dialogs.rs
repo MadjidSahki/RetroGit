@@ -43,7 +43,7 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
         ),
         PendingDialog::Diverged { ahead, behind } => {
             let q = format!(
-                "Your branch and its upstream have diverged (↑{ahead} ↓{behind}). How do you want to integrate the remote changes?"
+                "Your branch and its upstream have diverged ({ahead} local and {behind} remote commits). How do you want to integrate the remote changes?"
             );
             let buttons = vec![
                 (s::MERGE, Outcome::Send(Command::Pull(PullMode::Merge))),

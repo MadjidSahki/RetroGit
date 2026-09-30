@@ -36,14 +36,14 @@ pub fn sync_buttons(state: &AppState) -> SyncButtons {
         push: idle && has_origin && head.is_some() && (publish || ahead > 0),
         publish,
         pull_label: if behind > 0 {
-            format!("{} ↓{behind}", s::PULL)
+            format!("{} ({behind})", s::PULL)
         } else {
             s::PULL.to_string()
         },
         push_label: if publish {
             s::PUBLISH.to_string()
         } else if ahead > 0 {
-            format!("{} ↑{ahead}", s::PUSH)
+            format!("{} ({ahead})", s::PUSH)
         } else {
             s::PUSH.to_string()
         },
@@ -121,7 +121,7 @@ pub fn toolbar(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     combo_box(ui, "branch_picker", &head_name, 200.0, |ui| {
         for l in &locals {
             let label = if l.is_head {
-                format!("✓ {}", l.name)
+                format!("* {}", l.name)
             } else {
                 format!("   {}", l.name)
             };
@@ -272,7 +272,7 @@ mod tests {
         assert!(b.fetch && b.pull && b.push && !b.publish);
         assert_eq!(
             (b.pull_label.as_str(), b.push_label.as_str()),
-            ("Pull ↓3", "Push ↑2")
+            ("Pull (3)", "Push (2)")
         );
 
         let s = state_with(vec![branch("main", false, true, Some("origin/main"), 0, 0)]);

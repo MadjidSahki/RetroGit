@@ -275,7 +275,9 @@ impl AppError {
             ),
             GitError::Diverged { ahead, behind } => AppError::new(
                 Severity::Info,
-                &format!("Your branch and its upstream have diverged (↑{ahead} ↓{behind})."),
+                &format!(
+                    "Your branch and its upstream have diverged ({ahead} local and {behind} remote commits)."
+                ),
             ),
             GitError::PushRejected => AppError::new(Severity::Warning, s::ERR_PUSH_REJECTED),
             GitError::StashConflict => AppError::new(Severity::Warning, s::ERR_STASH_CONFLICT),
