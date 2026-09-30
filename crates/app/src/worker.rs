@@ -1,6 +1,7 @@
 //! The single background thread doing all network and Git work.
 
 mod changes;
+mod sync;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
@@ -31,6 +32,7 @@ pub struct WorkerHandle {
     cancel_clone: Arc<AtomicBool>,
     busy: Arc<AtomicBool>,
     refresh_pending: Arc<AtomicBool>,
+    cancel_net: Arc<AtomicBool>,
 }
 
 impl WorkerHandle {
@@ -38,6 +40,9 @@ impl WorkerHandle {
         match cmd {
             Command::StartDeviceFlow => self.cancel_flow.store(false, Ordering::SeqCst),
             Command::Clone { .. } => self.cancel_clone.store(false, Ordering::SeqCst),
+            Command::Fetch { .. } | Command::Pull(_) | Command::Push(_) => {
+                self.cancel_net.store(false, Ordering::SeqCst)
+            }
             // At most one refresh waiting in the queue.
             Command::RefreshStatus if self.refresh_pending.swap(true, Ordering::SeqCst) => return,
             _ => {}
@@ -66,12 +71,18 @@ impl WorkerHandle {
         self.cancel_clone.store(true, Ordering::SeqCst);
     }
 
+    /// Stop the running fetch / pull / push (kills the git process).
+    pub fn cancel_network(&self) {
+        self.cancel_net.store(true, Ordering::SeqCst);
+    }
+
     /// Cancel whatever is running and wait (up to `timeout`) for the worker to be idle,
     /// so a clone interrupted by quitting still removes its partial folder.
     /// Returns `true` if the worker became idle in time.
     pub fn shutdown(&self, timeout: Duration) -> bool {
         self.cancel_device_flow();
         self.cancel_clone();
+        self.cancel_network();
         let deadline = Instant::now() + timeout;
         while self.busy.load(Ordering::SeqCst) {
             if Instant::now() >= deadline {
@@ -114,7 +125,9 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
     let busy = Arc::new(AtomicBool::new(false));
     let worker_busy = busy.clone();
     let refresh_pending = Arc::new(AtomicBool::new(false));
+    let cancel_net = Arc::new(AtomicBool::new(false));
     let mut worker = Worker {
+        cancel_net: cancel_net.clone(),
         deps,
         token: None,
         repo: None,
@@ -157,6 +170,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
         cancel_clone,
         busy,
         refresh_pending,
+        cancel_net,
     }
 }
 
@@ -168,6 +182,7 @@ struct Worker {
     /// File whose diff the UI displays; its diff is re-sent after every change.
     shown: Option<(String, Side)>,
     refresh_pending: Arc<AtomicBool>,
+    cancel_net: Arc<AtomicBool>,
     cancel_flow: Arc<AtomicBool>,
     cancel_clone: Arc<AtomicBool>,
     emit: Box<dyn Fn(Event) + Send>,
@@ -221,6 +236,19 @@ impl Worker {
             Command::Commit { message, amend } => self.commit(&message, amend),
             Command::AddToGitignore(pattern) => self.add_to_gitignore(&pattern),
             Command::LoadAmendInfo => self.amend_info(),
+            Command::LoadLog { skip } => self.load_log(skip),
+            Command::LoadCommit(id) => self.load_commit(&id),
+            Command::LoadCommitFileDiff { id, path } => self.load_commit_file_diff(&id, &path),
+            Command::LoadBranches => self.load_branches(),
+            Command::CreateBranch { name, switch } => self.create_branch(&name, switch),
+            Command::SwitchBranch { name, stash } => self.switch_branch(&name, stash),
+            Command::RenameBranch { old, new } => self.rename_branch(&old, &new),
+            Command::DeleteBranch { name, force } => self.delete_branch(&name, force),
+            Command::Fetch { background } => self.fetch(background),
+            Command::Pull(mode) => self.pull(mode),
+            Command::Push(mode) => self.push(mode),
+            Command::AbortOperation => self.abort_operation(),
+            Command::ContinueRebase => self.continue_rebase(),
         }
     }
 

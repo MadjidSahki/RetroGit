@@ -1,5 +1,9 @@
 //! All UI state, updated by the pure `apply` function.
 
+mod sync;
+
+pub use sync::{HistoryView, LOG_PAGE, PendingDialog, SyncView, Tab, branch_name_error};
+
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
@@ -147,6 +151,17 @@ pub struct AppState {
     /// Message boxes waiting to be shown, oldest first.
     pub messages: VecDeque<AppError>,
     pub changes: ChangesView,
+    // --- Sub-project 3 ---
+    pub tab: Tab,
+    pub history: HistoryView,
+    pub branches: Vec<gitcore::Branch>,
+    pub sync: SyncView,
+    /// At most one sub-project 3 dialog at a time.
+    pub dialog: Option<PendingDialog>,
+    /// HEAD was amended after being pushed: a rejected push may offer force-with-lease.
+    pub amended_pushed: bool,
+    pub operation: Option<gitcore::Operation>,
+    pub signing: Option<gitcore::SigningConfig>,
 }
 
 impl AppState {
@@ -170,6 +185,14 @@ impl AppState {
             missing,
             messages: VecDeque::new(),
             changes: ChangesView::default(),
+            tab: Tab::default(),
+            history: HistoryView::default(),
+            branches: Vec::new(),
+            sync: SyncView::default(),
+            dialog: None,
+            amended_pushed: false,
+            operation: None,
+            signing: None,
         }
     }
 
@@ -258,6 +281,9 @@ impl AppState {
                 }
             }
             Event::Committed(outcome) => {
+                if self.changes.amend && self.changes.head_pushed {
+                    self.amended_pushed = true;
+                }
                 let c = &mut self.changes;
                 c.committing = false;
                 c.summary.clear();
@@ -284,6 +310,21 @@ impl AppState {
                     c.description = description.trim().to_string();
                 }
             }
+            ev @ (Event::LogLoaded { .. }
+            | Event::CommitLoaded(_)
+            | Event::SignatureLoaded { .. }
+            | Event::CommitFileDiffLoaded { .. }
+            | Event::BranchesLoaded(_)
+            | Event::OperationChanged(_)
+            | Event::SigningLoaded(_)
+            | Event::SyncStarted { .. }
+            | Event::SyncProgress(_)
+            | Event::SyncFinished { .. }
+            | Event::Pulled(_)
+            | Event::Diverged { .. }
+            | Event::PushRejected
+            | Event::WouldOverwrite { .. }
+            | Event::NotMerged(_)) => self.apply_sync(ev),
             Event::Error { during, error } => {
                 self.on_error(during);
                 self.messages.push_back(error);
@@ -313,6 +354,11 @@ impl AppState {
                 }
             }
             Op::Changes => {}
+            Op::History => self.history.loading = false,
+            Op::Sync => {
+                self.sync.running = None;
+                self.sync.progress = None;
+            }
             Op::Commit => self.changes.committing = false,
             Op::Internal => {
                 self.repos_loading = false;
@@ -333,6 +379,13 @@ impl AppState {
                 warned_no_cli: warned,
                 ..ChangesView::default()
             };
+            self.history = HistoryView::default();
+            self.branches.clear();
+            self.sync = SyncView::default();
+            self.dialog = None;
+            self.amended_pushed = false;
+            self.operation = None;
+            self.signing = None;
         }
         self.current = Some(summary);
     }

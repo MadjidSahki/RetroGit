@@ -1,0 +1,230 @@
+//! State for sub-project 3: history, branches, network operations and their dialogs.
+
+use gitcore::{
+    CommitDetail, FileDiff, GraphRow, GraphState, LogEntry, NetProgress, PullOutcome,
+    SignatureStatus,
+};
+
+use super::AppState;
+use crate::protocol::{AppError, Event, Severity, SyncOp};
+use crate::strings as s;
+
+/// History page size.
+pub const LOG_PAGE: usize = 500;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Tab {
+    #[default]
+    Changes,
+    History,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistoryView {
+    pub entries: Vec<LogEntry>,
+    pub graph: Vec<GraphRow>,
+    pub graph_state: GraphState,
+    /// A page request is in flight.
+    pub loading: bool,
+    /// The last page was shorter than `LOG_PAGE`.
+    pub end_reached: bool,
+    pub selected: Option<String>,
+    pub detail: Option<CommitDetail>,
+    pub signature: Option<SignatureStatus>,
+    pub detail_file: Option<String>,
+    pub detail_diff: Option<FileDiff>,
+    /// Share of the height given to the commit list.
+    pub split: f32,
+}
+
+impl Default for HistoryView {
+    fn default() -> Self {
+        HistoryView {
+            entries: Vec::new(),
+            graph: Vec::new(),
+            graph_state: GraphState::default(),
+            loading: false,
+            end_reached: false,
+            selected: None,
+            detail: None,
+            signature: None,
+            detail_file: None,
+            detail_diff: None,
+            split: 0.55,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SyncView {
+    pub running: Option<SyncOp>,
+    /// Automatic fetch: no modal progress, errors only logged.
+    pub background: bool,
+    pub progress: Option<NetProgress>,
+    /// Status bar note after the last operation, e.g. "Pushed".
+    pub note: Option<String>,
+}
+
+/// Dialogs of sub-project 3 (the UI shows at most one).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingDialog {
+    NewBranch { name: String, switch: bool },
+    RenameBranch { old: String, name: String },
+    DeleteBranch { name: String },
+    DeleteNotMerged { name: String },
+    Diverged { ahead: usize, behind: usize },
+    PushRejected { can_force: bool },
+    ConfirmForcePush,
+    WouldOverwrite { branch: String, files: Vec<String> },
+}
+
+impl AppState {
+    pub(super) fn apply_sync(&mut self, event: Event) {
+        match event {
+            Event::LogLoaded { skip, entries } => {
+                let h = &mut self.history;
+                h.loading = false;
+                if skip == 0 {
+                    h.entries.clear();
+                    h.graph.clear();
+                    h.graph_state = GraphState::default();
+                } else if skip != h.entries.len() {
+                    return; // stale page (history was reloaded meanwhile)
+                }
+                h.end_reached = entries.len() < LOG_PAGE;
+                h.graph.extend(h.graph_state.layout_more(&entries));
+                h.entries.extend(entries);
+                if h.selected
+                    .as_ref()
+                    .is_some_and(|id| !h.entries.iter().any(|e| &e.id == id))
+                    && h.end_reached
+                {
+                    h.selected = None;
+                    h.detail = None;
+                }
+            }
+            Event::CommitLoaded(detail) => {
+                let h = &mut self.history;
+                if h.selected.as_deref() == Some(detail.id.as_str()) {
+                    h.detail = Some(detail);
+                    h.signature = None;
+                    h.detail_file = None;
+                    h.detail_diff = None;
+                }
+            }
+            Event::SignatureLoaded { id, status } => {
+                if self.history.selected.as_deref() == Some(id.as_str()) {
+                    self.history.signature = Some(status);
+                }
+            }
+            Event::CommitFileDiffLoaded { id, diff } => {
+                let h = &mut self.history;
+                if h.selected.as_deref() == Some(id.as_str())
+                    && h.detail_file.as_deref() == Some(diff.path.as_str())
+                {
+                    h.detail_diff = Some(diff);
+                }
+            }
+            Event::BranchesLoaded(branches) => self.branches = branches,
+            Event::OperationChanged(op) => self.operation = op,
+            Event::SigningLoaded(cfg) => self.signing = cfg,
+            Event::SyncStarted { op, background } => {
+                self.sync.running = Some(op);
+                self.sync.background = background;
+                self.sync.progress = None;
+            }
+            Event::SyncProgress(p) => self.sync.progress = Some(p),
+            Event::SyncFinished { op, ok } => {
+                self.sync.running = None;
+                self.sync.progress = None;
+                if ok {
+                    self.sync.note = Some(
+                        match op {
+                            SyncOp::Fetch => s::FETCHED,
+                            SyncOp::Pull => s::PULLED,
+                            SyncOp::Push => s::PUSHED,
+                        }
+                        .to_string(),
+                    );
+                    if op == SyncOp::Push {
+                        self.amended_pushed = false;
+                    }
+                }
+            }
+            Event::Pulled(outcome) => {
+                self.sync.note = Some(
+                    match outcome {
+                        PullOutcome::UpToDate => s::UP_TO_DATE,
+                        _ => s::PULLED,
+                    }
+                    .to_string(),
+                );
+                if outcome == PullOutcome::Conflicts {
+                    self.tab = Tab::Changes;
+                    self.messages
+                        .push_back(AppError::new(Severity::Info, s::INFO_CONFLICTS));
+                }
+            }
+            Event::Diverged { ahead, behind } => {
+                self.dialog = Some(PendingDialog::Diverged { ahead, behind })
+            }
+            Event::PushRejected => {
+                self.dialog = Some(PendingDialog::PushRejected {
+                    can_force: self.amended_pushed,
+                });
+            }
+            Event::WouldOverwrite { branch, files } => {
+                self.dialog = Some(PendingDialog::WouldOverwrite { branch, files });
+            }
+            Event::NotMerged(name) => self.dialog = Some(PendingDialog::DeleteNotMerged { name }),
+            _ => {}
+        }
+    }
+
+    /// Select a commit in the history (the UI then asks the worker for its detail).
+    pub fn select_commit(&mut self, id: &str) {
+        let h = &mut self.history;
+        if h.selected.as_deref() != Some(id) {
+            h.selected = Some(id.to_string());
+            h.detail = None;
+            h.signature = None;
+            h.detail_file = None;
+            h.detail_diff = None;
+        }
+    }
+
+    /// Whether the history list should ask for its next page.
+    pub fn wants_more_history(&self) -> bool {
+        !self.history.loading && !self.history.end_reached && !self.history.entries.is_empty()
+    }
+}
+
+/// Pure check of a new branch name against Git's rules (`git check-ref-format --branch`)
+/// and the existing local branches.
+pub fn branch_name_error(name: &str, existing: &[gitcore::Branch]) -> Option<String> {
+    let n = name.trim();
+    if n.is_empty() {
+        return Some("Enter a branch name.".into());
+    }
+    let bad_char = n
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || "~^:?*[\\".contains(c));
+    let bad = bad_char
+        || n.starts_with('-')
+        || n.starts_with('/')
+        || n.ends_with('/')
+        || n.ends_with('.')
+        || n.ends_with(".lock")
+        || n.contains("..")
+        || n.contains("//")
+        || n.contains("@{")
+        || n == "@"
+        || n.split('/').any(|part| part.starts_with('.'));
+    if bad {
+        return Some(format!("'{n}' is not a valid branch name."));
+    }
+    if existing.iter().any(|b| !b.remote && b.name == n) {
+        return Some(format!("A branch named '{n}' already exists."));
+    }
+    None
+}

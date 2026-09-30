@@ -102,6 +102,30 @@ impl log::Log for FileLogger {
     }
 }
 
+/// Log every panic (UI or worker thread) with its location, token-shaped text masked.
+pub fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let secrets = SECRETS.lock().map(|s| s.clone()).unwrap_or_default();
+        log::error!("panic: {}", redact(&panic_text(info), &secrets));
+        previous(info);
+    }));
+}
+
+/// `message at file:line` for a panic.
+pub fn panic_text(info: &std::panic::PanicHookInfo<'_>) -> String {
+    let payload = info.payload();
+    let message = payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "(non-text panic)".into());
+    match info.location() {
+        Some(l) => format!("{message} at {}:{}", l.file(), l.line()),
+        None => message,
+    }
+}
+
 /// Install the file logger. Failing to open the log is not fatal.
 pub fn init(path: &Path) {
     let Ok(file) = open_log_file(path, MAX_LOG_BYTES) else {

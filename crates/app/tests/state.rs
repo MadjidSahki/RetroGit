@@ -447,3 +447,238 @@ mod recents {
         assert_eq!(s.selected_recent(), None);
     }
 }
+
+mod sync {
+    use super::*;
+    use gitcore::{Branch, LogEntry, PullOutcome};
+    use retrogit::protocol::SyncOp;
+    use retrogit::state::{LOG_PAGE, PendingDialog, Tab, branch_name_error};
+
+    fn entry(id: &str, parents: &[&str]) -> LogEntry {
+        LogEntry {
+            id: id.into(),
+            short_id: id.into(),
+            parents: parents.iter().map(|p| p.to_string()).collect(),
+            author: "Ada".into(),
+            email: String::new(),
+            time: 0,
+            summary: id.into(),
+            refs: vec![],
+        }
+    }
+
+    #[test]
+    fn history_pages_append_and_stale_pages_are_ignored() {
+        let mut s = AppState::new(Config::default());
+        let page1: Vec<_> = (0..LOG_PAGE)
+            .map(|i| entry(&format!("c{i}"), &[&format!("c{}", i + 1)]))
+            .collect();
+        s.apply(Event::LogLoaded {
+            skip: 0,
+            entries: page1,
+        });
+        assert_eq!(s.history.entries.len(), LOG_PAGE);
+        assert_eq!(s.history.graph.len(), LOG_PAGE);
+        assert!(!s.history.end_reached && s.wants_more_history());
+        s.apply(Event::LogLoaded {
+            skip: 7,
+            entries: vec![entry("x", &[])],
+        });
+        assert_eq!(
+            s.history.entries.len(),
+            LOG_PAGE,
+            "a page for another offset is ignored"
+        );
+        s.apply(Event::LogLoaded {
+            skip: LOG_PAGE,
+            entries: vec![entry(&format!("c{LOG_PAGE}"), &[])],
+        });
+        assert_eq!(s.history.entries.len(), LOG_PAGE + 1);
+        assert!(s.history.end_reached && !s.wants_more_history());
+        s.apply(Event::LogLoaded {
+            skip: 0,
+            entries: vec![entry("new", &[])],
+        });
+        assert_eq!(s.history.entries.len(), 1, "a reload starts over");
+    }
+
+    #[test]
+    fn commit_detail_is_kept_only_for_the_selected_commit() {
+        let mut s = AppState::new(Config::default());
+        s.select_commit("aaa");
+        let detail = |id: &str| gitcore::CommitDetail {
+            id: id.into(),
+            short_id: id.into(),
+            parents: vec![],
+            author: String::new(),
+            email: String::new(),
+            time: 0,
+            committer: String::new(),
+            message: String::new(),
+            files: vec![],
+        };
+        s.apply(Event::CommitLoaded(detail("bbb")));
+        assert!(s.history.detail.is_none());
+        s.apply(Event::CommitLoaded(detail("aaa")));
+        assert!(s.history.detail.is_some());
+        s.apply(Event::SignatureLoaded {
+            id: "aaa".into(),
+            status: gitcore::SignatureStatus::Unsigned,
+        });
+        assert_eq!(
+            s.history.signature,
+            Some(gitcore::SignatureStatus::Unsigned)
+        );
+        s.select_commit("ccc");
+        assert!(s.history.detail.is_none() && s.history.signature.is_none());
+    }
+
+    #[test]
+    fn sync_lifecycle_and_dialogs() {
+        let mut s = AppState::new(Config::default());
+        s.apply(Event::SyncStarted {
+            op: SyncOp::Push,
+            background: false,
+        });
+        assert_eq!(s.sync.running, Some(SyncOp::Push));
+        s.apply(Event::SyncProgress(gitcore::NetProgress {
+            phase: "Writing objects".into(),
+            percent: Some(40),
+        }));
+        assert!(s.sync.progress.is_some());
+        s.apply(Event::SyncFinished {
+            op: SyncOp::Push,
+            ok: false,
+        });
+        s.apply(Event::PushRejected);
+        assert_eq!(s.sync.running, None);
+        assert_eq!(
+            s.dialog,
+            Some(PendingDialog::PushRejected { can_force: false })
+        );
+
+        s.changes.amend = true;
+        s.changes.head_pushed = true;
+        s.apply(Event::Committed(gitcore::CommitOutcome {
+            commit: gitcore::CommitInfo {
+                short_id: "a".into(),
+                summary: "s".into(),
+                author: "A".into(),
+                time: 0,
+            },
+            used_cli: true,
+        }));
+        s.apply(Event::PushRejected);
+        assert_eq!(
+            s.dialog,
+            Some(PendingDialog::PushRejected { can_force: true }),
+            "force offered after amending a pushed commit"
+        );
+        s.apply(Event::SyncFinished {
+            op: SyncOp::Push,
+            ok: true,
+        });
+        assert!(!s.amended_pushed);
+        assert_eq!(s.sync.note.as_deref(), Some("Pushed"));
+
+        s.apply(Event::Diverged {
+            ahead: 2,
+            behind: 3,
+        });
+        assert_eq!(
+            s.dialog,
+            Some(PendingDialog::Diverged {
+                ahead: 2,
+                behind: 3
+            })
+        );
+        s.apply(Event::WouldOverwrite {
+            branch: "b".into(),
+            files: vec!["f".into()],
+        });
+        assert!(matches!(
+            s.dialog,
+            Some(PendingDialog::WouldOverwrite { .. })
+        ));
+        s.apply(Event::NotMerged("old".into()));
+        assert_eq!(
+            s.dialog,
+            Some(PendingDialog::DeleteNotMerged { name: "old".into() })
+        );
+    }
+
+    #[test]
+    fn conflicts_after_pull_switch_to_changes_with_a_message() {
+        let mut s = AppState::new(Config::default());
+        s.tab = Tab::History;
+        s.apply(Event::Pulled(PullOutcome::Conflicts));
+        assert_eq!(s.tab, Tab::Changes);
+        assert_eq!(s.messages.len(), 1);
+        s.apply(Event::Pulled(PullOutcome::UpToDate));
+        assert_eq!(s.sync.note.as_deref(), Some("Already up to date"));
+    }
+
+    #[test]
+    fn a_sync_error_stops_the_progress() {
+        let mut s = AppState::new(Config::default());
+        s.apply(Event::SyncStarted {
+            op: SyncOp::Fetch,
+            background: true,
+        });
+        s.apply(Event::Error {
+            during: Op::Sync,
+            error: err(),
+        });
+        assert_eq!(s.sync.running, None);
+    }
+
+    #[test]
+    fn opening_another_repo_resets_history_branches_and_dialogs() {
+        let mut s = AppState::new(Config::default());
+        s.apply(Event::RepoOpened(summary("/tmp/a")));
+        s.apply(Event::LogLoaded {
+            skip: 0,
+            entries: vec![entry("x", &[])],
+        });
+        s.apply(Event::BranchesLoaded(vec![Branch {
+            name: "main".into(),
+            remote: false,
+            is_head: true,
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+        }]));
+        s.dialog = Some(PendingDialog::ConfirmForcePush);
+        s.apply(Event::RepoOpened(summary("/tmp/b")));
+        assert!(s.history.entries.is_empty() && s.branches.is_empty() && s.dialog.is_none());
+    }
+
+    #[test]
+    fn branch_names_follow_git_rules() {
+        let existing = vec![Branch {
+            name: "main".into(),
+            remote: false,
+            is_head: true,
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+        }];
+        for bad in [
+            "", " ", "a b", "-x", "x/", "x.lock", "a..b", "a~1", "a^", "a:b", "a?", "a*", "a[b",
+            "a\\b", "@", "x@{y", ".hidden", "a/.b", "a//b", "end.",
+        ] {
+            assert!(
+                branch_name_error(bad, &existing).is_some(),
+                "{bad:?} should be refused"
+            );
+        }
+        assert!(
+            branch_name_error("main", &existing)
+                .unwrap()
+                .contains("already exists")
+        );
+        for good in ["feature/login", "fix-42", "v1.2", "user/ada/test"] {
+            assert_eq!(branch_name_error(good, &existing), None, "{good:?}");
+        }
+    }
+}

@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 
 use gitcore::{
-    CloneProgress, CommitOutcome, FileDiff, FileStatus, GitError, RepoSummary, Selection, Side,
+    Branch, CloneProgress, CommitDetail, CommitOutcome, FileDiff, FileStatus, GitError, LogEntry,
+    NetProgress, Operation, PullMode, PullOutcome, PushMode, RepoSummary, Selection, Side,
+    SignatureStatus, SigningConfig,
 };
 use github::{DeviceFlowFailure, GithubError, RepoInfo, TokenStoreError, User};
 
@@ -56,6 +58,51 @@ pub enum Command {
     AddToGitignore(String),
     /// Reply: `Event::AmendInfo`.
     LoadAmendInfo,
+    // --- Sub-project 3 ---
+    /// Next page of history (`skip` = number of entries already loaded).
+    LoadLog {
+        skip: usize,
+    },
+    LoadCommit(String),
+    LoadCommitFileDiff {
+        id: String,
+        path: String,
+    },
+    LoadBranches,
+    CreateBranch {
+        name: String,
+        switch: bool,
+    },
+    /// Local branch, or `origin/x` (creates the tracking branch). `stash`: put local changes
+    /// aside, switch, then re-apply them.
+    SwitchBranch {
+        name: String,
+        stash: bool,
+    },
+    RenameBranch {
+        old: String,
+        new: String,
+    },
+    DeleteBranch {
+        name: String,
+        force: bool,
+    },
+    /// `background`: automatic fetch at open (errors are only logged).
+    Fetch {
+        background: bool,
+    },
+    Pull(PullMode),
+    Push(PushMode),
+    AbortOperation,
+    ContinueRebase,
+}
+
+/// Network operation shown in the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncOp {
+    Fetch,
+    Pull,
+    Push,
 }
 
 /// Which operation an error belongs to, so the state can reset the right thing.
@@ -68,6 +115,9 @@ pub enum Op {
     /// Status, diff, staging, .gitignore.
     Changes,
     Commit,
+    /// History, branches.
+    History,
+    Sync,
     Internal,
 }
 
@@ -95,6 +145,47 @@ pub enum Event {
         message: Option<String>,
         pushed: bool,
     },
+    /// A page of history; `skip` tells where it goes.
+    LogLoaded {
+        skip: usize,
+        entries: Vec<LogEntry>,
+    },
+    CommitLoaded(CommitDetail),
+    SignatureLoaded {
+        id: String,
+        status: SignatureStatus,
+    },
+    CommitFileDiffLoaded {
+        id: String,
+        diff: FileDiff,
+    },
+    BranchesLoaded(Vec<Branch>),
+    /// Merge/rebase in progress in the open repository.
+    OperationChanged(Option<Operation>),
+    SigningLoaded(Option<SigningConfig>),
+    SyncStarted {
+        op: SyncOp,
+        background: bool,
+    },
+    SyncProgress(NetProgress),
+    /// Network operation finished (successfully, or with an `Error` sent just before).
+    SyncFinished {
+        op: SyncOp,
+        ok: bool,
+    },
+    Pulled(PullOutcome),
+    /// Pull needs a decision: Merge or Rebase.
+    Diverged {
+        ahead: usize,
+        behind: usize,
+    },
+    PushRejected,
+    /// Switching is blocked by local changes to these files.
+    WouldOverwrite {
+        branch: String,
+        files: Vec<String>,
+    },
+    NotMerged(String),
     Error {
         during: Op,
         error: AppError,

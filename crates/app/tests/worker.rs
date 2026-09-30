@@ -598,3 +598,197 @@ fn discard_commands_revert_the_working_tree_and_refresh() {
         "hello\n"
     );
 }
+
+mod sync {
+    use super::*;
+    use retrogit::protocol::SyncOp;
+    use std::process::Command as Cmd;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Cmd::new("git")
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn configure(dir: &Path) {
+        for (k, v) in [
+            ("user.name", "Ada"),
+            ("user.email", "ada@example.com"),
+            ("commit.gpgsign", "false"),
+            ("core.hooksPath", ".git/hooks"),
+        ] {
+            git(dir, &["config", k, v]);
+        }
+    }
+
+    /// Bare remote + a clone tracking it; `None` when git is not installed.
+    fn remote_env() -> Option<(tempfile::TempDir, std::path::PathBuf)> {
+        if !gitcore::git_available() {
+            return None;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let seed = root.join("seed");
+        make_source_repo(&seed);
+        git(
+            &root,
+            &[
+                "clone",
+                "-q",
+                "--bare",
+                seed.to_str().unwrap(),
+                "origin.git",
+            ],
+        );
+        git(&root, &["clone", "-q", "origin.git", "work"]);
+        let work = root.join("work");
+        configure(&work);
+        Some((tmp, work))
+    }
+
+    fn push_from_other(work: &Path, file: &str) {
+        let root = work.parent().unwrap();
+        let other = root.join(format!("other-{file}"));
+        git(
+            root,
+            &["clone", "-q", "origin.git", other.to_str().unwrap()],
+        );
+        configure(&other);
+        std::fs::write(other.join(file), "remote\n").unwrap();
+        git(&other, &["add", file]);
+        git(&other, &["commit", "-q", "-m", "remote change"]);
+        git(&other, &["push", "-q"]);
+    }
+
+    #[test]
+    fn opening_a_repo_sends_branches_history_and_signing() {
+        let Some((_tmp, work)) = remote_env() else {
+            return;
+        };
+        let server = mockito::Server::new();
+        let w = start(&server, Arc::new(MemoryStore::default()), "");
+        w.send(Command::OpenRepo(work.clone()));
+        let evs = until(&w, |e| matches!(e, Event::LogLoaded { .. }));
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, Event::SigningLoaded(Some(_))))
+        );
+        assert!(evs.iter().any(|e| matches!(e, Event::BranchesLoaded(b) if b.iter().any(|b| b.name == "main" && b.is_head))));
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, Event::OperationChanged(None)))
+        );
+        let Some(Event::LogLoaded { skip: 0, entries }) = evs.last() else {
+            unreachable!()
+        };
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn diverged_pull_asks_then_rebase_succeeds() {
+        let Some((_tmp, work)) = remote_env() else {
+            return;
+        };
+        push_from_other(&work, "theirs.txt");
+        std::fs::write(work.join("mine.txt"), "mine\n").unwrap();
+        git(&work, &["add", "mine.txt"]);
+        git(&work, &["commit", "-q", "-m", "mine"]);
+        let server = mockito::Server::new();
+        let w = start(&server, Arc::new(MemoryStore::default()), "");
+        w.send(Command::OpenRepo(work.clone()));
+        until(&w, |e| {
+            matches!(
+                e,
+                Event::SyncFinished {
+                    op: SyncOp::Fetch,
+                    ..
+                }
+            )
+        });
+        w.send(Command::Pull(gitcore::PullMode::FastForwardOnly));
+        until(&w, |e| {
+            matches!(
+                e,
+                Event::Diverged {
+                    ahead: 1,
+                    behind: 1
+                }
+            )
+        });
+        w.send(Command::Pull(gitcore::PullMode::Rebase));
+        let evs = until(&w, |e| matches!(e, Event::Pulled(_)));
+        assert!(matches!(
+            evs.last(),
+            Some(Event::Pulled(gitcore::PullOutcome::Rebased))
+        ));
+        assert!(work.join("theirs.txt").exists());
+    }
+
+    #[test]
+    fn rejected_push_and_switch_with_stash() {
+        let Some((_tmp, work)) = remote_env() else {
+            return;
+        };
+        let server = mockito::Server::new();
+        let w = start(&server, Arc::new(MemoryStore::default()), "");
+        w.send(Command::OpenRepo(work.clone()));
+        until(&w, |e| {
+            matches!(
+                e,
+                Event::SyncFinished {
+                    op: SyncOp::Fetch,
+                    ..
+                }
+            )
+        });
+        push_from_other(&work, "theirs.txt");
+        std::fs::write(work.join("mine.txt"), "mine\n").unwrap();
+        git(&work, &["add", "mine.txt"]);
+        git(&work, &["commit", "-q", "-m", "mine"]);
+        w.send(Command::Push(gitcore::PushMode::Normal));
+        until(&w, |e| matches!(e, Event::PushRejected));
+
+        w.send(Command::CreateBranch {
+            name: "side".into(),
+            switch: false,
+        });
+        until(
+            &w,
+            |e| matches!(e, Event::BranchesLoaded(b) if b.iter().any(|b| b.name == "side")),
+        );
+        git(&work, &["switch", "-q", "side"]);
+        std::fs::write(work.join("README.md"), "on side\n").unwrap();
+        git(&work, &["commit", "-q", "-am", "side edit"]);
+        git(&work, &["switch", "-q", "main"]);
+        std::fs::write(work.join("README.md"), "local edit\n").unwrap();
+        w.send(Command::SwitchBranch {
+            name: "side".into(),
+            stash: false,
+        });
+        until(
+            &w,
+            |e| matches!(e, Event::WouldOverwrite { files, .. } if files == &vec!["README.md".to_string()]),
+        );
+        std::fs::write(work.join("new-untracked.txt"), "keep me\n").unwrap();
+        std::fs::write(work.join("README.md"), "hello\n").unwrap(); // non-conflicting now
+        w.send(Command::SwitchBranch {
+            name: "side".into(),
+            stash: true,
+        });
+        until(
+            &w,
+            |e| matches!(e, Event::RepoOpened(s) if s.head == gitcore::Head::Branch("side".into())),
+        );
+        assert_eq!(
+            std::fs::read_to_string(work.join("new-untracked.txt")).unwrap(),
+            "keep me\n"
+        );
+    }
+}

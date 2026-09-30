@@ -8,7 +8,8 @@ use crate::protocol::{AppError, Event, Op};
 impl Worker {
     /// A repository was opened or cloned: it becomes the target of later commands.
     pub(super) fn opened(&mut self, summary: RepoSummary, cloned: bool) {
-        if self.repo.as_ref() != Some(&summary.path) {
+        let new_repo = self.repo.as_ref() != Some(&summary.path);
+        if new_repo {
             self.shown = None;
         }
         self.repo = Some(summary.path.clone());
@@ -18,9 +19,16 @@ impl Worker {
             Event::RepoOpened(summary)
         });
         self.refresh();
+        let Some(repo) = self.open_current(Op::History) else {
+            return;
+        };
+        self.load_repo_extras(&repo);
+        if new_repo && !cloned {
+            self.auto_fetch(&repo);
+        }
     }
 
-    fn open_current(&self, during: Op) -> Option<Repo> {
+    pub(super) fn open_current(&self, during: Op) -> Option<Repo> {
         let path = self.repo.as_ref()?;
         match Repo::open(path) {
             Ok(r) => Some(r),
@@ -40,6 +48,7 @@ impl Worker {
             Ok(files) => self.emit(Event::StatusLoaded(files)),
             Err(e) => return self.fail(Op::Changes, AppError::from_git(&e)),
         }
+        self.emit(Event::OperationChanged(repo.operation_in_progress()));
         if let Some((path, side)) = self.shown.clone() {
             self.send_diff(&repo, &path, side);
         }
@@ -124,15 +133,10 @@ impl Worker {
             return;
         };
         match repo.commit(message, amend, self.deps.commit_backend) {
-            Ok(outcome) => {
-                self.emit(Event::Committed(outcome));
-                if let Ok(summary) = repo.summary() {
-                    self.emit(Event::RepoOpened(summary));
-                }
-            }
+            Ok(outcome) => self.emit(Event::Committed(outcome)),
             Err(e) => self.fail(Op::Commit, AppError::from_git(&e)),
         }
-        self.refresh();
+        self.after_ref_change(&repo);
     }
 
     pub(super) fn add_to_gitignore(&mut self, pattern: &str) {
