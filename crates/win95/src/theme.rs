@@ -33,14 +33,13 @@ pub fn install(ctx: &egui::Context) {
     fonts
         .font_data
         .insert(FONT_NAME.to_owned(), Arc::new(FontData::from_static(W95FA)));
-    for family in [FontFamily::Proportional, FontFamily::Monospace] {
-        // W95FA first, egui's default fonts stay as fallback for missing glyphs.
-        fonts
-            .families
-            .entry(family)
-            .or_default()
-            .insert(0, FONT_NAME.to_owned());
-    }
+    // W95FA first for UI text; egui's default fonts stay as fallback for missing glyphs.
+    // Monospace keeps egui's fixed-width font: W95FA is proportional and would misalign diffs.
+    fonts
+        .families
+        .entry(FontFamily::Proportional)
+        .or_default()
+        .insert(0, FONT_NAME.to_owned());
     ctx.set_fonts(fonts);
     ctx.set_theme(egui::Theme::Light);
     ctx.all_styles_mut(apply_style);
