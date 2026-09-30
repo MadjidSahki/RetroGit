@@ -1,13 +1,18 @@
 //! RetroGit's internal Git API. No `git2` type is ever exposed publicly.
 
 mod clone;
+mod commit;
 mod diff;
 mod error;
+mod ignore;
 mod repo;
 mod stage;
 mod status;
 
 pub use clone::{CloneProgress, CloneRequest, Credentials, clone};
+pub use commit::{
+    CommitBackend, CommitOutcome, classify_commit_failure, git_available, set_git_search_path,
+};
 pub use diff::{DiffLine, FileDiff, Hunk, LineKind, Side};
 pub use error::GitError;
 pub use repo::{CommitInfo, Head, Repo, RepoSummary};
