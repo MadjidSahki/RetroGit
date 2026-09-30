@@ -4,6 +4,7 @@ pub mod config;
 pub mod format;
 pub mod logging;
 pub mod protocol;
+pub mod state;
 pub mod strings;
 
 /// OAuth App client ID (public, no secret). Paste yours here, or build with
