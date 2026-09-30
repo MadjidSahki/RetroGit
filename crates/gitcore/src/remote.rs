@@ -120,6 +120,12 @@ impl Repo {
         for (k, v) in &settings.env {
             cmd.env(k, v);
         }
+        // Own process group, so cancelling can kill git *and* its helpers (remote-https, ssh).
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
         let mut child = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -134,6 +140,11 @@ impl Repo {
             .stdout
             .take()
             .ok_or_else(|| GitError::Other("no stdout".into()))?;
+        let stdout_reader = std::thread::spawn(move || {
+            let mut out = String::new();
+            let _ = stdout.read_to_string(&mut out);
+            out
+        });
         let (tx, rx) = channel::<String>();
         let reader = std::thread::spawn(move || {
             // Progress lines end with '\r' (updates) or '\n'.
@@ -166,9 +177,10 @@ impl Repo {
                 }
             }
             if cancel.load(Ordering::Relaxed) {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = reader.join();
+                kill_tree(&mut child);
+                // Do not join the readers: a helper that survived could keep the pipes open.
+                drop(reader);
+                drop(stdout_reader);
                 return Err(GitError::Cancelled);
             }
             match child.try_wait() {
@@ -177,8 +189,7 @@ impl Repo {
                 Err(e) => return Err(GitError::Other(format!("git failed: {e}"))),
             }
         };
-        let mut out = String::new();
-        let _ = stdout.read_to_string(&mut out);
+        let out = stdout_reader.join().unwrap_or_default();
         let err = reader.join().unwrap_or_default();
         let text = format!("{out}{err}");
         if status.success() {
@@ -269,6 +280,32 @@ impl Repo {
         };
         self.run_net(auth, &args, progress, cancel).map(|_| ())
     }
+}
+
+/// Kill git and every helper it started.
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        // The child leads its own process group (see `process_group(0)`).
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", &format!("-{}", child.id())])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[cfg(test)]

@@ -174,3 +174,42 @@ fn cancelled_fetch_returns_cancelled() {
         Err(GitError::Cancelled)
     );
 }
+
+#[test]
+fn cancel_returns_quickly_even_when_the_server_never_answers() {
+    let Some(env) = Env::new() else { return };
+    // Accepts connections and never answers: git-remote-http would wait for minutes.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for s in listener.incoming().flatten() {
+            held.push(s);
+        }
+    });
+    git(
+        &env.work,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            &format!("http://127.0.0.1:{port}/repo.git"),
+        ],
+    );
+    let cancel = std::sync::Arc::new(AtomicBool::new(false));
+    let c = cancel.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        c.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+    let started = std::time::Instant::now();
+    assert_eq!(
+        env.repo().fetch(&NetAuth::default(), |_| {}, &cancel),
+        Err(GitError::Cancelled)
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(4),
+        "took {:?}",
+        started.elapsed()
+    );
+}
