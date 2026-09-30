@@ -106,6 +106,20 @@ fn toggle_file(cx: &Ctx<'_>, file: &FileStatus, side: Side) {
     }
 }
 
+/// One batch command for Stage all / Unstage all (conflicts are skipped, renames include
+/// both paths).
+pub fn all_files_command(files: &[FileStatus], side: Side) -> Command {
+    let paths: Vec<String> = files
+        .iter()
+        .filter(|f| f.unstaged != Some(Change::Conflicted))
+        .flat_map(|f| paths_of(f, side))
+        .collect();
+    match side {
+        Side::Unstaged => Command::StageFiles(paths),
+        Side::Staged => Command::UnstageFiles(paths),
+    }
+}
+
 fn select_file(cx: &mut Ctx<'_>, path: &str, side: Side) {
     let c = &mut cx.state.changes;
     if c.shown.as_ref() != Some(&(path.to_string(), side)) {
@@ -145,9 +159,7 @@ fn group(ui: &mut egui::Ui, cx: &mut Ctx<'_>, files: &[FileStatus], side: Side, 
                 .min_size(egui::vec2(80.0, 20.0))
                 .enabled(!files.is_empty());
             if ui.add(b).clicked() {
-                for f in files {
-                    toggle_file(cx, f, side);
-                }
+                cx.worker.send(all_files_command(files, side));
             }
         });
     });

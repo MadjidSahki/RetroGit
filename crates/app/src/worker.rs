@@ -210,6 +210,8 @@ impl Worker {
                 selection,
                 shown,
             } => self.stage(&path, &selection, shown.as_ref(), false),
+            Command::StageFiles(paths) => self.stage_files(&paths, true),
+            Command::UnstageFiles(paths) => self.stage_files(&paths, false),
             Command::Commit { message, amend } => self.commit(&message, amend),
             Command::AddToGitignore(pattern) => self.add_to_gitignore(&pattern),
             Command::LoadAmendInfo => self.amend_info(),

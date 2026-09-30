@@ -38,6 +38,9 @@ pub enum Command {
         selection: Selection,
         shown: Option<FileDiff>,
     },
+    /// Whole files, one index operation and one refresh (Stage all / Unstage all).
+    StageFiles(Vec<String>),
+    UnstageFiles(Vec<String>),
     Commit {
         message: String,
         amend: bool,

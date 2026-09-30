@@ -137,21 +137,19 @@ impl Repo {
         let rel = Path::new(path);
         if *selection == Selection::All {
             return match direction {
-                Direction::Stage => {
-                    let mut index = repo.index().map_err(map)?;
-                    if self.workdir()?.join(rel).symlink_metadata().is_ok() {
-                        index.add_path(rel).map_err(map)?;
-                    } else {
-                        index.remove_path(rel).map_err(map)?;
-                    }
-                    index.write().map_err(map)
-                }
-                Direction::Unstage => {
-                    let head = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
-                    let target = head.as_ref().map(|c| c.as_object());
-                    repo.reset_default(target, [path]).map_err(map)
-                }
+                Direction::Stage => self.stage_files(&[path]),
+                Direction::Unstage => self.unstage_files(&[path]),
             };
+        }
+        let filtered = repo
+            .get_attr(rel, "filter", git2::AttrCheckFlags::FILE_THEN_INDEX)
+            .ok()
+            .flatten()
+            .is_some();
+        if filtered {
+            return Err(GitError::Unsupported(
+                "files with a Git filter (e.g. LFS) can only be staged as a whole".into(),
+            ));
         }
 
         // Whole-file only: conflicts (a partial stage would "resolve" them with made-up
@@ -215,6 +213,67 @@ impl Repo {
                 let mut index = repo.index().map_err(map)?;
                 index.remove_path(rel).map_err(map)?;
                 index.write().map_err(map)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Stage whole files (new, modified or deleted) in one operation. Uses `git add` when
+    /// available so clean filters (Git LFS, custom drivers) apply exactly as in a terminal.
+    pub fn stage_files(&self, paths: &[&str]) -> Result<(), GitError> {
+        if crate::git_available() {
+            return self.git_on_paths(&["add", "-A"], paths);
+        }
+        let map = |e: git2::Error| GitError::from_git2(&e);
+        let mut index = self.git().index().map_err(map)?;
+        for path in paths {
+            let rel = Path::new(path);
+            if self.workdir()?.join(rel).symlink_metadata().is_ok() {
+                index.add_path(rel).map_err(map)?;
+            } else {
+                index.remove_path(rel).map_err(map)?;
+            }
+        }
+        index.write().map_err(map)
+    }
+
+    /// Put whole files back to their HEAD version in the index (or drop them if new).
+    pub fn unstage_files(&self, paths: &[&str]) -> Result<(), GitError> {
+        let repo = self.git();
+        let head = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+        if crate::git_available() {
+            return match head {
+                Some(_) => self.git_on_paths(&["reset", "-q"], paths),
+                None => {
+                    self.git_on_paths(&["rm", "--cached", "-q", "-r", "--ignore-unmatch"], paths)
+                }
+            };
+        }
+        let target = head.as_ref().map(|c| c.as_object());
+        repo.reset_default(target, paths.iter().copied())
+            .map_err(|e| GitError::from_git2(&e))
+    }
+
+    /// Run `git <args> -- <paths>` with literal pathspecs, in chunks (command-line limits).
+    fn git_on_paths(&self, args: &[&str], paths: &[&str]) -> Result<(), GitError> {
+        for chunk in paths.chunks(200) {
+            let out = crate::commit::git_command()
+                .arg("--literal-pathspecs")
+                .arg("-C")
+                .arg(self.workdir()?)
+                .args(args)
+                .arg("--")
+                .args(chunk)
+                .stdin(std::process::Stdio::null())
+                .output()
+                .map_err(|e| GitError::Other(format!("cannot run git: {e}")))?;
+            if !out.status.success() {
+                let text = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                return Err(GitError::Other(text.trim().to_string()));
             }
         }
         Ok(())

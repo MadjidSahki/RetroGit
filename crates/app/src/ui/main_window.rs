@@ -114,33 +114,20 @@ fn menu(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                 .clicked()
             {
                 let files: Vec<_> = cx.state.changes.unstaged().cloned().collect();
-                for f in files
-                    .iter()
-                    .filter(|f| f.unstaged != Some(gitcore::Change::Conflicted))
-                {
-                    for path in super::changes::paths_of(f, gitcore::Side::Unstaged) {
-                        cx.worker.send(Command::Stage {
-                            path,
-                            selection: gitcore::Selection::All,
-                            shown: None,
-                        });
-                    }
-                }
+                cx.worker.send(super::changes::all_files_command(
+                    &files,
+                    gitcore::Side::Unstaged,
+                ));
             }
             if ui
                 .add_enabled(open, egui::Button::new(s::UNSTAGE_ALL))
                 .clicked()
             {
                 let files: Vec<_> = cx.state.changes.staged().cloned().collect();
-                for f in &files {
-                    for path in super::changes::paths_of(f, gitcore::Side::Staged) {
-                        cx.worker.send(Command::Unstage {
-                            path,
-                            selection: gitcore::Selection::All,
-                            shown: None,
-                        });
-                    }
-                }
+                cx.worker.send(super::changes::all_files_command(
+                    &files,
+                    gitcore::Side::Staged,
+                ));
             }
             ui.separator();
             for label in [s::FETCH, s::PULL, s::PUSH] {

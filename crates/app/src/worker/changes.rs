@@ -82,6 +82,22 @@ impl Worker {
         self.refresh();
     }
 
+    pub(super) fn stage_files(&mut self, paths: &[String], stage: bool) {
+        let Some(repo) = self.open_current(Op::Changes) else {
+            return;
+        };
+        let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+        let result = if stage {
+            repo.stage_files(&refs)
+        } else {
+            repo.unstage_files(&refs)
+        };
+        if let Err(e) = result {
+            self.fail(Op::Changes, AppError::from_git(&e));
+        }
+        self.refresh();
+    }
+
     pub(super) fn commit(&mut self, message: &str, amend: bool) {
         let Some(repo) = self.open_current(Op::Commit) else {
             return;

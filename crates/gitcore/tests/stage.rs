@@ -444,3 +444,49 @@ fn partial_stage_of_a_conflicted_file_is_refused() {
             .has_conflicts()
     );
 }
+
+#[test]
+fn stage_files_and_unstage_files_in_one_call() {
+    let d = tempfile::tempdir().unwrap();
+    common::make_repo(d.path(), 1);
+    for name in ["a.txt", "b.txt", "-dash.txt", "star*.txt"] {
+        std::fs::write(d.path().join(name), "x\n").unwrap();
+    }
+    std::fs::write(d.path().join("starX.txt"), "must not be staged by a glob\n").unwrap();
+    let r = Repo::open(d.path()).unwrap();
+    r.stage_files(&["a.txt", "b.txt", "-dash.txt", "star*.txt"])
+        .unwrap();
+    let staged: Vec<String> = r
+        .status()
+        .unwrap()
+        .into_iter()
+        .filter(|f| f.staged.is_some())
+        .map(|f| f.path)
+        .collect();
+    assert_eq!(staged, vec!["-dash.txt", "a.txt", "b.txt", "star*.txt"]);
+    r.unstage_files(&["a.txt", "b.txt", "-dash.txt", "star*.txt"])
+        .unwrap();
+    assert!(r.status().unwrap().iter().all(|f| f.staged.is_none()));
+}
+
+#[test]
+fn whole_file_staging_applies_clean_filters_like_git() {
+    if !gitcore::git_available() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let repo = common::make_repo(d.path(), 1);
+    repo.config()
+        .unwrap()
+        .set_str("filter.upper.clean", "tr a-z A-Z")
+        .unwrap();
+    std::fs::write(d.path().join(".gitattributes"), "*.up filter=upper\n").unwrap();
+    std::fs::write(d.path().join("x.up"), "hello\n").unwrap();
+    let r = Repo::open(d.path()).unwrap();
+    r.stage("x.up", &Selection::All, None).unwrap();
+    assert_eq!(index_content(d.path(), "x.up").unwrap(), "HELLO\n");
+    assert!(matches!(
+        r.stage("x.up", &Selection::Hunks(vec![0]), None),
+        Err(GitError::Unsupported(_))
+    ));
+}

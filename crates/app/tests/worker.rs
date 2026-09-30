@@ -533,3 +533,37 @@ fn refresh_requests_are_deduplicated_while_one_is_pending() {
         .count();
     assert_eq!(refreshes, 1, "{evs:?}");
 }
+
+#[test]
+fn stage_all_is_one_operation_with_one_refresh() {
+    let server = mockito::Server::new();
+    let d = repo_for_changes();
+    for i in 0..20 {
+        std::fs::write(d.path().join(format!("f{i}.txt")), "x\n").unwrap();
+    }
+    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    w.send(Command::OpenRepo(d.path().to_path_buf()));
+    until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+    let paths: Vec<String> = (0..20).map(|i| format!("f{i}.txt")).collect();
+    w.send(Command::StageFiles(paths.clone()));
+    w.send(Command::ValidateToken); // marker
+    let evs = until(&w, |e| matches!(e, Event::SignedOut));
+    let statuses: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match e {
+            Event::StatusLoaded(f) => Some(f),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(statuses.len(), 1);
+    assert_eq!(
+        statuses[0].iter().filter(|f| f.staged.is_some()).count(),
+        20
+    );
+    w.send(Command::UnstageFiles(paths));
+    let evs = until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+    let Some(Event::StatusLoaded(files)) = evs.last() else {
+        unreachable!()
+    };
+    assert!(files.iter().all(|f| f.staged.is_none()));
+}

@@ -30,7 +30,7 @@ pub fn set_git_search_path(path: String) {
     let _ = SEARCH_PATH.set(path);
 }
 
-fn git_command() -> Command {
+pub(crate) fn git_command() -> Command {
     let mut cmd = Command::new("git");
     if let Some(p) = SEARCH_PATH.get() {
         cmd.env("PATH", p);
