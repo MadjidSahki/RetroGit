@@ -99,7 +99,7 @@ impl Repo {
         let mut cmd = git_command();
         cmd.arg("-C")
             .arg(self.workdir()?)
-            .args(["commit", "--cleanup=strip", "-F", "-"]);
+            .args(["commit", "--cleanup=whitespace", "-F", "-"]);
         if amend {
             cmd.arg("--amend");
         }

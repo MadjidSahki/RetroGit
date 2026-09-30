@@ -190,3 +190,16 @@ fn add_to_gitignore_creates_appends_and_dedupes() {
         Err(GitError::Unsupported(_))
     ));
 }
+
+#[test]
+fn cli_commit_keeps_lines_starting_with_hash() {
+    if !git_available() {
+        return;
+    }
+    let (d, r) = repo_with_identity(1);
+    stage_new_file(d.path(), &r, "a.txt");
+    let message = "#42 fix login\n\n## Changes\n- a";
+    let out = r.commit(message, false, CommitBackend::PreferCli).unwrap();
+    assert_eq!(out.commit.summary, "#42 fix login");
+    assert_eq!(r.last_commit_message().unwrap().as_deref(), Some(message));
+}
