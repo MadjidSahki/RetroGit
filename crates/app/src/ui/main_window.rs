@@ -34,7 +34,20 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(2)))
             .show(ui, |ui| {
                 if cx.state.current.is_some() {
-                    super::changes::show(ui, cx);
+                    let mut tab = match cx.state.tab {
+                        crate::state::Tab::Changes => 0,
+                        crate::state::Tab::History => 1,
+                    };
+                    win95::tabs(ui, &mut tab, &[s::TAB_CHANGES, s::TAB_HISTORY]);
+                    cx.state.tab = if tab == 0 {
+                        crate::state::Tab::Changes
+                    } else {
+                        crate::state::Tab::History
+                    };
+                    match cx.state.tab {
+                        crate::state::Tab::Changes => super::changes::show(ui, cx),
+                        crate::state::Tab::History => super::history::show(ui, cx),
+                    }
                 } else {
                     bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 8, |ui| {
                         ui.set_min_size(ui.available_size());
@@ -130,9 +143,7 @@ fn menu(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                 ));
             }
             ui.separator();
-            for label in [s::FETCH, s::PULL, s::PUSH] {
-                ui.add_enabled(false, egui::Button::new(label));
-            }
+            super::sync_toolbar::menu_entries(ui, cx);
         });
         ui.menu_button(s::MENU_VIEW, |ui| {
             let current = cx.state.current.as_ref().map(|c| c.path.clone());
@@ -162,9 +173,7 @@ fn toolbar(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             open_folder(cx);
         }
         ui.separator();
-        for label in [s::FETCH, s::PULL, s::PUSH] {
-            ui.add(Button95::new(label).min_size(size).enabled(false));
-        }
+        super::sync_toolbar::toolbar(ui, cx);
     });
 }
 
@@ -209,6 +218,14 @@ fn status(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     };
     let activity = if cx.state.repos_loading {
         s::LOADING
+    } else if let Some(op) = cx.state.sync.running {
+        match op {
+            crate::protocol::SyncOp::Fetch => s::FETCHING,
+            crate::protocol::SyncOp::Pull => s::PULLING,
+            crate::protocol::SyncOp::Push => s::PUSHING,
+        }
+    } else if let Some(note) = cx.state.sync.note.as_deref() {
+        note
     } else if cx.state.changes.committing {
         s::COMMITTING
     } else if let Some(note) = cx.state.changes.last_commit_note.as_deref() {

@@ -5,9 +5,12 @@ pub mod changes;
 pub mod clone_dialog;
 pub mod diff_view;
 pub mod discard;
+pub mod history;
 pub mod main_window;
 pub mod message;
 pub mod sign_in;
+pub mod sync_dialogs;
+pub mod sync_toolbar;
 
 use crate::state::AppState;
 use crate::worker::WorkerHandle;

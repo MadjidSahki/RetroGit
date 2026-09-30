@@ -14,7 +14,10 @@ use crate::strings as s;
 pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     Panel::top("changes_header")
         .frame(egui::Frame::NONE)
-        .show(ui, |ui| header(ui, cx));
+        .show(ui, |ui| {
+            header(ui, cx);
+            operation_banner(ui, cx);
+        });
     Panel::bottom("commit_box")
         .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(2)))
         .show(ui, |ui| commit_box(ui, cx));
@@ -50,6 +53,64 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         });
     });
     ui.add_space(2.0);
+}
+
+/// Yellow banner while a merge or rebase waits for conflict resolution.
+fn operation_banner(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
+    let Some(op) = cx.state.operation else { return };
+    let (text, abort) = match op {
+        gitcore::Operation::Merge => (s::MERGE_IN_PROGRESS, s::ABORT_MERGE),
+        gitcore::Operation::Rebase => (s::REBASE_IN_PROGRESS, s::ABORT_REBASE),
+    };
+    egui::Frame::NONE
+        .fill(egui::Color32::from_rgb(0xFF, 0xFF, 0xC0))
+        .inner_margin(egui::Margin::same(4))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(text).color(win95::theme::BLACK));
+                if ui
+                    .add(Button95::new(abort).min_size(egui::vec2(100.0, 20.0)))
+                    .clicked()
+                {
+                    cx.worker.send(Command::AbortOperation);
+                }
+                if op == gitcore::Operation::Rebase
+                    && ui
+                        .add(Button95::new(s::CONTINUE_REBASE).min_size(egui::vec2(110.0, 20.0)))
+                        .clicked()
+                {
+                    cx.worker.send(Command::ContinueRebase);
+                }
+            });
+        });
+    ui.add_space(2.0);
+}
+
+/// "Signed with GPG key ABCD" / "Commits will NOT be signed" for the commit form.
+pub fn signing_label(cfg: Option<&gitcore::SigningConfig>) -> (String, egui::Color32) {
+    match cfg {
+        Some(c) if c.enabled => {
+            let kind = match c.format {
+                gitcore::SigningFormat::Gpg => "GPG",
+                gitcore::SigningFormat::Ssh => "SSH",
+                gitcore::SigningFormat::X509 => "X.509",
+            };
+            let key = c
+                .key
+                .as_deref()
+                .map(|k| format!(" key {k}"))
+                .unwrap_or_default();
+            (
+                format!("🔒 {} {kind}{key}", s::SIGNED_WITH),
+                egui::Color32::from_rgb(0, 0x60, 0),
+            )
+        }
+        _ => (
+            s::NOT_SIGNED.to_string(),
+            egui::Color32::from_rgb(0xA0, 0, 0),
+        ),
+    }
 }
 
 /// `[M]`, `[A]`, ... and the displayed path (`old → new` for renames).
@@ -285,6 +346,7 @@ fn toggle_with_space(ui: &egui::Ui, cx: &mut Ctx<'_>) {
 
 fn commit_box(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let committing = cx.state.changes.committing;
+    let signing = cx.state.signing.clone();
     let can_commit = cx.state.changes.can_commit();
     let focus = std::mem::take(&mut cx.state.changes.focus_summary);
     let c = &mut cx.state.changes;
@@ -327,6 +389,10 @@ fn commit_box(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                         .add(Button95::new(s::COMMIT).enabled(can_commit))
                         .clicked();
                 });
+            });
+            ui.horizontal(|ui| {
+                let (text, color) = signing_label(signing.as_ref());
+                ui.label(egui::RichText::new(text).color(color));
             });
         });
         if committing {
@@ -381,6 +447,25 @@ mod tests {
             vec!["new.rs".to_string(), "old.rs".to_string()]
         );
         assert_eq!(paths_of(&f, Side::Unstaged), vec!["new.rs".to_string()]);
+    }
+
+    #[test]
+    fn signing_label_says_whether_commits_are_signed() {
+        let cfg = gitcore::SigningConfig {
+            enabled: true,
+            format: gitcore::SigningFormat::Gpg,
+            key: Some("ABCD1234".into()),
+        };
+        assert_eq!(
+            signing_label(Some(&cfg)).0,
+            "🔒 Signed with GPG key ABCD1234"
+        );
+        let off = gitcore::SigningConfig {
+            enabled: false,
+            ..cfg
+        };
+        assert_eq!(signing_label(Some(&off)).0, "Commits will NOT be signed");
+        assert_eq!(signing_label(None).0, "Commits will NOT be signed");
     }
 
     #[test]
