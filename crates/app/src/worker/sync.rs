@@ -123,12 +123,25 @@ impl Worker {
                 if !stash {
                     return switch(r);
                 }
-                let stashed = r.stash_push(&format!("RetroGit: switch to {target}"))?;
+                let label = format!("RetroGit: switch to {target}");
+                let stashed = r.stash_push(&label)?;
                 if let Err(e) = switch(r) {
-                    if stashed {
-                        let _ = r.stash_pop(); // put the changes back where they were
+                    // Put the changes back where they were; never lose track of them.
+                    if stashed && r.stash_pop().is_err() {
+                        return Err(GitError::Other(format!(
+                            "{e}\n\nYour changes are kept in the stash '{label}' (git stash list)."
+                        )));
                     }
-                    return Err(e);
+                    // Already stashed: a second "would be overwritten" must not reopen the
+                    // same dialog in a loop.
+                    return Err(match e {
+                        GitError::WouldOverwrite { files } => GitError::Other(format!(
+                            "{}\n{}",
+                            s::ERR_WOULD_OVERWRITE,
+                            files.join("\n")
+                        )),
+                        other => other,
+                    });
                 }
                 if stashed { r.stash_pop() } else { Ok(()) }
             },
