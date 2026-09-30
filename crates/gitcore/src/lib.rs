@@ -1,5 +1,6 @@
 //! RetroGit's internal Git API. No `git2` type is ever exposed publicly.
 
+mod branch;
 mod cli;
 mod clone;
 mod commit;
@@ -10,13 +11,19 @@ mod error;
 mod graph;
 mod ignore;
 mod log;
+mod ops;
 mod repo;
+mod signing;
 mod stage;
+mod stash;
 mod status;
 
+pub use branch::{Branch, parse_overwritten_files};
 pub use commit_detail::{ChangedFile, CommitDetail, SignatureStatus, parse_signature_status};
 pub use graph::{Edge, GraphRow, GraphState, layout};
 pub use log::{LogEntry, RefKind, RefLabel};
+pub use ops::Operation;
+pub use signing::{SigningConfig, SigningFormat};
 
 pub use clone::{CloneProgress, CloneRequest, Credentials, clone};
 pub use commit::{

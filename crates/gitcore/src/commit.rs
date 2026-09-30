@@ -85,6 +85,9 @@ impl Repo {
         let used_cli = backend == CommitBackend::PreferCli && git_available();
         if used_cli {
             self.commit_cli(message, amend)?;
+        } else if self.signing_config().is_ok_and(|s| s.enabled) {
+            // libgit2 cannot sign: never create an unsigned commit when signing is required.
+            return Err(GitError::SigningRequiresGit);
         } else {
             self.commit_git2(message, amend)?;
         }
