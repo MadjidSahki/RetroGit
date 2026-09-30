@@ -6,6 +6,7 @@ pub mod logging;
 pub mod protocol;
 pub mod state;
 pub mod strings;
+pub mod worker;
 
 /// OAuth App client ID (public, no secret). Paste yours here, or build with
 /// `RETROGIT_GITHUB_CLIENT_ID=Ov23li... cargo build`.
