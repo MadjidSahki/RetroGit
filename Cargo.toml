@@ -12,7 +12,7 @@ publish = false
 win95 = { path = "crates/win95" }
 gitcore = { path = "crates/gitcore" }
 github = { path = "crates/github" }
-eframe = { version = "0.36", default-features = false, features = ["glow", "accesskit", "default_fonts"] }
+eframe = { version = "0.36", default-features = false, features = ["glow", "accesskit", "default_fonts", "links"] }
 egui = "0.36"
 egui_kittest = "0.36"
 git2 = { version = "0.21", default-features = false, features = ["https", "vendored-libgit2", "vendored-openssl"] }
