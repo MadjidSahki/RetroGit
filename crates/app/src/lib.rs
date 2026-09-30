@@ -16,5 +16,5 @@ pub mod worker;
 /// `RETROGIT_GITHUB_CLIENT_ID=Ov23li... cargo build`.
 pub const GITHUB_CLIENT_ID: &str = match option_env!("RETROGIT_GITHUB_CLIENT_ID") {
     Some(id) => id,
-    None => "Ov23ctyzRyF2Lo8HWpXU",
+    None => "Ov23liN6gBDPqziTh3qi",
 };
