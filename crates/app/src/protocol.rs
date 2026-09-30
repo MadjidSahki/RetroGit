@@ -169,6 +169,24 @@ impl AppError {
                 AppError::new(Severity::Error, s::ERR_COMMIT_REJECTED).with_detail(output)
             }
             GitError::MissingIdentity => AppError::new(Severity::Error, s::ERR_MISSING_IDENTITY),
+            GitError::WouldOverwrite { files } => {
+                AppError::new(Severity::Warning, s::ERR_WOULD_OVERWRITE)
+                    .with_detail(files.join("\n"))
+            }
+            GitError::NotMerged(b) => AppError::new(
+                Severity::Warning,
+                &format!("Branch '{b}' is not fully merged."),
+            ),
+            GitError::Diverged { ahead, behind } => AppError::new(
+                Severity::Info,
+                &format!("Your branch and its upstream have diverged (↑{ahead} ↓{behind})."),
+            ),
+            GitError::PushRejected => AppError::new(Severity::Warning, s::ERR_PUSH_REJECTED),
+            GitError::StashConflict => AppError::new(Severity::Warning, s::ERR_STASH_CONFLICT),
+            GitError::SigningRequiresGit => {
+                AppError::new(Severity::Error, s::ERR_SIGNING_REQUIRES_GIT)
+            }
+            GitError::GitMissing => AppError::new(Severity::Warning, s::ERR_GIT_MISSING),
             GitError::Other(d) => AppError::new(Severity::Error, d),
         }
     }

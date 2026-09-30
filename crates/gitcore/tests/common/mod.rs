@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+pub mod remote;
+
 /// Create a non-bare repo with `commits` commits on branch `main`.
 pub fn make_repo(dir: &Path, commits: usize) -> git2::Repository {
     let mut opts = git2::RepositoryInitOptions::new();

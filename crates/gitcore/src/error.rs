@@ -22,6 +22,24 @@ pub enum GitError {
     CommitRejected { output: String },
     #[error("user.name / user.email are not configured")]
     MissingIdentity,
+    /// Switching branch would overwrite these locally modified files.
+    #[error("local changes would be overwritten")]
+    WouldOverwrite { files: Vec<String> },
+    #[error("branch '{0}' is not fully merged")]
+    NotMerged(String),
+    #[error("the branch and its upstream have diverged")]
+    Diverged { ahead: usize, behind: usize },
+    /// The remote has commits the local branch does not have (non fast-forward).
+    #[error("push rejected: the remote has new commits")]
+    PushRejected,
+    /// Re-applying stashed changes created conflicts; the stash was kept.
+    #[error("re-applying your stashed changes caused conflicts")]
+    StashConflict,
+    /// Commit signing is on but only libgit2 is available: refusing to commit unsigned.
+    #[error("commit signing requires the git command line")]
+    SigningRequiresGit,
+    #[error("this feature needs the git command line")]
+    GitMissing,
     #[error("{0}")]
     Other(String),
 }
