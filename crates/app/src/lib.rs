@@ -2,12 +2,14 @@
 
 pub mod app;
 pub mod config;
+pub mod env_path;
 pub mod format;
 pub mod logging;
 pub mod protocol;
 pub mod state;
 pub mod strings;
 pub mod ui;
+pub mod watch;
 pub mod worker;
 
 /// OAuth App client ID (public, no secret). Paste yours here, or build with
