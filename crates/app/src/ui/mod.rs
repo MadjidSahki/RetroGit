@@ -19,4 +19,6 @@ use crate::worker::WorkerHandle;
 pub struct Ctx<'a> {
     pub state: &'a mut AppState,
     pub worker: &'a WorkerHandle,
+    /// Background syntax highlighting.
+    pub highlighter: &'a crate::highlight::Service,
 }

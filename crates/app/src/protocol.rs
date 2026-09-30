@@ -191,6 +191,12 @@ pub enum Event {
         files: Vec<String>,
     },
     NotMerged(String),
+    /// Syntax colors computed in the background for `diff`.
+    ColorsLoaded {
+        target: crate::highlight::Target,
+        diff: FileDiff,
+        colors: Option<crate::highlight::DiffColors>,
+    },
     Error {
         during: Op,
         error: AppError,

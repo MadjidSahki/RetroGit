@@ -681,6 +681,7 @@ fn access_denied_explains_org_oauth_restrictions() {
 mod highlight_cache {
     use super::*;
     use gitcore::{FileDiff, Side};
+    use retrogit::highlight::{Colors, Target};
 
     fn diff(path: &str, binary: bool) -> FileDiff {
         FileDiff {
@@ -692,18 +693,36 @@ mod highlight_cache {
     }
 
     #[test]
-    fn colors_are_dropped_when_the_diff_changes_and_kept_otherwise() {
+    fn colors_follow_the_displayed_diff() {
         let mut s = AppState::new(Config::default());
         s.changes.shown = Some(("a.rs".into(), Side::Unstaged));
         s.apply(Event::DiffLoaded(diff("a.rs", false)));
-        s.changes.diff_colors = Some(Some(vec![]));
+        assert_eq!(s.changes.diff_colors, Colors::NotRequested);
+        s.changes.diff_colors = Colors::Pending;
         s.apply(Event::DiffLoaded(diff("a.rs", false)));
-        assert!(
-            s.changes.diff_colors.is_some(),
-            "same diff: keep the colors"
+        assert_eq!(s.changes.diff_colors, Colors::Pending, "same diff: keep");
+        s.apply(Event::ColorsLoaded {
+            target: Target::Changes,
+            diff: diff("a.rs", false),
+            colors: Some(vec![]),
+        });
+        assert_eq!(s.changes.diff_colors, Colors::Ready(vec![]));
+        s.apply(Event::ColorsLoaded {
+            target: Target::Changes,
+            diff: diff("old.rs", false),
+            colors: None,
+        });
+        assert_eq!(
+            s.changes.diff_colors,
+            Colors::Ready(vec![]),
+            "result for another diff is ignored"
         );
         s.apply(Event::DiffLoaded(diff("a.rs", true)));
-        assert!(s.changes.diff_colors.is_none(), "new diff: recompute");
+        assert_eq!(
+            s.changes.diff_colors,
+            Colors::NotRequested,
+            "new diff: recompute"
+        );
     }
 
     #[test]
@@ -711,14 +730,18 @@ mod highlight_cache {
         let mut s = AppState::new(Config::default());
         s.select_commit("c1");
         s.history.detail_file = Some("a.rs".into());
-        s.history.detail_colors = Some(None);
         s.apply(Event::CommitFileDiffLoaded {
             id: "c1".into(),
             diff: diff("a.rs", false),
         });
-        assert!(s.history.detail_colors.is_none());
-        s.history.detail_colors = Some(None);
+        assert_eq!(s.history.detail_colors, Colors::NotRequested);
+        s.apply(Event::ColorsLoaded {
+            target: Target::History,
+            diff: diff("a.rs", false),
+            colors: None,
+        });
+        assert_eq!(s.history.detail_colors, Colors::Plain);
         s.select_commit("c2");
-        assert!(s.history.detail_colors.is_none());
+        assert_eq!(s.history.detail_colors, Colors::NotRequested);
     }
 }

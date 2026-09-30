@@ -45,12 +45,12 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" README.md dist/
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" README.md THIRD_PARTY.md dist/
           cd dist
           if [ "$RUNNER_OS" = "Windows" ]; then
-            7z a -tzip "${{ matrix.asset }}" "${{ matrix.bin }}" README.md
+            7z a -tzip "${{ matrix.asset }}" "${{ matrix.bin }}" README.md THIRD_PARTY.md
           else
-            zip -9 "${{ matrix.asset }}" "${{ matrix.bin }}" README.md
+            zip -9 "${{ matrix.asset }}" "${{ matrix.bin }}" README.md THIRD_PARTY.md
           fi
       - uses: actions/upload-artifact@v4
         with:

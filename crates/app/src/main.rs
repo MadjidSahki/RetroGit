@@ -76,6 +76,7 @@ fn main() -> eframe::Result {
                 AppState::new(config),
                 worker,
                 config_path,
+                cc.egui_ctx.clone(),
             )))
         }),
     )

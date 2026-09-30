@@ -117,6 +117,14 @@ Every push, on any branch, is built and tested on macOS and Windows. `main` is p
 changes land through pull requests only, and each merge into `main` publishes a new release
 `v<major>.<minor>.<run number>` with both binaries (only if both platforms pass).
 
+## Credits
+
+Syntax highlighting uses [syntect](https://github.com/trishume/syntect) with the syntax
+definitions and theme of [bat](https://github.com/sharkdp/bat) (through
+[two-face](https://codeberg.org/CosmicHarper/two-face)). The pixel font is
+[W95FA](https://fontsarena.com/w95fa-by-alina-sava/) by Alina Sava (SIL OFL 1.1).
+Licenses of embedded third-party data: [THIRD_PARTY.md](THIRD_PARTY.md).
+
 ## Known limitations
 
 - Pull requests are not supported yet (planned).

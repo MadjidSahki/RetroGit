@@ -229,12 +229,12 @@ fn detail(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let mut open_file: Option<String> = None;
     {
         let h = &mut cx.state.history;
-        if h.detail_diff.is_some() && h.detail_colors.is_none() {
-            h.detail_colors = Some(
-                h.detail_diff
-                    .as_ref()
-                    .and_then(crate::highlight::highlight_diff),
-            );
+        if let Some(d) = &h.detail_diff
+            && h.detail_colors == crate::highlight::Colors::NotRequested
+        {
+            cx.highlighter
+                .request(crate::highlight::Target::History, d.clone());
+            h.detail_colors = crate::highlight::Colors::Pending;
         }
     }
     bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 4, |ui| {
@@ -265,6 +265,7 @@ fn detail(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             .resizable(true)
             .default_size(260.0)
             .min_size(140.0)
+            .max_size((ui.available_width() - 200.0).max(140.0))
             .show(ui, |ui| {
                 ScrollArea::vertical()
                     .id_salt("commit_files_scroll")
@@ -319,10 +320,10 @@ fn commit_file_diff(ui: &mut egui::Ui, h: &crate::state::HistoryView) {
         return;
     }
     let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
-    let colors = h.detail_colors.as_ref();
+    let colors = &h.detail_colors;
     let rows = super::diff_view::rows(diff);
     ScrollArea::both()
-        .id_salt(("commit_file_diff", &diff.path))
+        .id_salt(("commit_file_diff", &h.selected, &diff.path))
         .auto_shrink([false, false])
         .show_rows(ui, super::diff_view::ROW_HEIGHT, rows.len(), |ui, range| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -341,7 +342,12 @@ fn commit_file_diff(ui: &mut egui::Ui, h: &crate::state::HistoryView) {
                         for section in &mut header.sections {
                             section.format.color = win95::theme::NAVY;
                         }
-                        crate::highlight::diff_row(ui, header, super::diff_view::ROW_HEIGHT);
+                        crate::highlight::diff_row(
+                            ui,
+                            header,
+                            super::diff_view::ROW_HEIGHT,
+                            Color32::from_rgb(0xE0, 0xE0, 0xF0),
+                        );
                     }
                     super::diff_view::Row::Line(hi, li) => {
                         let l = &diff.hunks[hi].lines[li];
@@ -356,16 +362,15 @@ fn commit_file_diff(ui: &mut egui::Ui, h: &crate::state::HistoryView) {
                         };
                         let prefix = format!("{} {} {sign} ", num(l.old_no), num(l.new_no));
                         let text = l.text.trim_end_matches(['\n', '\r']);
-                        let spans = crate::highlight::line_spans(colors, hi, li);
                         let job = crate::highlight::colored_line(
                             &prefix,
                             text,
-                            spans,
+                            colors.line(hi, li),
                             "",
                             mono.clone(),
-                            bg,
+                            Color32::TRANSPARENT,
                         );
-                        crate::highlight::diff_row(ui, job, super::diff_view::ROW_HEIGHT);
+                        crate::highlight::diff_row(ui, job, super::diff_view::ROW_HEIGHT, bg);
                     }
                 }
             }
