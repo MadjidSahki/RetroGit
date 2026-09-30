@@ -634,7 +634,7 @@ mod sync {
             return None;
         }
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().canonicalize().unwrap();
+        let root = retrogit::watch::canonical(tmp.path());
         let seed = root.join("seed");
         make_source_repo(&seed);
         git(

@@ -13,7 +13,8 @@ concurrency:
 jobs:
   build:
     strategy:
-      fail-fast: true
+      # One OS failing must not cancel the other (the release still needs both).
+      fail-fast: false
       matrix:
         include:
           - os: macos-14

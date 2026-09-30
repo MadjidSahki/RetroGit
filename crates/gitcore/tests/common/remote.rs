@@ -41,13 +41,19 @@ pub struct Env {
     pub work: PathBuf,
 }
 
+/// Canonical path, without Windows' `\\?\` prefix (git cannot clone from such paths).
+pub fn canonical(path: &Path) -> PathBuf {
+    let p = path.canonicalize().unwrap().to_string_lossy().into_owned();
+    PathBuf::from(p.strip_prefix(r"\\?\").unwrap_or(&p))
+}
+
 impl Env {
     pub fn new() -> Option<Env> {
         if !git_available() {
             return None;
         }
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().canonicalize().unwrap();
+        let root = canonical(tmp.path());
         let seed = root.join("seed");
         super::make_repo(&seed, 2);
         git(

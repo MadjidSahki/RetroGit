@@ -21,13 +21,16 @@ fn wait_for(count: &AtomicUsize, at_least: usize, timeout: Duration) -> bool {
 fn a_burst_of_writes_is_reported_once_and_git_internals_are_ignored() {
     let d = tempfile::tempdir().unwrap();
     git2::Repository::init(d.path()).unwrap();
+    // FSEvents can deliver the `git init` writes (.git/HEAD...) late: let them pass first.
+    std::thread::sleep(Duration::from_millis(1000));
     let count = Arc::new(AtomicUsize::new(0));
     let c = count.clone();
     let _w = Watcher::start(d.path(), move || {
         c.fetch_add(1, Ordering::SeqCst);
     })
     .unwrap();
-    std::thread::sleep(Duration::from_millis(300)); // let FSEvents settle
+    std::thread::sleep(Duration::from_millis(700)); // let the watcher settle
+    count.store(0, Ordering::SeqCst);
 
     std::fs::create_dir_all(d.path().join(".git/objects/aa")).unwrap();
     std::fs::write(d.path().join(".git/objects/aa/bb"), "x").unwrap();

@@ -15,6 +15,25 @@ pub struct Watcher {
     root: PathBuf,
 }
 
+/// Remove Windows' verbatim prefix (`\\?\C:\...`, `\\?\UNC\server\...`).
+pub fn strip_verbatim(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        path.to_string()
+    }
+}
+
+/// Canonical path without the Windows verbatim prefix (falls back to `path` itself).
+pub fn canonical(path: &Path) -> PathBuf {
+    match path.canonicalize() {
+        Ok(p) => PathBuf::from(strip_verbatim(&p.to_string_lossy())),
+        Err(_) => path.to_path_buf(),
+    }
+}
+
 /// Whether a change at `path` can affect `git status` for the repo at `root`.
 /// Inside `.git/`, only the index and HEAD matter (objects, logs, locks are noise).
 pub fn is_relevant(root: &Path, path: &Path) -> bool {
@@ -36,8 +55,9 @@ impl Watcher {
     /// Watch `root` recursively; `on_change` runs on a background thread, at most once per
     /// `DEBOUNCE` burst.
     pub fn start(root: &Path, on_change: impl Fn() + Send + 'static) -> notify::Result<Watcher> {
-        // FSEvents reports canonical paths (e.g. /private/var/... for /var/...).
-        let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        // FSEvents reports canonical paths (e.g. /private/var/... for /var/...); on Windows
+        // canonicalize adds a \\?\ prefix that event paths do not have.
+        let root = canonical(root);
         let (tx, rx) = channel::<()>();
         let filter_root = root.clone();
         let mut inner = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
@@ -82,6 +102,23 @@ impl Watcher {
 mod tests {
     use super::is_relevant;
     use std::path::Path;
+
+    #[test]
+    fn windows_verbatim_prefixes_are_removed() {
+        assert_eq!(
+            super::strip_verbatim(r"\\?\C:\Users\me\repo"),
+            r"C:\Users\me\repo"
+        );
+        assert_eq!(
+            super::strip_verbatim(r"\\?\UNC\server\share\repo"),
+            r"\\server\share\repo"
+        );
+        assert_eq!(
+            super::strip_verbatim("/private/var/folders/x"),
+            "/private/var/folders/x"
+        );
+        assert_eq!(super::strip_verbatim(r"C:\plain"), r"C:\plain");
+    }
 
     #[test]
     fn only_index_and_head_matter_inside_dot_git() {
