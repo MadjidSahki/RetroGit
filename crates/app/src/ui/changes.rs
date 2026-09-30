@@ -1,0 +1,346 @@
+//! The "Changes" screen: file lists, diff, commit form.
+
+use egui::{Panel, RichText};
+use gitcore::{Change, FileStatus, Head, Selection, Side};
+use win95::{
+    Bevel, Button95, Cell, Column, ListView, ProgressBar95, bevel_frame, checkbox, text_area,
+    text_field,
+};
+
+use super::{Ctx, diff_view};
+use crate::protocol::Command;
+use crate::strings as s;
+
+pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
+    Panel::top("changes_header")
+        .frame(egui::Frame::NONE)
+        .show(ui, |ui| header(ui, cx));
+    Panel::bottom("commit_box")
+        .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(2)))
+        .show(ui, |ui| commit_box(ui, cx));
+    Panel::left("changed_files")
+        .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(2)))
+        .resizable(true)
+        .default_size(260.0)
+        .show(ui, |ui| file_lists(ui, cx));
+    egui::CentralPanel::default()
+        .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(2)))
+        .show(ui, |ui| diff_view::show(ui, cx));
+    toggle_with_space(ui, cx);
+}
+
+fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
+    let Some(c) = &cx.state.current else { return };
+    let branch = match &c.head {
+        Head::Branch(b) => b.clone(),
+        Head::Unborn(b) => format!("{b} {}", s::NO_COMMITS),
+        Head::Detached(id) => format!("{id} {}", s::DETACHED),
+    };
+    let last = c
+        .last_commit
+        .as_ref()
+        .map(|lc| format!(" · {} \"{}\"", lc.short_id, lc.summary))
+        .unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(format!("{} · {branch}{last}", c.name)).strong());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.add(Button95::new(s::REFRESH)).clicked() {
+                cx.worker.send(Command::RefreshStatus);
+            }
+        });
+    });
+    ui.add_space(2.0);
+}
+
+/// `[M]`, `[A]`, ... and the displayed path (`old → new` for renames).
+pub fn describe(path: &str, change: &Change) -> String {
+    let (code, shown) = match change {
+        Change::Added => ("A", path.to_string()),
+        Change::Modified => ("M", path.to_string()),
+        Change::Deleted => ("D", path.to_string()),
+        Change::Renamed { from } => ("R", format!("{from} → {path}")),
+        Change::TypeChange => ("T", path.to_string()),
+        Change::Untracked => ("?", path.to_string()),
+        Change::Conflicted => ("!", path.to_string()),
+    };
+    format!("[{code}] {shown}")
+}
+
+/// Paths a whole-file stage/unstage must touch (both sides of a rename).
+pub fn paths_of(file: &FileStatus, side: Side) -> Vec<String> {
+    let change = match side {
+        Side::Staged => &file.staged,
+        Side::Unstaged => &file.unstaged,
+    };
+    match change {
+        Some(Change::Renamed { from }) => vec![file.path.clone(), from.clone()],
+        _ => vec![file.path.clone()],
+    }
+}
+
+/// `*.ext` pattern for a path, if it has an extension.
+pub fn extension_pattern(path: &str) -> Option<String> {
+    let name = path.rsplit('/').next()?;
+    let (stem, ext) = name.rsplit_once('.')?;
+    (!stem.is_empty() && !ext.is_empty()).then(|| format!("*.{ext}"))
+}
+
+fn toggle_file(cx: &Ctx<'_>, file: &FileStatus, side: Side) {
+    if file.unstaged == Some(Change::Conflicted) {
+        return;
+    }
+    for path in paths_of(file, side) {
+        let cmd = match side {
+            Side::Unstaged => Command::Stage {
+                path,
+                selection: Selection::All,
+                shown: None,
+            },
+            Side::Staged => Command::Unstage {
+                path,
+                selection: Selection::All,
+                shown: None,
+            },
+        };
+        cx.worker.send(cmd);
+    }
+}
+
+fn select_file(cx: &mut Ctx<'_>, path: &str, side: Side) {
+    let c = &mut cx.state.changes;
+    if c.shown.as_ref() != Some(&(path.to_string(), side)) {
+        c.shown = Some((path.to_string(), side));
+        c.diff = None;
+        c.selected_lines.clear();
+    }
+    cx.worker.send(Command::LoadDiff {
+        path: path.to_string(),
+        side,
+    });
+}
+
+const FILE_COLUMNS: &[Column] = &[Column {
+    title: "File",
+    width: 1000.0,
+}];
+
+fn file_lists(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
+    let staged: Vec<FileStatus> = cx.state.changes.staged().cloned().collect();
+    let unstaged: Vec<FileStatus> = cx.state.changes.unstaged().cloned().collect();
+    let half = ((ui.available_height() - 60.0) / 2.0).max(60.0);
+    group(ui, cx, &staged, Side::Staged, half);
+    ui.add_space(4.0);
+    group(ui, cx, &unstaged, Side::Unstaged, half);
+}
+
+fn group(ui: &mut egui::Ui, cx: &mut Ctx<'_>, files: &[FileStatus], side: Side, height: f32) {
+    let (title, all_label) = match side {
+        Side::Staged => (s::STAGED_CHANGES, s::UNSTAGE_ALL),
+        Side::Unstaged => (s::CHANGES, s::STAGE_ALL),
+    };
+    ui.horizontal(|ui| {
+        ui.label(format!("{title} ({})", files.len()));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let b = Button95::new(all_label)
+                .min_size(egui::vec2(80.0, 20.0))
+                .enabled(!files.is_empty());
+            if ui.add(b).clicked() {
+                for f in files {
+                    toggle_file(cx, f, side);
+                }
+            }
+        });
+    });
+    let selected = cx
+        .state
+        .changes
+        .shown
+        .as_ref()
+        .filter(|(_, s)| *s == side)
+        .and_then(|(p, _)| files.iter().position(|f| &f.path == p));
+    let mut menu_action: Option<(usize, MenuAction)> = None;
+    let id = match side {
+        Side::Staged => "staged_files",
+        Side::Unstaged => "unstaged_files",
+    };
+    let resp = ListView::new(id, FILE_COLUMNS, files.len())
+        .header(false)
+        .height(height)
+        .context_menu(|row, ui| {
+            let toggle = if side == Side::Staged {
+                s::UNSTAGE
+            } else {
+                s::STAGE
+            };
+            if ui.button(toggle).clicked() {
+                menu_action = Some((row, MenuAction::Toggle));
+            }
+            if side == Side::Unstaged {
+                if ui.button(s::IGNORE_FILE).clicked() {
+                    menu_action = Some((row, MenuAction::IgnorePath));
+                }
+                if let Some(pattern) = extension_pattern(&files[row].path) {
+                    let label = s::IGNORE_EXT.replace("{ext}", pattern.trim_start_matches("*."));
+                    if ui.button(label).clicked() {
+                        menu_action = Some((row, MenuAction::Ignore(pattern)));
+                    }
+                }
+            }
+        })
+        .show(ui, selected, |row, _| {
+            let f = &files[row];
+            let change = match side {
+                Side::Staged => f.staged.as_ref(),
+                Side::Unstaged => f.unstaged.as_ref(),
+            };
+            Cell::from(change.map(|c| describe(&f.path, c)).unwrap_or_default())
+        });
+    if let Some(row) = resp.double_clicked {
+        toggle_file(cx, &files[row], side);
+    } else if let Some(row) = resp.clicked {
+        select_file(cx, &files[row].path, side);
+    }
+    match menu_action {
+        Some((row, MenuAction::Toggle)) => toggle_file(cx, &files[row], side),
+        Some((row, MenuAction::IgnorePath)) => cx
+            .worker
+            .send(Command::AddToGitignore(files[row].path.clone())),
+        Some((_, MenuAction::Ignore(pattern))) => cx.worker.send(Command::AddToGitignore(pattern)),
+        None => {}
+    }
+}
+
+enum MenuAction {
+    Toggle,
+    IgnorePath,
+    Ignore(String),
+}
+
+/// Space toggles the displayed file when no text field has the keyboard.
+fn toggle_with_space(ui: &egui::Ui, cx: &mut Ctx<'_>) {
+    if ui.ctx().egui_wants_keyboard_input() || !ui.input(|i| i.key_pressed(egui::Key::Space)) {
+        return;
+    }
+    let Some((path, side)) = cx.state.changes.shown.clone() else {
+        return;
+    };
+    if let Some(file) = cx
+        .state
+        .changes
+        .files
+        .iter()
+        .find(|f| f.path == path)
+        .cloned()
+    {
+        toggle_file(cx, &file, side);
+    }
+}
+
+fn commit_box(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
+    let committing = cx.state.changes.committing;
+    let can_commit = cx.state.changes.can_commit();
+    let focus = std::mem::take(&mut cx.state.changes.focus_summary);
+    let c = &mut cx.state.changes;
+    let mut amend_toggled = false;
+    let mut commit_clicked = false;
+    bevel_frame(ui, Bevel::Sunken, win95::theme::SILVER, 4, |ui| {
+        ui.set_width(ui.available_width());
+        ui.add_enabled_ui(!committing, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(s::SUMMARY);
+                let r = text_field(
+                    ui,
+                    &mut c.summary,
+                    (ui.available_width() - 190.0).max(120.0),
+                    false,
+                );
+                if focus {
+                    r.request_focus();
+                }
+                let before = c.amend;
+                checkbox(ui, &mut c.amend, s::AMEND);
+                amend_toggled = c.amend && !before;
+            });
+            if c.amend && c.head_pushed {
+                ui.label(
+                    RichText::new(s::AMEND_PUSHED_WARNING)
+                        .color(egui::Color32::from_rgb(0x80, 0, 0)),
+                );
+            }
+            ui.horizontal(|ui| {
+                ui.label(s::DESCRIPTION);
+                text_area(
+                    ui,
+                    &mut c.description,
+                    (ui.available_width() - 100.0).max(120.0),
+                    3,
+                );
+                ui.vertical(|ui| {
+                    commit_clicked = ui
+                        .add(Button95::new(s::COMMIT).enabled(can_commit))
+                        .clicked();
+                });
+            });
+        });
+        if committing {
+            ui.horizontal(|ui| {
+                ui.label(s::COMMITTING);
+                ui.add(ProgressBar95::new(None).width(200.0));
+            });
+        }
+    });
+    if amend_toggled {
+        cx.worker.send(Command::LoadAmendInfo);
+    }
+    if commit_clicked && can_commit {
+        let c = &mut cx.state.changes;
+        c.committing = true;
+        let message = c.commit_message();
+        let amend = c.amend;
+        cx.worker.send(Command::Commit { message, amend });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn describes_changes_with_win95_style_codes() {
+        assert_eq!(describe("a.rs", &Change::Modified), "[M] a.rs");
+        assert_eq!(
+            describe(
+                "new.rs",
+                &Change::Renamed {
+                    from: "old.rs".into()
+                }
+            ),
+            "[R] old.rs → new.rs"
+        );
+        assert_eq!(describe("x", &Change::Untracked), "[?] x");
+    }
+
+    #[test]
+    fn renames_touch_both_paths() {
+        let f = FileStatus {
+            path: "new.rs".into(),
+            staged: Some(Change::Renamed {
+                from: "old.rs".into(),
+            }),
+            unstaged: None,
+        };
+        assert_eq!(
+            paths_of(&f, Side::Staged),
+            vec!["new.rs".to_string(), "old.rs".to_string()]
+        );
+        assert_eq!(paths_of(&f, Side::Unstaged), vec!["new.rs".to_string()]);
+    }
+
+    #[test]
+    fn extension_patterns() {
+        assert_eq!(extension_pattern("logs/app.log").as_deref(), Some("*.log"));
+        assert_eq!(extension_pattern("Makefile"), None);
+        assert_eq!(extension_pattern(".env"), None);
+        assert_eq!(extension_pattern("dir.d/file"), None);
+    }
+}

@@ -1,14 +1,12 @@
-use egui::{Panel, RichText, UiBuilder, ViewportCommand};
+use egui::{Panel, UiBuilder, ViewportCommand};
 use win95::{
     Bevel, Button95, Cell, Column, ListView, TitleAction, TitleBar, bevel_frame, status_bar,
 };
 
 use super::{Ctx, clone_dialog};
-use crate::format::format_epoch;
 use crate::protocol::Command;
 use crate::state::Auth;
 use crate::strings as s;
-use gitcore::Head;
 
 pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let full = ui.max_rect();
@@ -34,7 +32,16 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             .show(ui, |ui| recents(ui, cx));
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(2)))
-            .show(ui, |ui| summary(ui, cx));
+            .show(ui, |ui| {
+                if cx.state.current.is_some() {
+                    super::changes::show(ui, cx);
+                } else {
+                    bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 8, |ui| {
+                        ui.set_min_size(ui.available_size());
+                        ui.label(s::NO_REPO);
+                    });
+                }
+            });
     });
     win95::resize_edges(ui, full);
 }
@@ -95,6 +102,47 @@ fn menu(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             }
         });
         ui.menu_button(s::MENU_REPOSITORY, |ui| {
+            let open = cx.state.current.is_some();
+            if ui
+                .add_enabled(open, egui::Button::new(s::COMMIT_MENU))
+                .clicked()
+            {
+                cx.state.changes.focus_summary = true;
+            }
+            if ui
+                .add_enabled(open, egui::Button::new(s::STAGE_ALL))
+                .clicked()
+            {
+                let files: Vec<_> = cx.state.changes.unstaged().cloned().collect();
+                for f in files
+                    .iter()
+                    .filter(|f| f.unstaged != Some(gitcore::Change::Conflicted))
+                {
+                    for path in super::changes::paths_of(f, gitcore::Side::Unstaged) {
+                        cx.worker.send(Command::Stage {
+                            path,
+                            selection: gitcore::Selection::All,
+                            shown: None,
+                        });
+                    }
+                }
+            }
+            if ui
+                .add_enabled(open, egui::Button::new(s::UNSTAGE_ALL))
+                .clicked()
+            {
+                let files: Vec<_> = cx.state.changes.staged().cloned().collect();
+                for f in &files {
+                    for path in super::changes::paths_of(f, gitcore::Side::Staged) {
+                        cx.worker.send(Command::Unstage {
+                            path,
+                            selection: gitcore::Selection::All,
+                            shown: None,
+                        });
+                    }
+                }
+            }
+            ui.separator();
             for label in [s::FETCH, s::PULL, s::PUSH] {
                 ui.add_enabled(false, egui::Button::new(label));
             }
@@ -169,47 +217,6 @@ fn recents(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     }
 }
 
-fn summary(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
-    bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 8, |ui| {
-        ui.set_min_size(ui.available_size());
-        let Some(c) = &cx.state.current else {
-            ui.label(s::NO_REPO);
-            return;
-        };
-        ui.label(RichText::new(&c.name).heading());
-        ui.add_space(6.0);
-        egui::Grid::new("summary")
-            .num_columns(2)
-            .spacing([12.0, 4.0])
-            .show(ui, |ui| {
-                ui.label(s::BRANCH);
-                ui.label(match &c.head {
-                    Head::Branch(b) => b.clone(),
-                    Head::Unborn(b) => format!("{b} {}", s::NO_COMMITS),
-                    Head::Detached(id) => format!("{id} {}", s::DETACHED),
-                });
-                ui.end_row();
-                ui.label(s::REMOTE);
-                ui.label(c.origin_url.as_deref().unwrap_or(s::NO_REMOTE));
-                ui.end_row();
-                ui.label(s::LAST_COMMIT);
-                ui.label(match &c.last_commit {
-                    Some(lc) => format!(
-                        "{} \"{}\" - {}, {}",
-                        lc.short_id,
-                        lc.summary,
-                        lc.author,
-                        format_epoch(lc.time)
-                    ),
-                    None => s::NO_COMMITS.to_string(),
-                });
-                ui.end_row();
-            });
-        ui.add_space(8.0);
-        ui.label(RichText::new(c.path.display().to_string()).color(win95::theme::GRAY));
-    });
-}
-
 fn status(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let who = match &cx.state.auth {
         Auth::SignedIn(u) => format!("Signed in: @{}", u.login),
@@ -219,6 +226,10 @@ fn status(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     };
     let activity = if cx.state.repos_loading {
         s::LOADING
+    } else if cx.state.changes.committing {
+        s::COMMITTING
+    } else if let Some(note) = cx.state.changes.last_commit_note.as_deref() {
+        note
     } else {
         s::READY
     };

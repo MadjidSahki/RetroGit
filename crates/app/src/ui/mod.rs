@@ -1,7 +1,9 @@
 //! Screens. Each function draws from `AppState` and sends `Command`s to the worker.
 
 pub mod about;
+pub mod changes;
 pub mod clone_dialog;
+pub mod diff_view;
 pub mod main_window;
 pub mod message;
 pub mod sign_in;

@@ -6,6 +6,7 @@ use crate::config::WindowGeometry;
 use crate::protocol::Command;
 use crate::state::AppState;
 use crate::ui::{self, Ctx};
+use crate::watch::Watcher;
 use crate::worker::WorkerHandle;
 
 pub struct RetroGitApp {
@@ -13,6 +14,10 @@ pub struct RetroGitApp {
     worker: WorkerHandle,
     config_path: Option<PathBuf>,
     geometry: Option<WindowGeometry>,
+    /// Watches the open repository; replaced when another one is opened.
+    /// `None` inside means watching failed for that path (not retried every frame).
+    watcher: Option<(PathBuf, Option<Watcher>)>,
+    was_focused: bool,
 }
 
 impl RetroGitApp {
@@ -23,7 +28,30 @@ impl RetroGitApp {
             worker,
             config_path,
             geometry: None,
+            watcher: None,
+            was_focused: true,
         }
+    }
+
+    /// Keep the file watcher on the current repository.
+    fn sync_watcher(&mut self) {
+        let current = self.state.current.as_ref().map(|c| c.path.clone());
+        if self.watcher.as_ref().map(|(p, _)| p) == current.as_ref() {
+            return;
+        }
+        self.watcher = current.map(|path| {
+            let w = match Watcher::start(&path, self.worker.refresher()) {
+                Ok(w) => Some(w),
+                Err(e) => {
+                    log::warn!(
+                        "cannot watch {}: {e}; refresh on focus and with Refresh",
+                        path.display()
+                    );
+                    None
+                }
+            };
+            (path, w)
+        });
     }
 
     fn save_config(&mut self) {
@@ -47,6 +75,12 @@ impl eframe::App for RetroGitApp {
         if self.state.config_dirty {
             self.save_config();
         }
+        self.sync_watcher();
+        let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+        if focused && !self.was_focused && self.state.current.is_some() {
+            self.worker.send(Command::RefreshStatus);
+        }
+        self.was_focused = focused;
         ctx.input(|i| {
             let vp = i.viewport();
             if vp.maximized != Some(true)
