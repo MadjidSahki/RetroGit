@@ -19,11 +19,19 @@ pub enum Command {
     ValidateToken,
     StartDeviceFlow,
     SavePat(String),
-    SignOut,
+    RemoveAccount(String),
+    /// Use `login` for `slug` from now on (`None`: choose automatically again).
+    SetRepoAccount {
+        slug: Slug,
+        login: Option<String>,
+    },
     ListRepos,
+    /// `account`: the account to clone with (from the repository list); `None`: the
+    /// account of the URL's github.com repository, else the user's git credentials.
     Clone {
         url: String,
         dest: PathBuf,
+        account: Option<String>,
     },
     OpenRepo(PathBuf),
     // --- Sub-project 2: all apply to the repository opened last. ---
@@ -200,7 +208,21 @@ pub enum Op {
 
 #[derive(Debug, Clone)]
 pub enum Event {
+    /// An account was added, or at least one account is usable at startup.
     SignedIn(User),
+    /// Every account, in order (valid or to sign in again).
+    AccountsChanged(Vec<github::AccountStatus>),
+    /// Account the open repository uses (`None`: none can see it).
+    RepoAccount {
+        slug: Slug,
+        login: Option<String>,
+    },
+    /// Remember (or forget, `None`) the account of repository `key` (`owner/repo`,
+    /// lowercase) in the config.
+    RepoAccountLearned {
+        key: String,
+        account: Option<github::RepoAccount>,
+    },
     SignedOut,
     /// A token is stored but GitHub could not be reached; it is kept for later calls.
     Offline,

@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use github::{
-    Client, MemoryStore, Merge, MergeMethod, NewPull, PrFilter, Review, ReviewEvent, TokenProvider,
+    Client, MemoryAccounts, Merge, MergeMethod, NewPull, PrFilter, Review, ReviewEvent,
+    TokenProvider,
 };
 use mockito::Matcher;
 use retrogit::protocol::{Command, Event, Op, Severity};
@@ -20,10 +21,12 @@ fn slug() -> (String, String) {
 fn start(server: &mockito::Server, tokens: TokenProvider) -> WorkerHandle {
     let deps = WorkerDeps {
         client: Client::with_bases(&server.url(), &server.url()),
-        store: Arc::new(MemoryStore::default()),
+        store: Arc::new(MemoryAccounts::default()),
         client_id: String::new(),
         commit_backend: gitcore::CommitBackend::Git2,
         tokens,
+        known_accounts: Vec::new(),
+        repo_accounts: Default::default(),
     };
     spawn(deps, || {})
 }
@@ -43,11 +46,17 @@ fn until(w: &WorkerHandle, done: impl Fn(&Event) -> bool) -> Vec<Event> {
     panic!("timed out; events so far: {seen:?}");
 }
 
-/// Worker signed in with the PAT `ghp_pat` (login "ada").
+/// Worker signed in with the PAT `ghp_pat` (login "ada", member of organization "o", so
+/// it is the account of every `o/*` repository).
 fn signed_in(server: &mut mockito::Server, tokens: TokenProvider) -> WorkerHandle {
     server
         .mock("GET", "/user")
         .with_body(r#"{"login":"ada","name":null}"#)
+        .create();
+    server
+        .mock("GET", "/user/orgs")
+        .match_query(Matcher::Any)
+        .with_body(r#"[{"login":"o"}]"#)
         .create();
     let w = start(server, tokens);
     w.send(Command::SavePat("ghp_pat".into()));
@@ -135,8 +144,11 @@ fn list_and_detail_are_loaded_for_the_repository() {
 #[test]
 fn an_organization_restricting_retrogit_is_read_with_the_gh_token() {
     let mut server = mockito::Server::new();
-    let tokens = TokenProvider::new(Arc::new(|login: Option<&str>| {
-        assert_eq!(login, Some("ada"), "gh is asked for the signed-in account");
+    let tokens = TokenProvider::new(Arc::new(|login: &str| {
+        assert_eq!(
+            login, "ada",
+            "gh is asked for the account of the repository"
+        );
         Some("gho_cli".to_string())
     }));
     let w = signed_in(&mut server, tokens);
@@ -167,7 +179,7 @@ fn an_organization_restricting_retrogit_is_read_with_the_gh_token() {
 fn a_repository_looking_missing_is_read_with_the_gh_token() {
     // What github.com really answers for an organization restricting the OAuth App.
     let mut server = mockito::Server::new();
-    let tokens = TokenProvider::new(Arc::new(|_: Option<&str>| Some("gho_cli".to_string())));
+    let tokens = TokenProvider::new(Arc::new(|_: &str| Some("gho_cli".to_string())));
     let w = signed_in(&mut server, tokens);
     server
         .mock("POST", "/graphql")

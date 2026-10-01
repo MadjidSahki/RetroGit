@@ -7,18 +7,49 @@ use crate::protocol::{AppError, Command, Event, Op, Severity, Slug, SyncOp};
 use crate::strings as s;
 
 impl Worker {
-    /// Run a GitHub call for `slug` with the right token (RetroGit's, or `gh`'s when the
-    /// organization restricts OAuth Apps).
+    /// Run a GitHub call for `slug` as the repository's account (its RetroGit token, or
+    /// `gh`'s token of the same account when the organization restricts OAuth Apps). An
+    /// account learned automatically that lost access is forgotten and another one tried.
     fn on_github<T>(
-        &self,
+        &mut self,
         slug: &Slug,
         call: impl Fn(&Client, &str, &str, &str) -> Result<T, GithubError>,
     ) -> Result<T, GithubError> {
+        let r = self.on_github_once(slug, &call);
+        if matches!(&r, Err(e) if github::repository_missing(e))
+            && let Some(failed) = self.last_account.clone()
+            && self.replace_account(slug, &failed)
+        {
+            return self.on_github_once(slug, &call);
+        }
+        r
+    }
+
+    fn on_github_once<T>(
+        &mut self,
+        slug: &Slug,
+        call: &impl Fn(&Client, &str, &str, &str) -> Result<T, GithubError>,
+    ) -> Result<T, GithubError> {
         let (owner, repo) = slug;
+        if let Some(login) = self.unusable_choice(slug) {
+            self.last_account = None;
+            return Err(GithubError::Rejected {
+                status: 401,
+                message: s::ERR_ACCOUNT_MUST_SIGN_IN.replace("{login}", &login),
+            });
+        }
+        let Some(account) = self.account_for(slug) else {
+            self.last_account = None;
+            // No signed-in account can see it: say so as GitHub would.
+            return Err(GithubError::NotFound(format!(
+                "Could not resolve to a Repository with the name '{owner}/{repo}'."
+            )));
+        };
+        self.last_account = Some(account.login.clone());
         let client = &self.deps.client;
         self.deps
             .tokens
-            .with_token(self.token.as_deref(), owner, |t| {
+            .with_token(&account.login, &account.token, owner, |t| {
                 crate::logging::add_secret(t);
                 call(client, t, owner, repo)
             })
@@ -26,8 +57,10 @@ impl Worker {
 
     /// Report a GitHub failure; a restricted organization gets a link to approve RetroGit.
     fn github_failed(&mut self, during: Op, e: &GithubError) {
-        if *e == GithubError::Unauthorized && self.token.is_some() {
-            return self.drop_token(during);
+        if *e == GithubError::Unauthorized
+            && let Some(login) = self.last_account.clone()
+        {
+            return self.invalidate(&login, during);
         }
         let mut error = AppError::from_github(e);
         if matches!(e, GithubError::OAuthRestricted { .. }) || github::repository_missing(e) {
@@ -252,7 +285,7 @@ impl Worker {
         let Some(repo) = self.open_current(Op::PullAction) else {
             return;
         };
-        let auth = self.net_auth();
+        let auth = self.repo_net_auth();
         let never = std::sync::atomic::AtomicBool::new(false);
         let target = match head {
             Some(branch) => repo.fetch(&auth, |_| {}, &never).map(|()| {

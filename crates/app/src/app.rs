@@ -106,14 +106,16 @@ impl RetroGitApp {
         ctx: egui::Context,
     ) -> RetroGitApp {
         let (tx, rx) = std::sync::mpsc::channel();
+        let accounts = self.worker.accounts();
         let watcher = crate::pr_watch::PrWatcher::start(
             client,
             tokens,
-            self.worker.session(),
+            self.worker.accounts(),
             crate::pr_watch::INTERVAL,
             move |events: Vec<github::PrEvent>| {
+                let several = accounts.list().len() > 1;
                 for e in &events {
-                    let (title, body) = crate::notify::notification_text(e);
+                    let (title, body) = crate::notify::notification_text(e, several);
                     crate::notify::show(&title, &body);
                 }
                 let _ = tx.send(events);
@@ -231,6 +233,7 @@ impl eframe::App for RetroGitApp {
         };
         ui::main_window::show(ui, &mut cx);
         ui::clone_dialog::show(&egui_ctx, &mut cx);
+        ui::accounts::show(&egui_ctx, &mut cx);
         ui::sign_in::show(&egui_ctx, &mut cx);
         ui::about::show(&egui_ctx, &mut cx);
         ui::discard::show(&egui_ctx, &mut cx);

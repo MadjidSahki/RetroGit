@@ -44,7 +44,8 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                 .max_height(360.0)
                 .show(ui, |ui| {
                     for (i, e) in items.iter().enumerate() {
-                        let (title, body) = crate::notify::notification_text(e);
+                        let (title, body) =
+                            crate::notify::notification_text(e, cx.state.accounts.len() > 1);
                         if ui
                             .selectable_label(false, format!("{title}  {body}"))
                             .clicked()

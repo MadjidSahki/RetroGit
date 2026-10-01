@@ -30,6 +30,10 @@ pub struct Config {
     pub ide_by_repo: std::collections::BTreeMap<PathBuf, String>,
     /// Last IDE chosen: the default for repositories without a choice.
     pub default_ide: Option<String>,
+    /// GitHub logins of the signed-in accounts, in order (tokens are in the keychain).
+    pub accounts: Vec<String>,
+    /// Account of each repository (`owner/repo`, lowercase): chosen or learned.
+    pub repo_accounts: std::collections::BTreeMap<String, github::RepoAccount>,
 }
 
 impl Config {

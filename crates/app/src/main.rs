@@ -83,7 +83,7 @@ fn main() -> eframe::Result {
             let repaint = cc.egui_ctx.clone();
             let tokens = github::TokenProvider::new(std::sync::Arc::new(|login| {
                 let token =
-                    github::gh_auth_token(retrogit::env_path::tool_path().as_deref(), login);
+                    github::gh_auth_token(retrogit::env_path::tool_path().as_deref(), Some(login));
                 if let Some(t) = &token {
                     logging::add_secret(t);
                 }
@@ -91,7 +91,9 @@ fn main() -> eframe::Result {
             }));
             let deps = WorkerDeps {
                 client: github::Client::github_com(),
-                store: Arc::new(github::KeyringStore::new("RetroGit", "github.com")),
+                store: Arc::new(github::KeyringAccounts::new("RetroGit")),
+                known_accounts: config.accounts.clone(),
+                repo_accounts: config.repo_accounts.clone(),
                 client_id: GITHUB_CLIENT_ID.to_string(),
                 commit_backend: gitcore::CommitBackend::PreferCli,
                 tokens: tokens.clone(),

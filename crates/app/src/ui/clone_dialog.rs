@@ -11,15 +11,19 @@ use crate::strings as s;
 const COLUMNS: &[Column] = &[
     Column {
         title: s::COL_NAME,
-        width: 190.0,
+        width: 160.0,
     },
     Column {
         title: s::COL_OWNER,
-        width: 140.0,
+        width: 120.0,
     },
     Column {
         title: s::COL_PRIVATE,
         width: 55.0,
+    },
+    Column {
+        title: s::COL_ACCOUNTS,
+        width: 130.0,
     },
     Column {
         title: s::COL_UPDATED,
@@ -27,16 +31,20 @@ const COLUMNS: &[Column] = &[
     },
 ];
 
-/// Open the clone dialog (or the sign-in dialog if needed) and fetch repos once.
+/// "Account" column: every account that sees the repository.
+pub fn accounts_cell(accounts: &[String]) -> String {
+    accounts.join(", ")
+}
+
+/// Open the clone dialog and fetch the repositories of every account once (without an
+/// account, only cloning from a URL is offered).
 pub fn open(cx: &mut Ctx<'_>) {
     if cx.state.auth == Auth::Offline {
-        // Token kept from an offline start: retry the session, then list repos with it.
+        // Tokens kept from an offline start: retry the sessions, then list repos with them.
         cx.state.auth = Auth::Checking;
         cx.worker.send(Command::ValidateToken);
-    } else if !matches!(cx.state.auth, Auth::SignedIn(_)) {
-        cx.state.sign_in.get_or_insert_with(Default::default);
-        return;
     }
+    let signed_in = matches!(cx.state.auth, Auth::SignedIn(_) | Auth::Checking);
     let parent = cx
         .state
         .config
@@ -48,7 +56,7 @@ pub fn open(cx: &mut Ctx<'_>) {
         dest_parent: parent.display().to_string(),
         ..Default::default()
     });
-    if cx.state.repos.is_empty() && !cx.state.repos_loading {
+    if signed_in && cx.state.repos.is_empty() && !cx.state.repos_loading {
         cx.state.repos_loading = true;
         cx.worker.send(Command::ListRepos);
     }
@@ -93,17 +101,18 @@ fn progress(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
 }
 
 fn picker(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
-    let mut start: Option<(String, PathBuf, String)> = None;
+    let mut start: Option<(String, PathBuf, String, Option<String>)> = None;
     let mut refresh = false;
     let mut close = false;
     let loading = cx.state.repos_loading;
+    let signed_in = matches!(cx.state.auth, Auth::SignedIn(_));
     let repos = &cx.state.repos;
     let Some(dialog) = cx.state.clone.as_mut() else {
         return;
     };
 
     let r = Dialog::new("clone", s::CLONE_TITLE)
-        .width(500.0)
+        .width(620.0)
         .show(egui_ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label(s::FILTER);
@@ -125,12 +134,22 @@ fn picker(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                         0 => Cell::from(r.name.as_str()),
                         1 => Cell::from(r.owner.as_str()),
                         2 => Cell::from(if r.private { s::YES } else { "" }),
+                        3 => Cell {
+                            text: accounts_cell(&r.accounts),
+                            dimmed: false,
+                        },
                         _ => Cell::from(r.updated_at.get(..10).unwrap_or("")),
                     }
                 });
             if loading {
                 ui.label(s::LOADING);
+            } else if !signed_in {
+                ui.label(s::CLONE_SIGN_IN_HINT);
             }
+            ui.horizontal(|ui| {
+                ui.label(s::CLONE_URL);
+                text_field(ui, &mut dialog.url, 330.0, false);
+            });
             if let Some(row) = list.clicked.or(list.double_clicked) {
                 dialog.selected = Some(repos[visible[row]].full_name.clone());
             }
@@ -148,45 +167,58 @@ fn picker(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                     }
                 }
             });
-            let chosen = dialog
-                .selected
-                .as_ref()
-                .and_then(|f| repos.iter().find(|r| &r.full_name == f));
+            let url = dialog.url.trim().to_string();
+            // What would be cloned: the URL if one is typed, else the selected repository.
+            let target: Option<(String, String, Option<String>)> = if url.is_empty() {
+                dialog
+                    .selected
+                    .as_ref()
+                    .and_then(|f| repos.iter().find(|r| &r.full_name == f))
+                    .map(|r| {
+                        (
+                            r.clone_url.clone(),
+                            r.name.clone(),
+                            r.accounts.first().cloned(),
+                        )
+                    })
+            } else {
+                match super::accounts::clone_url_for(&url) {
+                    Ok(clone_url) => super::accounts::folder_from_url(&clone_url)
+                        .map(|name| (clone_url, name, None)),
+                    Err(why) => {
+                        ui.label(egui::RichText::new(why).color(win95::theme::GRAY));
+                        None
+                    }
+                }
+            };
             let parent = dialog.dest_parent.trim();
-            if let Some(repo) = chosen
+            if let Some((_, name, _)) = &target
                 && !parent.is_empty()
             {
-                let dest = PathBuf::from(parent).join(&repo.name);
+                let dest = PathBuf::from(parent).join(name);
                 ui.label(format!("{} {}", s::WILL_CLONE_INTO, dest.display()));
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let can_clone = chosen.is_some() && !parent.is_empty();
+                let can_clone = target.is_some() && !parent.is_empty();
                 let clicked = ui.add(Button95::new(s::CLONE).enabled(can_clone)).clicked();
                 let double = list.double_clicked.is_some() && !parent.is_empty();
                 if (clicked || double)
-                    && let Some(repo) = dialog
-                        .selected
-                        .as_ref()
-                        .and_then(|f| repos.iter().find(|r| &r.full_name == f))
+                    && let Some((url, name, account)) = target.clone()
                 {
-                    start = Some((
-                        repo.clone_url.clone(),
-                        PathBuf::from(parent).join(&repo.name),
-                        repo.name.clone(),
-                    ));
+                    start = Some((url, PathBuf::from(parent).join(&name), name, account));
                 }
                 close = ui.add(Button95::new(s::CANCEL)).clicked();
             });
         });
 
-    if let Some((url, dest, name)) = start {
+    if let Some((url, dest, name, account)) = start {
         let parent = dialog.dest_parent.trim().to_string();
         dialog.progress = Some(Default::default());
         dialog.cloning_name = name;
         cx.state.config.last_clone_dir = Some(PathBuf::from(parent));
         cx.state.config_dirty = true;
-        cx.worker.send(Command::Clone { url, dest });
+        cx.worker.send(Command::Clone { url, dest, account });
     } else if r.close_requested || close {
         cx.state.clone = None;
     }

@@ -4,8 +4,9 @@ use github::{PrEvent, PrEventKind};
 
 use crate::strings as s;
 
-/// Title and body of the notification for `e`.
-pub fn notification_text(e: &PrEvent) -> (String, String) {
+/// Title and body of the notification for `e`; the title names the account when several
+/// are signed in.
+pub fn notification_text(e: &PrEvent, with_account: bool) -> (String, String) {
     let what = match &e.kind {
         PrEventKind::ChecksPassed => s::NOTIFY_CHECKS_PASSED.to_string(),
         PrEventKind::ChecksFailed { failed } if *failed == 1 => {
@@ -21,10 +22,11 @@ pub fn notification_text(e: &PrEvent) -> (String, String) {
         PrEventKind::Merged => s::NOTIFY_MERGED.to_string(),
         PrEventKind::Closed => s::NOTIFY_CLOSED.to_string(),
     };
-    (
-        format!("{} #{}", e.repo, e.number),
-        format!("{}: {what}", e.title),
-    )
+    let mut title = format!("{} #{}", e.repo, e.number);
+    if with_account {
+        title.push_str(&format!(" (@{})", e.account));
+    }
+    (title, format!("{}: {what}", e.title))
 }
 
 /// `text` as an AppleScript string literal.
@@ -98,6 +100,7 @@ mod tests {
 
     fn event(kind: PrEventKind) -> PrEvent {
         PrEvent {
+            account: "me".into(),
             key: "o/r#7".into(),
             repo: "o/r".into(),
             number: 7,
@@ -109,8 +112,16 @@ mod tests {
 
     #[test]
     fn notification_text_for_each_event() {
-        let body = |k| notification_text(&event(k)).1;
-        assert_eq!(notification_text(&event(PrEventKind::Merged)).0, "o/r #7");
+        let body = |k| notification_text(&event(k), false).1;
+        assert_eq!(
+            notification_text(&event(PrEventKind::Merged), false).0,
+            "o/r #7"
+        );
+        assert_eq!(
+            notification_text(&event(PrEventKind::Merged), true).0,
+            "o/r #7 (@me)",
+            "several accounts"
+        );
         assert_eq!(
             body(PrEventKind::ChecksPassed),
             "Fix login: all checks passed"

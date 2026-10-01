@@ -7,7 +7,6 @@ pub const MENU_REPOSITORY: &str = "Repository";
 pub const MENU_VIEW: &str = "View";
 pub const MENU_HELP: &str = "Help";
 pub const SIGN_IN_MENU: &str = "Sign in...";
-pub const SIGN_OUT: &str = "Sign out";
 pub const CLONE_MENU: &str = "Clone...";
 pub const OPEN_MENU: &str = "Open...";
 pub const EXIT: &str = "Exit";
@@ -341,3 +340,29 @@ pub const RESOLVE: &str = "Resolve conversation";
 pub const UNRESOLVE: &str = "Unresolve conversation";
 pub const NOTE_RESOLVED: &str = "Conversation resolved";
 pub const NOTE_UNRESOLVED: &str = "Conversation unresolved";
+pub const ERR_ACCOUNT_REJECTED: &str =
+    "GitHub rejected the session of @{login}. Sign in again with File > Accounts...";
+pub const ACCOUNTS_MENU: &str = "Accounts...";
+pub const ACCOUNTS_TITLE: &str = "GitHub accounts";
+pub const NO_ACCOUNTS: &str = "No account yet.";
+pub const ADD_ACCOUNT: &str = "Add account...";
+pub const REMOVE: &str = "Remove";
+pub const SIGN_IN_AGAIN: &str = "sign in again";
+pub const ACCOUNT_LABEL: &str = "Account:";
+pub const ACCOUNTS_COUNT: &str = "accounts";
+pub const CHECKING_ACCOUNT: &str = "Account: checking...";
+pub const GIT_CREDENTIALS: &str = "Account: git credentials";
+pub const REPO_ACCOUNT_MENU: &str = "Account...";
+pub const REPO_ACCOUNT_TITLE: &str = "Account for";
+pub const REPO_ACCOUNT_HELP: &str =
+    "GitHub account RetroGit uses for this repository (pull requests, fetch, pull, push).";
+pub const AUTOMATIC: &str = "Automatic (an account that can see it)";
+pub const CLONE_URL: &str = "Or clone from URL:";
+pub const CLONE_SIGN_IN_HINT: &str =
+    "Sign in (File > Accounts...) to list your repositories, or clone from a URL.";
+pub const COL_ACCOUNTS: &str = "Account";
+pub const AS_ACCOUNT: &str = "as";
+pub const SWITCH_ACCOUNT_HINT: &str = "Repository > Account... to use another account.";
+pub const ERR_SSH_CLONE: &str = "Cloning over SSH is only supported for github.com (cloned over HTTPS). Use the HTTPS URL of this repository.";
+pub const ERR_CLONE_URL: &str = "Enter an HTTPS URL, or a github.com SSH URL.";
+pub const ERR_ACCOUNT_MUST_SIGN_IN: &str = "@{login} is the account chosen for this repository and must sign in again (File > Accounts...), or choose another one with Repository > Account...";

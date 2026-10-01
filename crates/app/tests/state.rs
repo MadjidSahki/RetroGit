@@ -34,6 +34,7 @@ fn repo(full: &str) -> RepoInfo {
         private: false,
         clone_url: format!("https://github.com/{full}.git"),
         updated_at: "2026-09-30T10:00:00Z".into(),
+        accounts: vec![],
     }
 }
 

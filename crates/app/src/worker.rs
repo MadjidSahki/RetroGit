@@ -1,5 +1,6 @@
 //! The single background thread doing all network and Git work.
 
+mod accounts;
 mod changes;
 mod pulls;
 mod sync;
@@ -10,8 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
-use gitcore::{CloneRequest, CommitBackend, Credentials, GitError, Repo, Side};
-use github::{Client, DeviceFlow, GithubError, Step, TokenStore};
+use gitcore::{CommitBackend, Repo, Side};
+use github::{Client, DeviceFlow, Step};
 
 use crate::logging;
 use crate::protocol::{AppError, Command, Event, Op, Severity};
@@ -19,20 +20,22 @@ use crate::strings as s;
 
 pub struct WorkerDeps {
     pub client: Client,
-    pub store: Arc<dyn TokenStore>,
+    /// Account tokens (system credential store).
+    pub store: Arc<dyn github::AccountStore>,
     /// Empty = Device Flow unavailable (PAT only).
     pub client_id: String,
     pub commit_backend: CommitBackend,
     /// Chooses the token per organization (`gh` fallback for restricted organizations).
     pub tokens: github::TokenProvider,
+    /// Logins remembered in the config, checked at startup.
+    pub known_accounts: Vec<String>,
+    /// Account of each repository (`owner/repo`, lowercase), as remembered in the config.
+    pub repo_accounts: std::collections::BTreeMap<String, github::RepoAccount>,
 }
-
-/// Token and login of the signed-in user, shared with the pull request watcher.
-pub type Session = Arc<std::sync::Mutex<Option<(String, String)>>>;
 
 /// UI-side handle. Cancellation flags bypass the command queue so they act immediately.
 pub struct WorkerHandle {
-    session: Session,
+    accounts: github::Accounts,
     tx: Sender<Command>,
     pub events: Receiver<Event>,
     cancel_flow: Arc<AtomicBool>,
@@ -59,9 +62,9 @@ impl WorkerHandle {
         }
     }
 
-    /// Who is signed in, kept up to date by the worker (read by the pull request watcher).
-    pub fn session(&self) -> Session {
-        self.session.clone()
+    /// The signed-in accounts, kept up to date by the worker (read by the watcher).
+    pub fn accounts(&self) -> github::Accounts {
+        self.accounts.clone()
     }
 
     /// Thread-safe "please refresh the status" callback (for the file watcher).
@@ -138,12 +141,15 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
     let worker_busy = busy.clone();
     let refresh_pending = Arc::new(AtomicBool::new(false));
     let cancel_net = Arc::new(AtomicBool::new(false));
-    let session: Session = Arc::new(std::sync::Mutex::new(None));
+    let accounts = github::Accounts::default();
     let mut worker = Worker {
-        session: session.clone(),
+        accounts: accounts.clone(),
+        repo_accounts: deps.repo_accounts.clone(),
+        seen: Default::default(),
+        no_account: Default::default(),
+        last_account: None,
         cancel_net: cancel_net.clone(),
         deps,
-        token: None,
         repo: None,
         shown: None,
         lease: None,
@@ -179,7 +185,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
         log::error!("could not start worker thread: {e}");
     }
     WorkerHandle {
-        session,
+        accounts,
         tx,
         events: erx,
         cancel_flow,
@@ -191,9 +197,17 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
 }
 
 struct Worker {
-    session: Session,
+    /// Signed-in accounts (shared with the watcher).
+    accounts: github::Accounts,
+    /// Account of each repository (`owner/repo`, lowercase): chosen or learned.
+    repo_accounts: std::collections::BTreeMap<String, github::RepoAccount>,
+    /// Accounts each repository was listed for (from the repository lists).
+    seen: std::collections::HashMap<String, Vec<String>>,
+    /// Repositories no account could see this session (not tried again).
+    no_account: std::collections::HashSet<String>,
+    /// Account used by the last GitHub call (to sign out the right one on a 401).
+    last_account: Option<String>,
     deps: WorkerDeps,
-    token: Option<String>,
     /// Repository opened last (target of all sub-project 2 commands).
     repo: Option<std::path::PathBuf>,
     /// File whose diff the UI displays; its diff is re-sent after every change.
@@ -209,14 +223,6 @@ struct Worker {
 }
 
 impl Worker {
-    /// Signed in (or out): tell the token provider and the watcher.
-    fn set_session(&self, session: Option<(&str, &str)>) {
-        self.deps.tokens.set_login(session.map(|(_, login)| login));
-        if let Ok(mut s) = self.session.lock() {
-            *s = session.map(|(t, l)| (t.to_string(), l.to_string()));
-        }
-    }
-
     fn emit(&self, ev: Event) {
         (self.emit)(ev);
     }
@@ -231,9 +237,10 @@ impl Worker {
             Command::ValidateToken => self.validate(),
             Command::StartDeviceFlow => self.device_flow(),
             Command::SavePat(t) => self.sign_in_with(t.trim().to_string(), true),
-            Command::SignOut => self.sign_out(),
+            Command::RemoveAccount(login) => self.remove_account(&login),
+            Command::SetRepoAccount { slug, login } => self.set_repo_account(&slug, login),
             Command::ListRepos => self.list_repos(),
-            Command::Clone { url, dest } => self.clone(url, dest),
+            Command::Clone { url, dest, account } => self.clone(url, dest, account),
             Command::OpenRepo(path) => match Repo::open(&path).and_then(|r| r.summary()) {
                 Ok(summary) => self.opened(summary, false),
                 Err(e) => self.fail(Op::Open(path), AppError::from_git(&e)),
@@ -293,58 +300,6 @@ impl Worker {
         }
     }
 
-    fn validate(&mut self) {
-        let token = match self.deps.store.load() {
-            Ok(Some(t)) => t,
-            Ok(None) => return self.emit(Event::SignedOut),
-            Err(e) => {
-                self.fail(Op::Auth, AppError::from_store(&e));
-                return self.emit(Event::SignedOut);
-            }
-        };
-        logging::add_secret(&token);
-        match self.deps.client.current_user(&token) {
-            Ok(user) => {
-                self.set_session(Some((&token, &user.login)));
-                self.token = Some(token);
-                self.emit(Event::SignedIn(user));
-            }
-            Err(GithubError::Unauthorized) => {
-                let _ = self.deps.store.clear();
-                self.emit(Event::SignedOut);
-            }
-            Err(e) => {
-                // Keep the token: the network may come back (VPN, Wi-Fi).
-                self.token = Some(token);
-                self.fail(Op::Auth, AppError::from_github(&e));
-                self.emit(Event::Offline);
-            }
-        }
-    }
-
-    /// Validate `token` with `GET /user`, then store it.
-    fn sign_in_with(&mut self, token: String, is_pat: bool) {
-        logging::add_secret(&token);
-        match self.deps.client.current_user(&token) {
-            Ok(user) => {
-                if let Err(e) = self.deps.store.save(&token) {
-                    // Still signed in for this session; warn that it won't persist.
-                    self.fail(Op::Auth, AppError::from_store(&e));
-                }
-                self.set_session(Some((&token, &user.login)));
-                self.token = Some(token);
-                self.emit(Event::SignedIn(user));
-            }
-            Err(GithubError::Unauthorized) if is_pat => {
-                self.fail(
-                    Op::Auth,
-                    AppError::new(Severity::Warning, s::ERR_PAT_REJECTED),
-                );
-            }
-            Err(e) => self.fail(Op::Auth, AppError::from_github(&e)),
-        }
-    }
-
     fn device_flow(&mut self) {
         if self.deps.client_id.is_empty() {
             return self.fail(Op::Auth, AppError::new(Severity::Info, s::ERR_NO_CLIENT_ID));
@@ -383,67 +338,6 @@ impl Worker {
             }
         }
     }
-
-    fn sign_out(&mut self) {
-        self.token = None;
-        self.set_session(None);
-        if let Err(e) = self.deps.store.clear() {
-            self.fail(Op::Auth, AppError::from_store(&e));
-        }
-        self.emit(Event::SignedOut);
-    }
-
-    fn list_repos(&mut self) {
-        let Some(token) = self.token.clone() else {
-            return self.emit(Event::SignedOut);
-        };
-        match self.deps.client.list_repos(&token) {
-            Ok(listing) => {
-                self.emit(Event::ReposLoaded(listing.repos));
-                if !listing.sso_hidden_orgs.is_empty() {
-                    let mut warning = AppError::new(Severity::Warning, s::ERR_SSO_PARTIAL);
-                    warning.link = Some(self.sso_settings_link());
-                    self.fail(Op::Repos, warning);
-                }
-            }
-            Err(GithubError::Unauthorized) => self.drop_token(Op::Repos),
-            Err(e) => self.fail(Op::Repos, AppError::from_github(&e)),
-        }
-    }
-
-    fn clone(&mut self, url: String, dest: std::path::PathBuf) {
-        let credentials = self.token.clone().map(|t| Credentials {
-            username: "x-access-token".into(),
-            password: t,
-        });
-        let req = CloneRequest {
-            url,
-            dest,
-            credentials,
-        };
-        let mut throttle = Throttle::new(Duration::from_millis(50));
-        let mut last = None;
-        let emit = &self.emit;
-        let result = gitcore::clone(
-            &req,
-            |p| {
-                last = Some(p);
-                if throttle.ready(Instant::now()) {
-                    emit(Event::CloneProgress(p));
-                }
-            },
-            &self.cancel_clone,
-        );
-        if let Some(p) = last {
-            self.emit(Event::CloneProgress(p));
-        }
-        match result.and_then(|repo| repo.summary()) {
-            Ok(summary) => self.opened(summary, true),
-            Err(GitError::Cancelled) => self.emit(Event::CloneCancelled),
-            Err(e @ GitError::Auth(_)) => self.clone_auth_failed(&e),
-            Err(e) => self.fail(Op::Clone, AppError::from_git(&e)),
-        }
-    }
 }
 
 impl Worker {
@@ -457,27 +351,6 @@ impl Worker {
                 self.deps.client_id
             )
         }
-    }
-
-    /// The token was rejected: forget it everywhere and ask to sign in again.
-    fn drop_token(&mut self, during: Op) {
-        self.token = None;
-        self.set_session(None);
-        let _ = self.deps.store.clear();
-        self.fail(during, AppError::from_github(&GithubError::Unauthorized));
-        self.emit(Event::SignedOut);
-    }
-
-    /// Git refused our credentials: a revoked token or a missing SSO authorization.
-    fn clone_auth_failed(&mut self, e: &GitError) {
-        if let Some(token) = self.token.clone()
-            && self.deps.client.current_user(&token) == Err(GithubError::Unauthorized)
-        {
-            return self.drop_token(Op::Clone);
-        }
-        let mut error = AppError::from_git(e);
-        error.link = Some(self.sso_settings_link());
-        self.fail(Op::Clone, error);
     }
 }
 

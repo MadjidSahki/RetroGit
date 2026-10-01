@@ -10,12 +10,6 @@ use crate::state::LOG_PAGE;
 use crate::strings as s;
 
 impl Worker {
-    pub(super) fn net_auth(&self) -> NetAuth {
-        NetAuth {
-            github_token: self.token.clone(),
-        }
-    }
-
     /// HEAD or refs changed: resend everything that depends on them.
     pub(super) fn after_ref_change(&mut self, repo: &Repo) {
         if let Ok(summary) = repo.summary() {
@@ -190,7 +184,7 @@ impl Worker {
         self.cancel_net
             .store(false, std::sync::atomic::Ordering::SeqCst);
         self.emit(Event::SyncStarted { op, background });
-        let auth = self.net_auth();
+        let auth = self.repo_net_auth();
         let mut throttle = Throttle::new(Duration::from_millis(100));
         let emit = &self.emit;
         let mut on_progress = |p: gitcore::NetProgress| {
@@ -343,7 +337,9 @@ impl Worker {
             .ok()
             .and_then(|s| s.origin_url)
             .unwrap_or_default();
-        if url.is_empty() || (url.starts_with("https://github.com/") && self.token.is_none()) {
+        if url.is_empty()
+            || (url.starts_with("https://github.com/") && self.accounts.list().is_empty())
+        {
             return;
         }
         self.fetch(true);

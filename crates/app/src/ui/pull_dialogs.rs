@@ -276,7 +276,8 @@ fn review(
             ] {
                 let enabled = allowed.contains(&e);
                 ui.add_enabled_ui(enabled, |ui| {
-                    if ui.radio(event == e, event_label(e)).clicked() {
+                    // egui's radio circle is invisible in the Win95 theme when unselected.
+                    if ui.selectable_label(event == e, event_label(e)).clicked() {
                         event = e;
                     }
                 });

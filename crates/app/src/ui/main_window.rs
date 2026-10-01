@@ -90,11 +90,10 @@ fn open_folder(cx: &mut Ctx<'_>) {
 fn menu(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     egui::MenuBar::new().ui(ui, |ui| {
         ui.menu_button(s::MENU_FILE, |ui| {
-            if matches!(cx.state.auth, Auth::SignedIn(_)) {
-                if ui.button(s::SIGN_OUT).clicked() {
-                    cx.worker.send(Command::SignOut);
-                }
-            } else if ui.button(s::SIGN_IN_MENU).clicked() {
+            if ui.button(s::ACCOUNTS_MENU).clicked() {
+                cx.state.accounts_dialog = true;
+            }
+            if !matches!(cx.state.auth, Auth::SignedIn(_)) && ui.button(s::SIGN_IN_MENU).clicked() {
                 if cx.state.auth == Auth::Offline {
                     cx.state.auth = Auth::Checking;
                     cx.worker.send(Command::ValidateToken);
@@ -161,6 +160,15 @@ fn menu(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                     &files,
                     gitcore::Side::Staged,
                 ));
+            }
+            if ui
+                .add_enabled(
+                    cx.state.github_slug().is_some(),
+                    egui::Button::new(s::REPO_ACCOUNT_MENU),
+                )
+                .clicked()
+            {
+                cx.state.repo_account_dialog = true;
             }
             ui.separator();
             super::sync_toolbar::menu_entries(ui, cx);
@@ -233,10 +241,9 @@ fn recents(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
 
 fn status(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let who = match &cx.state.auth {
-        Auth::SignedIn(u) => format!("Signed in: @{}", u.login),
         Auth::Checking => s::CHECKING.to_string(),
         Auth::Offline => s::OFFLINE.to_string(),
-        _ => s::NOT_SIGNED_IN.to_string(),
+        _ => super::accounts::who_text(cx.state),
     };
     let activity = if cx.state.repos_loading {
         s::LOADING

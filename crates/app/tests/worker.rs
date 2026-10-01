@@ -4,18 +4,30 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use github::{Client, MemoryStore, TokenStore};
+use github::{AccountStore, Client, MemoryAccounts};
 use mockito::Matcher;
 use retrogit::protocol::{Command, Event, Op};
 use retrogit::worker::{WorkerDeps, WorkerHandle, spawn};
 
-fn start(server: &mockito::Server, store: Arc<MemoryStore>, client_id: &str) -> WorkerHandle {
+fn start(server: &mockito::Server, store: Arc<MemoryAccounts>, client_id: &str) -> WorkerHandle {
+    start_with(server, store, client_id, &[])
+}
+
+/// Worker whose config remembers the accounts `known`.
+fn start_with(
+    server: &mockito::Server,
+    store: Arc<MemoryAccounts>,
+    client_id: &str,
+    known: &[&str],
+) -> WorkerHandle {
     let deps = WorkerDeps {
         client: Client::with_bases(&server.url(), &server.url()),
         store,
         client_id: client_id.into(),
         commit_backend: gitcore::CommitBackend::Git2,
         tokens: github::TokenProvider::without_gh(),
+        known_accounts: known.iter().map(|k| k.to_string()).collect(),
+        repo_accounts: Default::default(),
     };
     spawn(deps, || {})
 }
@@ -47,7 +59,7 @@ fn mock_user(server: &mut mockito::Server, token: &str) -> mockito::Mock {
 #[test]
 fn validate_without_token_signs_out() {
     let server = mockito::Server::new();
-    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "");
     w.send(Command::ValidateToken);
     until(&w, |e| matches!(e, Event::SignedOut));
 }
@@ -56,7 +68,11 @@ fn validate_without_token_signs_out() {
 fn validate_with_good_token_signs_in() {
     let mut server = mockito::Server::new();
     let _m = mock_user(&mut server, "gho_good");
-    let w = start(&server, Arc::new(MemoryStore::with_token("gho_good")), "");
+    let w = start(
+        &server,
+        Arc::new(MemoryAccounts::with_legacy("gho_good")),
+        "",
+    );
     w.send(Command::ValidateToken);
     until(&w, |e| matches!(e, Event::SignedIn(u) if u.login == "ada"));
 }
@@ -65,29 +81,29 @@ fn validate_with_good_token_signs_in() {
 fn validate_with_revoked_token_clears_it() {
     let mut server = mockito::Server::new();
     server.mock("GET", "/user").with_status(401).create();
-    let store = Arc::new(MemoryStore::with_token("gho_old"));
+    let store = Arc::new(MemoryAccounts::with_legacy("gho_old"));
     let w = start(&server, store.clone(), "");
     w.send(Command::ValidateToken);
     until(&w, |e| matches!(e, Event::SignedOut));
-    assert_eq!(store.load(), Ok(None));
+    assert_eq!(store.load_legacy(), Ok(None));
 }
 
 #[test]
 fn pat_is_validated_then_stored() {
     let mut server = mockito::Server::new();
     let _m = mock_user(&mut server, "ghp_pat");
-    let store = Arc::new(MemoryStore::default());
+    let store = Arc::new(MemoryAccounts::default());
     let w = start(&server, store.clone(), "");
     w.send(Command::SavePat("  ghp_pat \n".into()));
     until(&w, |e| matches!(e, Event::SignedIn(_)));
-    assert_eq!(store.load(), Ok(Some("ghp_pat".into())));
+    assert_eq!(store.load("ada"), Ok(Some("ghp_pat".into())));
 }
 
 #[test]
 fn rejected_pat_is_not_stored() {
     let mut server = mockito::Server::new();
     server.mock("GET", "/user").with_status(401).create();
-    let store = Arc::new(MemoryStore::default());
+    let store = Arc::new(MemoryAccounts::default());
     let w = start(&server, store.clone(), "");
     w.send(Command::SavePat("ghp_bad".into()));
     until(&w, |e| {
@@ -99,13 +115,13 @@ fn rejected_pat_is_not_stored() {
             }
         )
     });
-    assert_eq!(store.load(), Ok(None));
+    assert_eq!(store.load("ada"), Ok(None));
 }
 
 #[test]
 fn device_flow_without_client_id_explains_pat_fallback() {
     let server = mockito::Server::new();
-    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "");
     w.send(Command::StartDeviceFlow);
     until(
         &w,
@@ -130,12 +146,12 @@ fn device_flow_happy_path_stores_token() {
         .with_body(r#"{"access_token":"gho_new","token_type":"bearer","scope":"repo,read:org"}"#)
         .create();
     let _u = mock_user(&mut server, "gho_new");
-    let store = Arc::new(MemoryStore::default());
+    let store = Arc::new(MemoryAccounts::default());
     let w = start(&server, store.clone(), "Iv1.test");
     w.send(Command::StartDeviceFlow);
     let evs = until(&w, |e| matches!(e, Event::SignedIn(_)));
     assert!(matches!(&evs[0], Event::DeviceCode { user_code, .. } if user_code == "ABCD-1234"));
-    assert_eq!(store.load(), Ok(Some("gho_new".into())));
+    assert_eq!(store.load("ada"), Ok(Some("gho_new".into())));
 }
 
 #[test]
@@ -146,7 +162,7 @@ fn device_flow_can_be_cancelled_while_waiting() {
         .mock("POST", "/login/oauth/access_token")
         .with_body(r#"{"error":"authorization_pending"}"#)
         .create();
-    let w = start(&server, Arc::new(MemoryStore::default()), "Iv1.test");
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "Iv1.test");
     w.send(Command::StartDeviceFlow);
     until(&w, |e| matches!(e, Event::DeviceCode { .. }));
     w.cancel_device_flow();
@@ -161,7 +177,7 @@ fn network_failure_while_polling_reports_auth_error() {
         .mock("POST", "/login/oauth/access_token")
         .with_status(502)
         .create();
-    let w = start(&server, Arc::new(MemoryStore::default()), "Iv1.test");
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "Iv1.test");
     w.send(Command::StartDeviceFlow);
     until(&w, |e| {
         matches!(
@@ -182,7 +198,7 @@ fn shutdown_interrupts_a_running_device_flow() {
         .mock("POST", "/login/oauth/access_token")
         .with_body(r#"{"error":"authorization_pending"}"#)
         .create();
-    let w = start(&server, Arc::new(MemoryStore::default()), "Iv1.test");
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "Iv1.test");
     w.send(Command::StartDeviceFlow);
     until(&w, |e| matches!(e, Event::DeviceCode { .. }));
     assert!(w.shutdown(Duration::from_secs(2)));
@@ -197,7 +213,7 @@ fn token_revoked_while_running_signs_out_on_next_call() {
         .match_query(Matcher::Any)
         .with_status(401)
         .create();
-    let store = Arc::new(MemoryStore::default());
+    let store = Arc::new(MemoryAccounts::default());
     let w = start(&server, store.clone(), "");
     w.send(Command::SavePat("ghp_pat".into()));
     until(&w, |e| matches!(e, Event::SignedIn(_)));
@@ -210,13 +226,13 @@ fn token_revoked_while_running_signs_out_on_next_call() {
             ..
         }
     )));
-    assert_eq!(store.load(), Ok(None));
+    assert_eq!(store.load("ada"), Ok(None));
 }
 
 #[test]
 fn list_repos_requires_sign_in() {
     let server = mockito::Server::new();
-    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "");
     w.send(Command::ListRepos);
     until(&w, |e| matches!(e, Event::SignedOut));
 }
@@ -250,10 +266,11 @@ fn clone_then_open_report_summaries() {
     make_source_repo(src.path());
     let out = tempfile::tempdir().unwrap();
     let dest = out.path().join("demo");
-    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "");
     w.send(Command::Clone {
         url: file_url(src.path()),
         dest: dest.clone(),
+        account: None,
     });
     let evs = until(&w, |e| matches!(e, Event::CloneDone(_)));
     assert!(evs.iter().any(|e| matches!(e, Event::CloneProgress(_))));
@@ -276,7 +293,7 @@ fn clone_then_open_report_summaries() {
 
 fn signed_in_with_pat(
     server: &mut mockito::Server,
-    store: Arc<MemoryStore>,
+    store: Arc<MemoryAccounts>,
     client_id: &str,
 ) -> (WorkerHandle, mockito::Mock) {
     let user = mock_user(server, "ghp_pat");
@@ -295,7 +312,7 @@ fn repos_hidden_by_sso_are_listed_with_a_warning_and_link() {
         .with_header("X-GitHub-SSO", "partial-results; organizations=42")
         .with_body("[]")
         .create();
-    let (w, _u) = signed_in_with_pat(&mut server, Arc::new(MemoryStore::default()), "Ov23test");
+    let (w, _u) = signed_in_with_pat(&mut server, Arc::new(MemoryAccounts::default()), "Ov23test");
     w.send(Command::ListRepos);
     let evs = until(&w, |e| {
         matches!(
@@ -326,11 +343,11 @@ fn offline_start_keeps_the_token_for_later_calls() {
         .match_header("authorization", "Bearer gho_kept")
         .with_body("[]")
         .create();
-    let store = Arc::new(MemoryStore::with_token("gho_kept"));
-    let w = start(&server, store.clone(), "");
+    let store = Arc::new(MemoryAccounts::with("ada", "gho_kept"));
+    let w = start_with(&server, store.clone(), "", &["ada"]);
     w.send(Command::ValidateToken);
     until(&w, |e| matches!(e, Event::Offline));
-    assert_eq!(store.load(), Ok(Some("gho_kept".into())));
+    assert_eq!(store.load("ada"), Ok(Some("gho_kept".into())));
     w.send(Command::ListRepos);
     until(&w, |e| matches!(e, Event::ReposLoaded(_)));
 }
@@ -346,7 +363,7 @@ fn git_401(server: &mut mockito::Server) -> mockito::Mock {
 #[test]
 fn clone_auth_failure_with_revoked_token_signs_out() {
     let mut server = mockito::Server::new();
-    let store = Arc::new(MemoryStore::default());
+    let store = Arc::new(MemoryAccounts::default());
     let (w, user_ok) = signed_in_with_pat(&mut server, store.clone(), "");
     user_ok.remove();
     let _u = server.mock("GET", "/user").with_status(401).create();
@@ -355,22 +372,28 @@ fn clone_auth_failure_with_revoked_token_signs_out() {
     w.send(Command::Clone {
         url: format!("{}/org/demo.git", server.url()),
         dest: out.path().join("demo"),
+        // Picked in the repository list (the mock is not github.com).
+        account: Some("ada".into()),
     });
     let evs = until(&w, |e| matches!(e, Event::SignedOut));
-    assert!(evs.iter().any(|e| matches!(e, Event::Error { during: Op::Clone, error } if error.message == retrogit::strings::ERR_UNAUTHORIZED)));
-    assert_eq!(store.load(), Ok(None));
+    assert!(evs.iter().any(
+        |e| matches!(e, Event::Error { during: Op::Clone, error } if error.message.contains("@ada"))
+    ));
+    assert_eq!(store.load("ada"), Ok(None));
 }
 
 #[test]
 fn clone_auth_failure_with_valid_token_points_to_sso() {
     let mut server = mockito::Server::new();
-    let store = Arc::new(MemoryStore::default());
+    let store = Arc::new(MemoryAccounts::default());
     let (w, _user_ok) = signed_in_with_pat(&mut server, store.clone(), "");
     let _g = git_401(&mut server);
     let out = tempfile::tempdir().unwrap();
     w.send(Command::Clone {
         url: format!("{}/org/demo.git", server.url()),
         dest: out.path().join("demo"),
+        // Picked in the repository list (the mock is not github.com).
+        account: Some("ada".into()),
     });
     let evs = until(&w, |e| {
         matches!(
@@ -389,7 +412,7 @@ fn clone_auth_failure_with_valid_token_points_to_sso() {
         error.link.as_deref(),
         Some("https://github.com/settings/tokens")
     );
-    assert_eq!(store.load(), Ok(Some("ghp_pat".into())));
+    assert_eq!(store.load("ada"), Ok(Some("ghp_pat".into())));
 }
 
 fn repo_for_changes() -> tempfile::TempDir {
@@ -413,7 +436,7 @@ fn open_stage_commit_flow() {
     let server = mockito::Server::new();
     let d = repo_for_changes();
     std::fs::write(d.path().join("README.md"), "hello\nworld\n").unwrap();
-    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "");
     w.send(Command::OpenRepo(d.path().to_path_buf()));
     let evs = until(&w, |e| matches!(e, Event::StatusLoaded(_)));
     assert!(evs.iter().any(|e| matches!(e, Event::RepoOpened(_))));
@@ -475,7 +498,7 @@ fn stale_selection_reports_and_resyncs() {
     let server = mockito::Server::new();
     let d = repo_for_changes();
     std::fs::write(d.path().join("README.md"), "hello\nnew\n").unwrap();
-    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "");
     w.send(Command::OpenRepo(d.path().to_path_buf()));
     until(&w, |e| matches!(e, Event::StatusLoaded(_)));
     w.send(Command::LoadDiff {
@@ -497,14 +520,33 @@ fn stale_selection_reports_and_resyncs() {
 }
 
 #[test]
+fn opening_a_repository_shows_its_files_before_looking_for_its_account() {
+    let server = mockito::Server::new();
+    let d = repo_for_changes();
+    let r = git2::Repository::open(d.path()).unwrap();
+    r.remote("origin", "https://github.com/o/r.git").unwrap();
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "");
+    w.send(Command::OpenRepo(d.path().to_path_buf()));
+    let evs = until(&w, |e| matches!(e, Event::RepoAccount { .. }));
+    assert!(
+        evs.iter().any(|e| matches!(e, Event::StatusLoaded(_))),
+        "status first: {evs:?}"
+    );
+}
+
+#[test]
 fn changes_commands_without_an_open_repo_do_nothing() {
     let server = mockito::Server::new();
-    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "");
     w.send(Command::RefreshStatus);
     w.send(Command::ValidateToken);
-    // The first event is the reply to ValidateToken: RefreshStatus was ignored.
+    // Only the reply to ValidateToken: RefreshStatus was ignored.
     let evs = until(&w, |e| matches!(e, Event::SignedOut));
-    assert_eq!(evs.len(), 1);
+    assert!(
+        evs.iter()
+            .all(|e| matches!(e, Event::AccountsChanged(_) | Event::SignedOut)),
+        "{evs:?}"
+    );
 }
 
 #[test]
@@ -516,7 +558,7 @@ fn refresh_requests_are_deduplicated_while_one_is_pending() {
         .with_body(r#"{"error":"authorization_pending"}"#)
         .create();
     let d = repo_for_changes();
-    let w = start(&server, Arc::new(MemoryStore::default()), "Iv1.test");
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "Iv1.test");
     w.send(Command::OpenRepo(d.path().to_path_buf()));
     until(&w, |e| matches!(e, Event::StatusLoaded(_)));
     // Keep the worker busy (waiting for authorization) while refreshes pile up.
@@ -544,7 +586,7 @@ fn stage_all_is_one_operation_with_one_refresh() {
     for i in 0..20 {
         std::fs::write(d.path().join(format!("f{i}.txt")), "x\n").unwrap();
     }
-    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "");
     w.send(Command::OpenRepo(d.path().to_path_buf()));
     until(&w, |e| matches!(e, Event::StatusLoaded(_)));
     let paths: Vec<String> = (0..20).map(|i| format!("f{i}.txt")).collect();
@@ -576,7 +618,7 @@ fn discard_commands_revert_the_working_tree_and_refresh() {
     let server = mockito::Server::new();
     let d = repo_for_changes();
     std::fs::write(d.path().join("README.md"), "hello\nnoise\n").unwrap();
-    let w = start(&server, Arc::new(MemoryStore::default()), "");
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "");
     w.send(Command::OpenRepo(d.path().to_path_buf()));
     until(&w, |e| matches!(e, Event::StatusLoaded(_)));
     w.send(Command::Discard {
@@ -696,7 +738,7 @@ mod sync {
             return;
         };
         let server = mockito::Server::new();
-        let w = start(&server, Arc::new(MemoryStore::default()), "");
+        let w = start(&server, Arc::new(MemoryAccounts::default()), "");
         w.send(Command::OpenRepo(work.clone()));
         let evs = until(&w, |e| matches!(e, Event::LogLoaded { .. }));
         assert!(
@@ -724,7 +766,7 @@ mod sync {
         git(&work, &["add", "mine.txt"]);
         git(&work, &["commit", "-q", "-m", "mine"]);
         let server = mockito::Server::new();
-        let w = start(&server, Arc::new(MemoryStore::default()), "");
+        let w = start(&server, Arc::new(MemoryAccounts::default()), "");
         w.send(Command::OpenRepo(work.clone()));
         until(&w, |e| {
             matches!(
@@ -760,7 +802,7 @@ mod sync {
             return;
         };
         let server = mockito::Server::new();
-        let w = start(&server, Arc::new(MemoryStore::default()), "");
+        let w = start(&server, Arc::new(MemoryAccounts::default()), "");
         w.send(Command::OpenRepo(work.clone()));
         until(&w, |e| {
             matches!(
@@ -821,7 +863,7 @@ mod sync {
             return;
         };
         let server = mockito::Server::new();
-        let w = start(&server, Arc::new(MemoryStore::default()), "");
+        let w = start(&server, Arc::new(MemoryAccounts::default()), "");
         w.cancel_network(); // e.g. the user cancelled a push earlier
         w.send(Command::OpenRepo(work.clone()));
         until(&w, |e| {
@@ -841,7 +883,7 @@ mod sync {
             return;
         };
         let server = mockito::Server::new();
-        let w = start(&server, Arc::new(MemoryStore::default()), "");
+        let w = start(&server, Arc::new(MemoryAccounts::default()), "");
         w.send(Command::OpenRepo(work.clone()));
         until(&w, |e| {
             matches!(
