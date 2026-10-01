@@ -26,6 +26,10 @@ pub struct Config {
     pub recent: Vec<RecentRepo>,
     pub last_clone_dir: Option<PathBuf>,
     pub window: Option<WindowGeometry>,
+    /// IDE chosen for each repository ("Open in IDE"), by IDE id.
+    pub ide_by_repo: std::collections::BTreeMap<PathBuf, String>,
+    /// Last IDE chosen: the default for repositories without a choice.
+    pub default_ide: Option<String>,
 }
 
 impl Config {

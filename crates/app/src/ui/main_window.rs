@@ -110,6 +110,19 @@ fn menu(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                 open_folder(cx);
             }
             ui.separator();
+            if ui.button(s::INSTALL_CLI_MENU).clicked() {
+                use crate::protocol::{AppError, Severity};
+                let msg = match crate::cli::install_command_line_tool() {
+                    Ok(done) => AppError::new(Severity::Info, &done),
+                    Err(e) => {
+                        let mut a = AppError::new(Severity::Error, s::ERR_INSTALL_CLI);
+                        a.detail = Some(e);
+                        a
+                    }
+                };
+                cx.state.messages.push_back(msg);
+            }
+            ui.separator();
             if ui.button(s::EXIT).clicked() {
                 ui.ctx().send_viewport_cmd(ViewportCommand::Close);
             }

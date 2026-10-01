@@ -156,6 +156,48 @@ pub fn toolbar(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             switch: true,
         });
     }
+    ide_controls(ui, cx);
+}
+
+/// [Open in IDE] IDE: [Rider v] — the choice is remembered per repository.
+fn ide_controls(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
+    let Some(repo) = cx.state.current.as_ref().map(|c| c.path.clone()) else {
+        return;
+    };
+    let chosen = crate::ide::ide_for(&cx.state.config, &cx.state.ides, &repo).cloned();
+    let open = ui
+        .add(
+            Button95::new(s::OPEN_IN_IDE)
+                .min_size(egui::vec2(90.0, 22.0))
+                .enabled(chosen.is_some()),
+        )
+        .on_disabled_hover_text(s::NO_IDE_FOUND);
+    if open.clicked()
+        && let Some(ide) = &chosen
+        && let Err(e) = crate::ide::open(ide, &repo)
+    {
+        let mut err =
+            crate::protocol::AppError::new(crate::protocol::Severity::Error, s::ERR_OPEN_IDE);
+        err.detail = Some(format!("{}: {e}", ide.name));
+        cx.state.messages.push_back(err);
+    }
+    if cx.state.ides.is_empty() {
+        return;
+    }
+    ui.label(s::IDE_LABEL);
+    let mut pick: Option<String> = None;
+    let current_name = chosen.as_ref().map(|i| i.name.clone()).unwrap_or_default();
+    combo_box(ui, "ide_picker", &current_name, 130.0, |ui| {
+        for ide in &cx.state.ides {
+            if ui.button(&ide.name).clicked() {
+                pick = Some(ide.id.clone());
+            }
+        }
+    });
+    if let Some(id) = pick {
+        crate::ide::remember_ide(&mut cx.state.config, &repo, &id);
+        cx.state.config_dirty = true;
+    }
 }
 
 /// Repository menu entries for sub-project 3.

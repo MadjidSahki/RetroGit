@@ -20,6 +20,9 @@ pub struct RetroGitApp {
     was_focused: bool,
     highlighter: crate::highlight::Service,
     highlighted: std::sync::mpsc::Receiver<crate::highlight::Highlighted>,
+    /// Folders sent by `retrogit` from a terminal (see `instance`).
+    to_open: Option<std::sync::mpsc::Receiver<PathBuf>>,
+    _instance: Option<crate::instance::Server>,
 }
 
 impl RetroGitApp {
@@ -37,6 +40,8 @@ impl RetroGitApp {
             ctx.request_repaint();
         });
         RetroGitApp {
+            to_open: None,
+            _instance: None,
             highlighter,
             highlighted,
             state,
@@ -46,6 +51,31 @@ impl RetroGitApp {
             watcher: None,
             was_focused: true,
         }
+    }
+
+    /// Accept folders from the `retrogit` command (single instance), and open `initial`.
+    pub fn with_instance(
+        mut self,
+        dir: Option<&std::path::Path>,
+        ctx: egui::Context,
+        initial: Option<PathBuf>,
+    ) -> RetroGitApp {
+        if let Some(path) = initial {
+            self.worker.send(Command::OpenRepo(path));
+        }
+        let Some(dir) = dir else { return self };
+        let (tx, rx) = std::sync::mpsc::channel();
+        match crate::instance::Server::start(dir, move |p| {
+            let _ = tx.send(p);
+            ctx.request_repaint();
+        }) {
+            Ok(server) => {
+                self._instance = Some(server);
+                self.to_open = Some(rx);
+            }
+            Err(e) => log::warn!("single-instance listener not started: {e}"),
+        }
+        self
     }
 
     /// Keep the file watcher on the current repository.
@@ -86,6 +116,16 @@ impl eframe::App for RetroGitApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         while let Ok(ev) = self.worker.events.try_recv() {
             self.state.apply(ev);
+        }
+        let requested: Vec<PathBuf> = self
+            .to_open
+            .as_ref()
+            .map(|rx| rx.try_iter().collect())
+            .unwrap_or_default();
+        for path in requested {
+            self.worker.send(Command::OpenRepo(path));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
         while let Ok(h) = self.highlighted.try_recv() {
             self.state.apply(crate::protocol::Event::ColorsLoaded {

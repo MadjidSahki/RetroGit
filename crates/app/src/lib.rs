@@ -1,10 +1,13 @@
 //! RetroGit application: state, background worker and screens.
 
 pub mod app;
+pub mod cli;
 pub mod config;
 pub mod env_path;
 pub mod format;
 pub mod highlight;
+pub mod ide;
+pub mod instance;
 pub mod logging;
 pub mod protocol;
 pub mod state;

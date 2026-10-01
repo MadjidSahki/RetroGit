@@ -57,6 +57,15 @@ impl Repo {
         Repo { inner, path }
     }
 
+    /// Working-tree root of the repository containing `path` (parents are searched).
+    pub fn discover(path: &Path) -> Result<PathBuf, GitError> {
+        let repo = git2::Repository::discover(path)
+            .map_err(|_| GitError::NotARepository(path.to_path_buf()))?;
+        repo.workdir()
+            .map(|w| w.to_path_buf())
+            .ok_or_else(|| GitError::NotARepository(path.to_path_buf()))
+    }
+
     pub(crate) fn git(&self) -> &git2::Repository {
         &self.inner
     }

@@ -162,6 +162,8 @@ pub struct AppState {
     pub dialog: Option<PendingDialog>,
     pub operation: Option<gitcore::Operation>,
     pub signing: Option<gitcore::SigningConfig>,
+    /// IDEs installed on this machine (detected at startup).
+    pub ides: Vec<crate::ide::Ide>,
 }
 
 impl AppState {
@@ -192,6 +194,7 @@ impl AppState {
             dialog: None,
             operation: None,
             signing: None,
+            ides: Vec::new(),
         }
     }
 

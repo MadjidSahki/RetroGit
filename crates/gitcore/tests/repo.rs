@@ -58,3 +58,21 @@ fn summary_of_detached_head() {
     let s = Repo::open(d.path()).unwrap().summary().unwrap();
     assert_eq!(s.head, Head::Detached(id.to_string()[..7].to_string()));
 }
+
+#[test]
+fn discover_finds_the_root_from_a_subfolder() {
+    let d = tempfile::tempdir().unwrap();
+    common::make_repo(d.path(), 1);
+    let sub = d.path().join("a/b");
+    std::fs::create_dir_all(&sub).unwrap();
+    let root = Repo::discover(&sub).unwrap();
+    assert_eq!(
+        root.canonicalize().unwrap(),
+        d.path().canonicalize().unwrap()
+    );
+    let outside = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        Repo::discover(outside.path()),
+        Err(GitError::NotARepository(_))
+    ));
+}
