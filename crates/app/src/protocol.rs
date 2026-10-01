@@ -108,6 +108,20 @@ pub enum Command {
     ForcePush,
     AbortOperation,
     ContinueRebase,
+    // --- Sub-project 6a: conflicts of the open repository. ---
+    LoadConflict(String),
+    /// Write `content` as the resolution of `path` and mark it resolved.
+    ResolveConflict {
+        path: String,
+        content: String,
+    },
+    /// Keep one side's whole version of `path`.
+    ResolveConflictWith {
+        path: String,
+        pick: gitcore::Pick,
+    },
+    /// Resolve by deleting `path`.
+    ResolveDelete(String),
     // --- Sub-project 4: pull requests of the github.com repository `slug`. ---
     LoadPulls {
         slug: Slug,
@@ -323,6 +337,9 @@ pub enum Event {
         number: u64,
         note: String,
     },
+    ConflictLoaded(Box<gitcore::ConflictFile>),
+    /// `path` is no longer in conflict (sent after the refreshed status).
+    ConflictResolved(String),
     /// Changes on the user's pull requests (from the watcher thread).
     PrEvents(Vec<github::PrEvent>),
     Error {

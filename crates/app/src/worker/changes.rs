@@ -55,6 +55,12 @@ impl Worker {
         if let Some((path, side)) = self.shown.clone() {
             self.send_diff(&repo, &path, side);
         }
+        if let Some(path) = self.shown_conflict.clone() {
+            // Still conflicted: the editor learns about changes made on disk.
+            if let Ok(file) = repo.conflict(&path) {
+                self.emit(Event::ConflictLoaded(Box::new(file)));
+            }
+        }
     }
 
     fn send_diff(&self, repo: &Repo, path: &str, side: Side) {
@@ -70,6 +76,7 @@ impl Worker {
         };
         self.send_diff(&repo, &path, side);
         self.shown = Some((path, side));
+        self.shown_conflict = None;
     }
 
     pub(super) fn stage(

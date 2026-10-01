@@ -366,3 +366,51 @@ pub const SWITCH_ACCOUNT_HINT: &str = "Repository > Account... to use another ac
 pub const ERR_SSH_CLONE: &str = "Cloning over SSH is only supported for github.com (cloned over HTTPS). Use the HTTPS URL of this repository.";
 pub const ERR_CLONE_URL: &str = "Enter an HTTPS URL, or a github.com SSH URL.";
 pub const ERR_ACCOUNT_MUST_SIGN_IN: &str = "@{login} is the account chosen for this repository and must sign in again (File > Accounts...), or choose another one with Repository > Account...";
+pub const ALL_RESOLVED: &str = "All conflicts are resolved.";
+pub const ALL_RESOLVED_MERGE: &str = "All conflicts are resolved. Commit the merge to finish it.";
+pub const ALL_RESOLVED_REBASE: &str =
+    "All conflicts are resolved. Click Continue rebase to finish it.";
+pub const CONFLICTS: &str = "Conflicts";
+pub const LOADING_CONFLICT: &str = "Loading the conflict...";
+pub const CONFLICTS_LEFT: &str = "conflicts left";
+pub const CONFLICT_LEFT: &str = "conflict left";
+pub const PREV_CONFLICT: &str = "< Prev";
+pub const NEXT_CONFLICT: &str = "Next >";
+pub const USE_BOTH: &str = "Use both";
+pub const OPEN_IN_IDE_SHORT: &str = "Open in IDE";
+pub const PANE_MINE: &str = "Mine";
+pub const PANE_THEIRS: &str = "Theirs";
+pub const PANE_UPSTREAM: &str = "Upstream";
+pub const PANE_YOUR_COMMIT: &str = "Your commit";
+pub const PANE_RESULT: &str = "Result (editable)";
+pub const MARK_RESOLVED: &str = "Mark resolved";
+pub const CHANGED_ON_DISK: &str = "The file changed on disk.";
+pub const RELOAD: &str = "Reload";
+pub const KEEP_MY_EDITS: &str = "Keep my edits";
+pub const CONFLICT_TITLE: &str = "Conflict";
+pub const CONFIRM_MARKERS_LEFT: &str =
+    "Conflict markers are still in the file. Mark it resolved anyway?";
+pub const CONFIRM_DISCARD_EDITS: &str = "Discard your edits to this file?";
+pub const CONFLICT_BINARY: &str = "This file is binary (or not UTF-8 text): keep one version.";
+pub const KEEP_FILE: &str = "Keep the file";
+pub const DELETE_FILE: &str = "Delete it";
+pub const USE_SIDE: &str = "Use {side}";
+pub const WHOLE_FILE_SIDE: &str = "Whole file: {side}";
+pub const SIDE_MINE: &str = "mine";
+pub const SIDE_THEIRS: &str = "theirs";
+pub const SIDE_MINE_LONG: &str = "your version";
+pub const SIDE_THEIRS_LONG: &str = "the other version";
+pub const SIDE_UPSTREAM: &str = "upstream";
+pub const SIDE_MY_COMMIT: &str = "my commit";
+pub const SIDE_UPSTREAM_LONG: &str = "the upstream";
+pub const SIDE_MY_COMMIT_LONG: &str = "your commit";
+pub const SIDE_CURRENT: &str = "current";
+pub const SIDE_MY_STASH: &str = "my stash";
+pub const SIDE_CURRENT_LONG: &str = "the current version";
+pub const SIDE_MY_STASH_LONG: &str = "your stashed changes";
+pub const CONFIRM_WHOLE_SIDE: &str =
+    "Keep {kept} for the whole file, dropping the changes of {dropped}?";
+pub const CONFLICT_DELETED_IN: &str =
+    "This file was deleted in {deleted} and changed in {changed}.";
+pub const CONFIRM_ABORT_EDITS: &str =
+    "Abort the whole operation? Your edits to this file and every resolution so far are lost.";
