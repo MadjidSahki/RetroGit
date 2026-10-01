@@ -5,6 +5,7 @@ mod cli;
 mod clone;
 mod commit;
 mod commit_detail;
+mod conflict;
 mod diff;
 mod discard;
 mod error;
@@ -23,6 +24,10 @@ mod status;
 
 pub use branch::{Branch, parse_overwritten_files};
 pub use commit_detail::{ChangedFile, CommitDetail, SignatureStatus, parse_signature_status};
+pub use conflict::{
+    Choice, ConflictFile, ConflictKind, Pane, Pick, Segment, apply_choice, block_lines,
+    conflict_count, has_marker_lines, parse_conflicts,
+};
 pub use github::parse_github_slug;
 pub use graph::{Edge, GraphRow, GraphState, layout};
 pub use log::{LogEntry, RefKind, RefLabel};
