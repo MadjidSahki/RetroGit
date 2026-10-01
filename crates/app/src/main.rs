@@ -22,6 +22,13 @@ fn main() -> eframe::Result {
         retrogit::cli::Launch::Cli { target } => return run_cli(&target, data_dir.as_deref()),
         retrogit::cli::Launch::Gui { open } => open,
     };
+    // `--open` (also used by the command when it starts a window): join a window that is
+    // already open instead of starting a second one.
+    if let (Some(path), Some(dir)) = (&initial, &data_dir)
+        && retrogit::instance::send(dir, path).is_ok()
+    {
+        return Ok(());
+    }
     if let Some(dir) = &data_dir {
         logging::init(&dir.join("retrogit.log"));
     }
@@ -124,7 +131,7 @@ fn run_cli(target: &std::path::Path, data_dir: Option<&std::path::Path>) -> efra
         cmd.process_group(0); // not killed with the terminal
     }
     if let Err(e) = cmd.spawn() {
-        eprintln!("retrogit: cannot start the window: {e}");
+        eprintln!("{} {e}", strings::ERR_CLI_START);
         std::process::exit(1);
     }
     Ok(())

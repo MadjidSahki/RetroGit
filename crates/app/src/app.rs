@@ -20,6 +20,8 @@ pub struct RetroGitApp {
     was_focused: bool,
     highlighter: crate::highlight::Service,
     highlighted: std::sync::mpsc::Receiver<crate::highlight::Highlighted>,
+    notices_tx: std::sync::mpsc::Sender<crate::protocol::AppError>,
+    notices: std::sync::mpsc::Receiver<crate::protocol::AppError>,
     /// Folders sent by `retrogit` from a terminal (see `instance`).
     to_open: Option<std::sync::mpsc::Receiver<PathBuf>>,
     _instance: Option<crate::instance::Server>,
@@ -39,7 +41,10 @@ impl RetroGitApp {
             let _ = tx.send(h);
             ctx.request_repaint();
         });
+        let (notices_tx, notices) = std::sync::mpsc::channel();
         RetroGitApp {
+            notices_tx,
+            notices,
             to_open: None,
             _instance: None,
             highlighter,
@@ -127,6 +132,9 @@ impl eframe::App for RetroGitApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
+        while let Ok(notice) = self.notices.try_recv() {
+            self.state.messages.push_back(notice);
+        }
         while let Ok(h) = self.highlighted.try_recv() {
             self.state.apply(crate::protocol::Event::ColorsLoaded {
                 target: h.target,
@@ -165,6 +173,7 @@ impl eframe::App for RetroGitApp {
             state: &mut self.state,
             worker: &self.worker,
             highlighter: &self.highlighter,
+            notices: &self.notices_tx,
         };
         ui::main_window::show(ui, &mut cx);
         ui::clone_dialog::show(&egui_ctx, &mut cx);

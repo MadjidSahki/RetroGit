@@ -61,9 +61,18 @@ impl Repo {
     pub fn discover(path: &Path) -> Result<PathBuf, GitError> {
         let repo = git2::Repository::discover(path)
             .map_err(|_| GitError::NotARepository(path.to_path_buf()))?;
-        repo.workdir()
-            .map(|w| w.to_path_buf())
-            .ok_or_else(|| GitError::NotARepository(path.to_path_buf()))
+        let workdir = repo
+            .workdir()
+            .ok_or_else(|| GitError::NotARepository(path.to_path_buf()))?;
+        // libgit2 returns "/w/repo/" (and "C:/w/repo/" on Windows): normalise for display.
+        let text = workdir.to_string_lossy();
+        let trimmed = text.trim_end_matches(['/', '\\']);
+        let native = if cfg!(windows) {
+            trimmed.replace('/', "\\")
+        } else {
+            trimmed.to_string()
+        };
+        Ok(PathBuf::from(native))
     }
 
     pub(crate) fn git(&self) -> &git2::Repository {

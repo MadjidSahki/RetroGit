@@ -58,46 +58,62 @@ pub fn detect_mac(apps: &[PathBuf]) -> Vec<Ide> {
     out
 }
 
-/// Windows: standard install locations (user and machine), JetBrains Toolbox launchers and
-/// versioned JetBrains installs, plus Visual Studio found by `vswhere` (`devenv`).
+/// The `.exe` a JetBrains Toolbox `.cmd` launcher starts (`start "" "C:\...\rider64.exe" %*`).
+pub fn toolbox_exe(script: &str) -> Option<PathBuf> {
+    script
+        .split('"')
+        .map(str::trim)
+        .find(|part| part.to_ascii_lowercase().ends_with(".exe"))
+        .map(PathBuf::from)
+}
+
+/// Windows: standard install locations (user and machine), JetBrains IDEs installed by Toolbox
+/// (`%LOCALAPPDATA%\Programs\<IDE>`) or by hand (`Program Files\JetBrains`), Toolbox `.cmd`
+/// launchers resolved to their `.exe`, and Visual Studio found by `vswhere`. Only `.exe` files
+/// are returned, so launching never goes through `cmd` (paths with `&` or `%` stay literal).
 pub fn detect_windows(
     local_app_data: &Path,
     program_files: &Path,
     exists: &dyn Fn(&Path) -> bool,
     list: &dyn Fn(&Path) -> Vec<String>,
+    read: &dyn Fn(&Path) -> Option<String>,
     devenv: Option<PathBuf>,
 ) -> Vec<Ide> {
+    let programs = local_app_data.join("Programs");
     let jetbrains = |tool: &str, dir_prefix: &str, exe: &str| -> Vec<PathBuf> {
-        let mut v = vec![local_app_data.join(format!(r"JetBrains\Toolbox\scripts\{tool}.cmd"))];
-        let root = program_files.join("JetBrains");
-        let mut dirs: Vec<String> = list(&root)
-            .into_iter()
-            .filter(|d| d.starts_with(dir_prefix))
-            .collect();
-        dirs.sort();
-        v.extend(
-            dirs.into_iter()
-                .rev()
-                .map(|d| root.join(d).join("bin").join(exe)),
-        );
+        let mut v = Vec::new();
+        for root in [programs.clone(), program_files.join("JetBrains")] {
+            let mut dirs: Vec<String> = list(&root)
+                .into_iter()
+                .filter(|d| d.starts_with(dir_prefix))
+                .collect();
+            dirs.sort();
+            v.extend(
+                dirs.into_iter()
+                    .rev()
+                    .map(|d| root.join(d).join("bin").join(exe)),
+            );
+        }
+        let script = local_app_data.join(format!(r"JetBrains\Toolbox\scripts\{tool}.cmd"));
+        v.extend(read(&script).as_deref().and_then(toolbox_exe));
         v
     };
     let candidates: Vec<(&str, Vec<PathBuf>)> = vec![
         (
             "vscode",
             vec![
-                local_app_data.join(r"Programs\Microsoft VS Code\Code.exe"),
+                programs.join(r"Microsoft VS Code\Code.exe"),
                 program_files.join(r"Microsoft VS Code\Code.exe"),
             ],
         ),
-        (
-            "cursor",
-            vec![local_app_data.join(r"Programs\cursor\Cursor.exe")],
-        ),
+        ("cursor", vec![programs.join(r"cursor\Cursor.exe")]),
         ("visualstudio", devenv.into_iter().collect()),
         (
             "rider",
-            jetbrains("rider", "JetBrains Rider", "rider64.exe"),
+            jetbrains("rider", "JetBrains Rider", "rider64.exe")
+                .into_iter()
+                .chain(jetbrains("rider", "Rider", "rider64.exe"))
+                .collect(),
         ),
         ("idea", jetbrains("idea", "IntelliJ IDEA", "idea64.exe")),
         (
@@ -110,7 +126,7 @@ pub fn detect_windows(
             "rustrover",
             jetbrains("rustrover", "RustRover", "rustrover64.exe"),
         ),
-        ("zed", vec![local_app_data.join(r"Programs\Zed\Zed.exe")]),
+        ("zed", vec![programs.join(r"Zed\Zed.exe")]),
         (
             "sublime",
             vec![program_files.join(r"Sublime Text\sublime_text.exe")],
@@ -163,7 +179,8 @@ pub fn detect() -> Vec<Ide> {
                 })
                 .unwrap_or_default()
         };
-        detect_windows(&local, &pf, &|p| p.exists(), &list, vswhere_devenv())
+        let read = |p: &Path| std::fs::read_to_string(p).ok();
+        detect_windows(&local, &pf, &|p| p.exists(), &list, &read, vswhere_devenv())
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {
@@ -220,7 +237,7 @@ pub fn open(ide: &Ide, repo: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW (for .cmd launchers)
+        cmd.creation_flags(0x0000_0008); // DETACHED_PROCESS: the IDE outlives RetroGit
     }
     cmd.spawn().map(|_| ())
 }
@@ -268,65 +285,79 @@ mod tests {
     fn windows_ides_are_found_in_standard_locations() {
         let local = Path::new(r"C:\Users\me\AppData\Local");
         let pf = Path::new(r"C:\Program Files");
+        // Built the way detection builds them (so the test also runs on macOS).
+        let rider_exe = pf
+            .join("JetBrains")
+            .join("JetBrains Rider 2025.2")
+            .join("bin")
+            .join("rider64.exe");
+        let idea_exe = local
+            .join("Programs")
+            .join("IntelliJ IDEA Ultimate")
+            .join("bin")
+            .join("idea64.exe");
         let existing = [
-            local.join(r"Programs\Microsoft VS Code\Code.exe"),
-            local.join(r"JetBrains\Toolbox\scripts\rider.cmd"),
-            pf.join(r"JetBrains\JetBrains Rider 2025.2\bin\rider64.exe"),
+            local.join("Programs").join(r"Microsoft VS Code\Code.exe"),
+            rider_exe.clone(),
+            idea_exe.clone(),
         ];
         let exists = |p: &Path| existing.iter().any(|e| e == p);
         let list = |dir: &Path| {
             if dir == pf.join("JetBrains") {
                 vec!["JetBrains Rider 2025.2".to_string()]
+            } else if dir == local.join("Programs") {
+                vec![
+                    "IntelliJ IDEA Ultimate".to_string(),
+                    "Microsoft VS Code".to_string(),
+                ]
             } else {
                 vec![]
             }
         };
-        let ides = detect_windows(local, pf, &exists, &list, None);
+        let no_scripts = |_: &Path| None;
+        let ides = detect_windows(local, pf, &exists, &list, &no_scripts, None);
         let found: Vec<(&str, &Path)> = ides
             .iter()
             .map(|i| (i.id.as_str(), i.program.as_path()))
             .collect();
-        assert_eq!(found[0], ("vscode", existing[0].as_path()));
-        // The Toolbox launcher wins over a versioned install; one entry per IDE.
-        assert_eq!(found[1], ("rider", existing[1].as_path()));
-        assert_eq!(found.len(), 2);
+        assert_eq!(
+            found,
+            [
+                ("vscode", existing[0].as_path()),
+                ("rider", rider_exe.as_path()),
+                ("idea", idea_exe.as_path()),
+            ]
+        );
         let vs = detect_windows(
             local,
             pf,
             &|_| false,
             &|_| vec![],
+            &no_scripts,
             Some(PathBuf::from(r"C:\VS\devenv.exe")),
         );
         assert_eq!(vs[0].id, "visualstudio");
     }
 
     #[test]
-    fn launch_commands() {
-        let app = Ide {
-            id: "rider".into(),
-            name: "Rider".into(),
-            program: PathBuf::from("/Applications/Rider.app"),
-        };
-        let (prog, args) = launch_args(&app, Path::new("/w/repo"), true);
-        assert_eq!(prog, PathBuf::from("open"));
-        assert_eq!(args, ["-a", "/Applications/Rider.app", "/w/repo"]);
-        let cmd = Ide {
-            id: "rider".into(),
-            name: "Rider".into(),
-            program: PathBuf::from(r"C:\T\rider.cmd"),
-        };
-        let (prog, args) = launch_args(&cmd, Path::new(r"C:\w\repo"), false);
-        assert_eq!(prog, PathBuf::from("cmd"));
-        assert_eq!(args, ["/C", r"C:\T\rider.cmd", r"C:\w\repo"]);
-        let exe = Ide {
-            id: "vscode".into(),
-            name: "VS Code".into(),
-            program: PathBuf::from(r"C:\Code.exe"),
-        };
+    fn toolbox_scripts_are_resolved_to_their_exe_or_ignored() {
+        let local = Path::new(r"C:\L");
+        let pf = Path::new(r"C:\P");
+        let script = local.join(r"JetBrains\Toolbox\scripts\rider.cmd");
+        let target = PathBuf::from(r"C:\L\Programs\Rider\bin\rider64.exe");
+        let body = format!("@echo off\r\nstart \"\" \"{}\" %*\r\n", target.display());
+        let exists = |p: &Path| p == script || p == target;
+        let read = |p: &Path| (p == script).then(|| body.clone());
+        let ides = detect_windows(local, pf, &exists, &|_| vec![], &read, None);
+        assert_eq!(ides[0].program, target, "the script's exe, never cmd");
+        // A stale script whose exe is gone is ignored.
+        let gone = |p: &Path| p == script;
+        assert!(detect_windows(local, pf, &gone, &|_| vec![], &read, None).is_empty());
         assert_eq!(
-            launch_args(&exe, Path::new(r"C:\r"), false),
-            (PathBuf::from(r"C:\Code.exe"), vec![r"C:\r".to_string()])
+            toolbox_exe("start \"\" \"C:\\x y\\idea64.exe\" %*"),
+            Some(PathBuf::from(r"C:\x y\idea64.exe"))
         );
+        assert_eq!(toolbox_exe("echo hi"), None);
     }
 
     #[test]

@@ -161,10 +161,18 @@ pub const SIG_CHECKING: &str = "Checking signature...";
 pub const FILES: &str = "Files:";
 pub const OPEN_IN_IDE: &str = "Open in IDE";
 pub const IDE_LABEL: &str = "IDE:";
-pub const NO_IDE_FOUND: &str = "No supported IDE was found (VS Code, Cursor, Rider, IntelliJ, Visual Studio, Zed, Sublime Text...).";
+pub const NO_IDE_FOUND: &str = "No supported IDE was found.";
 pub const ERR_OPEN_IDE: &str = "Could not start the IDE.";
 pub const INSTALL_CLI_MENU: &str = "Install command line tool...";
 pub const ERR_INSTALL_CLI: &str = "Could not install the retrogit command.";
+pub const ERR_INSTALL_FROM_TEMP: &str = "RetroGit is running from a temporary location (a disk image or the Downloads quarantine). Move it to the Applications folder, start it from there, then install the command again.";
+pub const INSTALLED_CLI_MAC: &str =
+    "Installed /usr/local/bin/retrogit. In a terminal, type: retrogit";
+pub const INSTALLED_CLI_WINDOWS: &str =
+    "Installed the retrogit command. Open a new terminal and type: retrogit";
+pub const ERR_NO_LOCALAPPDATA: &str = "The LOCALAPPDATA folder is not set.";
+pub const ERR_PLATFORM: &str = "Not supported on this platform.";
+pub const ERR_CLI_START: &str = "retrogit: cannot start the window:";
 pub const ABOUT_TITLE: &str = "About RetroGit";
 pub const ABOUT_TAGLINE: &str = "A Git client with a Windows 95 look.";
 pub const ABOUT_FONT: &str = "Font: W95FA by Alina Sava (SIL Open Font License 1.1)";

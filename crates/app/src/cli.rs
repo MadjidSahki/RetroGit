@@ -57,9 +57,45 @@ pub fn mac_install_applescript(script_file: &Path) -> String {
     format!("do shell script \"{escaped}\" with administrator privileges")
 }
 
-/// `retrogit.cmd` placed in a folder on the user's PATH (Windows).
-pub fn windows_shim(exe: &Path) -> String {
-    format!("@\"{}\" --cli \"%CD%\" %*\r\n", exe.display())
+/// `retrogit.cmd` placed in a folder on the user's PATH (Windows). ASCII only: cmd reads
+/// batch files in the OEM code page, so a path under `%LOCALAPPDATA%` is written with the
+/// variable (expanded by cmd in UTF-16). `"%CD%\."` stays valid at a drive root (`C:\`).
+pub fn windows_shim(exe: &Path, local_app_data: Option<&Path>) -> String {
+    let exe = exe.display().to_string();
+    // Compared as text, case-insensitively (Windows paths).
+    let rest = local_app_data.and_then(|l| {
+        let prefix = format!("{}\\", l.display().to_string().trim_end_matches('\\'));
+        exe.to_lowercase()
+            .starts_with(&prefix.to_lowercase())
+            .then(|| exe[prefix.len()..].to_string())
+    });
+    let exe_text = match rest {
+        Some(rest) => format!("%LOCALAPPDATA%\\{}", rest.replace('%', "%%")),
+        None => exe.replace('%', "%%"),
+    };
+    format!("@\"{exe_text}\" --cli \"%CD%\\.\" %*\r\n")
+}
+
+/// PowerShell that appends `$env:RETROGIT_BIN` to the *user* PATH in the registry, keeping
+/// `%VARS%` unexpanded and the value type `REG_EXPAND_SZ`; stops on any error (never writes
+/// a PATH it could not read).
+pub fn windows_path_script() -> &'static str {
+    "$ErrorActionPreference = 'Stop'\n\
+     $key = Get-Item -Path 'HKCU:\\Environment'\n\
+     $path = $key.GetValue('Path', '', 'DoNotExpandEnvironmentNames')\n\
+     $dir = $env:RETROGIT_BIN\n\
+     $parts = @($path -split ';' | Where-Object { $_ -ne '' })\n\
+     if ($parts | Where-Object { $_.TrimEnd('\\').ToLower() -eq $dir.TrimEnd('\\').ToLower() }) { exit 0 }\n\
+     Set-ItemProperty -Path 'HKCU:\\Environment' -Name 'Path' -Type ExpandString -Value (($parts + $dir) -join ';')\n\
+     [Environment]::SetEnvironmentVariable('RETROGIT_PATH_REFRESH', '1', 'User')\n\
+     [Environment]::SetEnvironmentVariable('RETROGIT_PATH_REFRESH', $null, 'User')\n"
+}
+
+/// Why the command cannot be installed from where RetroGit runs (macOS temporary locations).
+pub fn install_blocker(exe: &Path) -> Option<&'static str> {
+    let p = exe.to_string_lossy();
+    (p.contains("/AppTranslocation/") || p.starts_with("/Volumes/"))
+        .then_some(crate::strings::ERR_INSTALL_FROM_TEMP)
 }
 
 /// `existing` user PATH plus `dir`, or `None` if `dir` is already there.
@@ -77,22 +113,30 @@ pub fn merge_path(existing: &str, dir: &str) -> Option<String> {
     Some(out.join(";"))
 }
 
-/// Install the `retrogit` command for the current user. Returns a message to show.
-pub fn install_command_line_tool() -> Result<String, String> {
+/// Install the `retrogit` command for the current user. `Ok(None)` = cancelled by the user.
+/// Blocking (password prompt, PowerShell): run it off the UI thread.
+pub fn install_command_line_tool() -> Result<Option<String>, String> {
+    use crate::strings as s;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    if let Some(why) = install_blocker(&exe) {
+        return Err(why.to_string());
+    }
     #[cfg(target_os = "macos")]
     {
-        let tmp = std::env::temp_dir().join("retrogit-cli");
+        let tmp = std::env::temp_dir().join(format!("retrogit-cli-{}", std::process::id()));
         std::fs::write(&tmp, mac_install_script(&exe)).map_err(|e| e.to_string())?;
         let out = std::process::Command::new("osascript")
             .args(["-e", &mac_install_applescript(&tmp)])
             .output()
             .map_err(|e| e.to_string())?;
         let _ = std::fs::remove_file(&tmp);
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
         if out.status.success() {
-            Ok("Installed /usr/local/bin/retrogit. Open a new terminal and type: retrogit".into())
+            Ok(Some(s::INSTALLED_CLI_MAC.to_string()))
+        } else if err.contains("-128") {
+            Ok(None) // "User canceled."
         } else {
-            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+            Err(err)
         }
     }
     #[cfg(windows)]
@@ -100,41 +144,32 @@ pub fn install_command_line_tool() -> Result<String, String> {
         use std::os::windows::process::CommandExt;
         let local = std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
-            .ok_or("LOCALAPPDATA is not set")?;
+            .ok_or_else(|| s::ERR_NO_LOCALAPPDATA.to_string())?;
         let bin = local.join("RetroGit").join("bin");
         std::fs::create_dir_all(&bin).map_err(|e| e.to_string())?;
-        std::fs::write(bin.join("retrogit.cmd"), windows_shim(&exe)).map_err(|e| e.to_string())?;
-        // Read and write the *user* PATH (not the merged process PATH).
-        let read = std::process::Command::new("powershell")
+        std::fs::write(bin.join("retrogit.cmd"), windows_shim(&exe, Some(&local)))
+            .map_err(|e| e.to_string())?;
+        let out = std::process::Command::new("powershell")
             .args([
                 "-NoProfile",
+                "-NonInteractive",
                 "-Command",
-                "[Environment]::GetEnvironmentVariable('Path','User')",
+                windows_path_script(),
             ])
+            .env("RETROGIT_BIN", &bin)
             .creation_flags(0x0800_0000)
             .output()
             .map_err(|e| e.to_string())?;
-        let current = String::from_utf8_lossy(&read.stdout).trim().to_string();
-        if let Some(new_path) = merge_path(&current, &bin.display().to_string()) {
-            let script = format!(
-                "[Environment]::SetEnvironmentVariable('Path', '{}', 'User')",
-                new_path.replace('\'', "''")
-            );
-            let out = std::process::Command::new("powershell")
-                .args(["-NoProfile", "-Command", &script])
-                .creation_flags(0x0800_0000)
-                .output()
-                .map_err(|e| e.to_string())?;
-            if !out.status.success() {
-                return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-            }
+        if out.status.success() {
+            Ok(Some(s::INSTALLED_CLI_WINDOWS.to_string()))
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
         }
-        Ok("Installed the retrogit command. Open a new terminal and type: retrogit".into())
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = exe;
-        Err("Not supported on this platform.".into())
+        Err(s::ERR_PLATFORM.to_string())
     }
 }
 
@@ -197,24 +232,54 @@ mod tests {
     }
 
     #[test]
-    fn windows_shim_and_path_merge() {
-        assert_eq!(
-            windows_shim(Path::new(r"C:\Program Files\RetroGit\retrogit.exe")),
-            "@\"C:\\Program Files\\RetroGit\\retrogit.exe\" --cli \"%CD%\" %*\r\n"
+    fn windows_shim_works_at_a_drive_root_and_with_accented_user_folders() {
+        let local = Path::new(r"C:\Users\Hélène\AppData\Local");
+        let shim = windows_shim(
+            Path::new(r"C:\Users\Hélène\AppData\Local\RetroGit\retrogit.exe"),
+            Some(local),
         );
         assert_eq!(
-            merge_path(r"C:\a;C:\b", r"C:\bin"),
-            Some(r"C:\a;C:\b;C:\bin".to_string())
+            shim,
+            "@\"%LOCALAPPDATA%\\RetroGit\\retrogit.exe\" --cli \"%CD%\\.\" %*\r\n"
         );
+        assert!(
+            shim.is_ascii(),
+            "cmd reads batch files in the OEM code page"
+        );
+        let other = windows_shim(Path::new(r"D:\Tools\100%\retrogit.exe"), Some(local));
         assert_eq!(
-            merge_path(r"C:\a;c:\BIN\;C:\b", r"C:\bin"),
-            None,
-            "already present (case/trailing slash)"
+            other,
+            "@\"D:\\Tools\\100%%\\retrogit.exe\" --cli \"%CD%\\.\" %*\r\n"
         );
-        assert_eq!(merge_path("", r"C:\bin"), Some(r"C:\bin".to_string()));
-        assert_eq!(
-            merge_path(r"C:\a;", r"C:\bin"),
-            Some(r"C:\a;C:\bin".to_string())
+    }
+
+    #[test]
+    fn windows_path_update_never_round_trips_the_path_through_text() {
+        let script = windows_path_script();
+        assert!(
+            script.contains("DoNotExpandEnvironmentNames"),
+            "keep %VARS% unexpanded"
         );
+        assert!(script.contains("-Type ExpandString"), "keep REG_EXPAND_SZ");
+        assert!(
+            script.contains("$env:RETROGIT_BIN"),
+            "folder passed by environment, not interpolated"
+        );
+        assert!(
+            script.starts_with("$ErrorActionPreference = 'Stop'"),
+            "abort if the PATH cannot be read"
+        );
+    }
+
+    #[test]
+    fn installing_from_a_temporary_location_is_refused() {
+        assert!(
+            install_blocker(Path::new(
+                "/private/var/folders/x/T/AppTranslocation/U/d/RetroGit.app/Contents/MacOS/retrogit"
+            ))
+            .is_some()
+        );
+        assert!(install_blocker(Path::new("/Volumes/RetroGit/retrogit")).is_some());
+        assert!(install_blocker(Path::new("/Applications/RetroGit/retrogit")).is_none());
     }
 }

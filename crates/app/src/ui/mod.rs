@@ -21,4 +21,6 @@ pub struct Ctx<'a> {
     pub worker: &'a WorkerHandle,
     /// Background syntax highlighting.
     pub highlighter: &'a crate::highlight::Service,
+    /// Message boxes produced by background jobs started from the UI.
+    pub notices: &'a std::sync::mpsc::Sender<crate::protocol::AppError>,
 }

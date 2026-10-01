@@ -3,7 +3,7 @@
 //! The running instance listens on 127.0.0.1 (random port) and writes the port and a random
 //! token to a private file in the data directory; requests without the token are ignored.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -24,23 +24,15 @@ pub enum SendError {
     Refused,
 }
 
-/// 128 random bits as hex (std's per-process random hash keys, mixed with time and pid).
-fn new_token() -> String {
-    use std::hash::{BuildHasher, Hasher};
-    let part = |salt: u64| {
-        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-        h.write_u64(salt);
-        h.write_u128(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0),
-        );
-        h.write_u32(std::process::id());
-        h.finish()
-    };
-    format!("{:016x}{:016x}", part(1), part(2))
+/// 128 bits from the operating system's random generator, as hex.
+fn new_token() -> std::io::Result<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| std::io::Error::other(e.to_string()))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
+
+/// Longest request accepted (`token \t path \n`).
+const MAX_REQUEST: u64 = 8 * 1024;
 
 pub fn read_info(dir: &Path) -> Option<Info> {
     let text = std::fs::read_to_string(dir.join(FILE_NAME)).ok()?;
@@ -51,6 +43,8 @@ pub fn read_info(dir: &Path) -> Option<Info> {
 pub fn write_info(dir: &Path, info: &Info) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let path = dir.join(FILE_NAME);
+    // Written next to it then renamed: a client never reads half a file.
+    let tmp = dir.join(format!("{FILE_NAME}.{}", std::process::id()));
     let text = serde_json::to_string(info).map_err(std::io::Error::other)?;
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);
@@ -59,7 +53,8 @@ pub fn write_info(dir: &Path, info: &Info) -> std::io::Result<()> {
         use std::os::unix::fs::OpenOptionsExt;
         opts.mode(0o600);
     }
-    opts.open(&path)?.write_all(text.as_bytes())
+    opts.open(&tmp)?.write_all(text.as_bytes())?;
+    std::fs::rename(&tmp, &path)
 }
 
 /// Listening side, owned by the GUI. Removes its instance file when dropped.
@@ -72,11 +67,11 @@ impl Server {
     /// Start listening; `on_open` runs on a background thread for each accepted folder.
     pub fn start(
         dir: &Path,
-        on_open: impl Fn(PathBuf) + Send + 'static,
+        on_open: impl Fn(PathBuf) + Send + Sync + 'static,
     ) -> std::io::Result<Server> {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
-        let token = new_token();
+        let token = new_token()?;
         write_info(
             dir,
             &Info {
@@ -85,25 +80,35 @@ impl Server {
             },
         )?;
         let expected = token.clone();
+        let on_open = std::sync::Arc::new(on_open);
         std::thread::Builder::new()
             .name("retrogit-instance".into())
             .spawn(move || {
                 for stream in listener.incoming().flatten() {
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-                    let mut reader = BufReader::new(&stream);
-                    let mut line = String::new();
-                    if reader.read_line(&mut line).is_err() {
-                        continue;
-                    }
-                    let mut parts = line.trim_end_matches(['\r', '\n']).splitn(2, '\t');
-                    let (Some(tok), Some(path)) = (parts.next(), parts.next()) else {
-                        continue;
-                    };
-                    if tok != expected || path.is_empty() {
-                        continue; // no answer: the client reports a refusal
-                    }
-                    on_open(PathBuf::from(path));
-                    let _ = (&stream).write_all(b"ok\n");
+                    // One short-lived thread per client: a slow client cannot stall the others.
+                    let expected = expected.clone();
+                    let on_open = on_open.clone();
+                    let _ = std::thread::Builder::new()
+                        .name("retrogit-instance-client".into())
+                        .spawn(move || {
+                            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                            let mut line = String::new();
+                            if BufReader::new((&stream).take(MAX_REQUEST))
+                                .read_line(&mut line)
+                                .is_err()
+                            {
+                                return;
+                            }
+                            let mut parts = line.trim_end_matches(['\r', '\n']).splitn(2, '\t');
+                            let (Some(tok), Some(path)) = (parts.next(), parts.next()) else {
+                                return;
+                            };
+                            if tok != expected || path.is_empty() {
+                                return; // no answer: the client reports a refusal
+                            }
+                            on_open(PathBuf::from(path));
+                            let _ = (&stream).write_all(b"ok\n");
+                        });
                 }
             })?;
         Ok(Server {

@@ -19,8 +19,6 @@ fn cli(data_home: &std::path::Path, args: &[&std::ffi::OsStr]) -> std::process::
 fn data_dir(home: &std::path::Path) -> std::path::PathBuf {
     if cfg!(target_os = "macos") {
         home.join("Library/Application Support/RetroGit")
-    } else if cfg!(windows) {
-        home.join("RetroGit")
     } else {
         home.join("RetroGit")
     }
