@@ -16,10 +16,16 @@ and a pixel font.
 
 ## Features
 
-**GitHub account**
+**GitHub accounts**
 - Sign in with GitHub in your browser (OAuth Device Flow), or paste a personal access token
-- The token is stored in the macOS Keychain / Windows Credential Manager, never on disk, never in logs
-- List your personal and organization repositories, filter, and clone with progress and cancel
+- Several accounts at once (e.g. personal and work): **File > Accounts...** to add or remove them
+- Each repository uses the right account automatically (one that can see it: its owner, a
+  member of its organization, or the first that has access), shown in the status bar and
+  changeable with **Repository > Account...**; pull requests, fetch, pull and push all use it
+- Tokens are stored in the macOS Keychain / Windows Credential Manager (one entry per
+  account), never on disk, never in logs
+- List the repositories of all your accounts in one list (with the accounts that see each),
+  filter, and clone with progress and cancel — or clone any Git URL (HTTPS or SSH)
 - SSO-aware: tells you when an organization needs you to authorize the app, with the link
 - Organizations that restrict third-party OAuth apps: fetch, pull and push retry with your own git
   credentials; pull requests use the [GitHub CLI](https://cli.github.com/) token of the same account
@@ -50,7 +56,7 @@ and a pixel font.
 - Check out a pull request: as its branch when it lives in the repository (brought up to date), or as `pr/<number>` for forks
 
 **Notifications**
-- While RetroGit is open, your pull requests in all repositories are checked every 2 minutes: checks passed or failed, review received, new comment, merged or closed
+- While RetroGit is open, the pull requests of all your accounts are checked every 2 minutes: checks passed or failed, review received, new comment, merged or closed
 - Shown as system notifications and in the **Notifications** list (toolbar), which opens the pull request in its local clone, or on github.com
 
 **Everyday comfort**
@@ -171,14 +177,13 @@ Licenses of embedded third-party data: [THIRD_PARTY.md](THIRD_PARTY.md).
 ## Known limitations
 
 **Accounts and hosting**
-- One GitHub account at a time. With a work account signed in, you can at best read your personal
-  repositories' pull requests but not merge or review as their owner (and the other way round):
-  sign out and sign in with the other account. Multiple accounts are planned.
+- The account of a repository is used for GitHub and Git network operations only: the
+  author of your commits is still your Git configuration (`user.name`, `user.email`).
 - github.com only: no GitHub Enterprise Server, GitLab or Bitbucket for sign-in, repository
   lists and pull requests (plain Git operations work with any remote).
-- When signed out, the Pull Requests tab is unavailable (the GitHub CLI is only used for the
-  signed-in account). The GitHub CLI fallback needs `gh` 2.40 or newer, signed in with the
-  same account (`gh auth login`).
+- Without an account, the Pull Requests tab is unavailable (the GitHub CLI is only used for
+  your signed-in accounts). The GitHub CLI fallback needs `gh` 2.40 or newer, signed in
+  with the same account (`gh auth login`).
 
 **Pull requests**
 - Not supported: editing the title or description, reviewers, assignees, milestones, marking a
