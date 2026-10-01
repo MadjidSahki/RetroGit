@@ -370,3 +370,42 @@ pub const ALL_RESOLVED: &str = "All conflicts are resolved.";
 pub const ALL_RESOLVED_MERGE: &str = "All conflicts are resolved. Commit the merge to finish it.";
 pub const ALL_RESOLVED_REBASE: &str =
     "All conflicts are resolved. Click Continue rebase to finish it.";
+pub const CONFLICTS: &str = "Conflicts";
+pub const LOADING_CONFLICT: &str = "Loading the conflict...";
+pub const CONFLICTS_LEFT: &str = "conflicts left";
+pub const CONFLICT_LEFT: &str = "conflict left";
+pub const PREV_CONFLICT: &str = "< Prev";
+pub const NEXT_CONFLICT: &str = "Next >";
+pub const USE_MINE: &str = "Use mine";
+pub const USE_THEIRS: &str = "Use theirs";
+pub const USE_BOTH: &str = "Use both";
+pub const WHOLE_FILE: &str = "Whole file:";
+pub const WHOLE_MINE: &str = "Mine";
+pub const WHOLE_THEIRS: &str = "Theirs";
+pub const OPEN_IN_IDE_SHORT: &str = "Open in IDE";
+pub const PANE_MINE: &str = "Mine";
+pub const PANE_THEIRS: &str = "Theirs";
+pub const PANE_UPSTREAM: &str = "Upstream";
+pub const PANE_YOUR_COMMIT: &str = "Your commit";
+pub const PANE_RESULT: &str = "Result (editable)";
+pub const MARK_RESOLVED: &str = "Mark resolved";
+pub const CHANGED_ON_DISK: &str = "The file changed on disk.";
+pub const RELOAD: &str = "Reload";
+pub const KEEP_MY_EDITS: &str = "Keep my edits";
+pub const CONFLICT_TITLE: &str = "Conflict";
+pub const CONFIRM_WHOLE_MINE: &str =
+    "Keep your version of the whole file, dropping the other side's changes?";
+pub const CONFIRM_WHOLE_THEIRS: &str =
+    "Take the other version of the whole file, dropping your changes?";
+pub const CONFIRM_MARKERS_LEFT: &str =
+    "Conflict markers are still in the file. Mark it resolved anyway?";
+pub const CONFIRM_DISCARD_EDITS: &str = "Discard your edits to this file?";
+pub const CONFLICT_DELETED_BY_US: &str =
+    "This file was deleted on your side and changed on the other.";
+pub const CONFLICT_DELETED_BY_THEM: &str =
+    "This file was changed on your side and deleted on the other.";
+pub const CONFLICT_BINARY: &str = "This file is binary (or not UTF-8 text): keep one version.";
+pub const KEEP_FILE: &str = "Keep the file";
+pub const DELETE_FILE: &str = "Delete it";
+pub const KEEP_MINE: &str = "Keep mine";
+pub const TAKE_THEIRS: &str = "Take theirs";

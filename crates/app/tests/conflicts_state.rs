@@ -172,3 +172,53 @@ fn resolving_moves_to_the_next_file_then_says_what_is_left_to_do() {
     st.apply(Event::ConflictResolved("b.rs".into()));
     assert_eq!(st.messages.back().unwrap().message, s::ALL_RESOLVED_MERGE);
 }
+
+#[test]
+fn syntax_colors_arrive_in_the_background_for_each_pane() {
+    use retrogit::highlight::{Colors, Span, Target};
+    let mut st = state();
+    open(&mut st, "a.rs");
+    let ed = st.changes.conflict.as_ref().unwrap();
+    assert_eq!(ed.mine_colors, Colors::NotRequested);
+    let mine = retrogit::state::text_as_diff("a.rs", ed.file.mine.as_deref().unwrap());
+    let result = retrogit::state::text_as_diff("a.rs", &ed.result);
+    assert_eq!(mine.line_count(), 4);
+    let spans = |n: usize| {
+        Some(vec![Some(
+            (0..n)
+                .map(|_| {
+                    vec![Span {
+                        text: "x".into(),
+                        color: egui::Color32::RED,
+                    }]
+                })
+                .collect(),
+        )])
+    };
+    st.apply(Event::ColorsLoaded {
+        target: Target::ConflictMine,
+        diff: mine.clone(),
+        colors: spans(4),
+    });
+    st.apply(Event::ColorsLoaded {
+        target: Target::ConflictResult,
+        diff: result.clone(),
+        colors: spans(result.line_count()),
+    });
+    let ed = st.changes.conflict.as_mut().unwrap();
+    assert!(matches!(ed.mine_colors, Colors::Ready(_)));
+    assert!(matches!(ed.result_colors, Colors::Ready(_)));
+    // Typing makes the result's colors stale; old results are dropped.
+    ed.edit("typed\n".into());
+    assert_eq!(ed.result_colors, Colors::NotRequested);
+    st.apply(Event::ColorsLoaded {
+        target: Target::ConflictResult,
+        diff: result,
+        colors: spans(13),
+    });
+    assert_eq!(
+        st.changes.conflict.as_ref().unwrap().result_colors,
+        Colors::NotRequested,
+        "colors of an older text are ignored"
+    );
+}

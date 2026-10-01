@@ -28,7 +28,13 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         .show(ui, |ui| file_lists(ui, cx));
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(2)))
-        .show(ui, |ui| diff_view::show(ui, cx));
+        .show(ui, |ui| {
+            if cx.state.changes.conflict_path.is_some() {
+                super::conflict_view::show(ui, cx)
+            } else {
+                diff_view::show(ui, cx)
+            }
+        });
     toggle_with_space(ui, cx);
 }
 
@@ -72,6 +78,7 @@ fn operation_banner(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                 if ui
                     .add(Button95::new(abort).min_size(egui::vec2(100.0, 20.0)))
                     .clicked()
+                    && cx.state.changes.request_abort()
                 {
                     cx.worker.send(Command::AbortOperation);
                 }
@@ -200,6 +207,12 @@ fn request_discard_files(cx: &mut Ctx<'_>, files: &[FileStatus]) {
 
 fn select_file(cx: &mut Ctx<'_>, path: &str, side: Side) {
     let c = &mut cx.state.changes;
+    if c.conflict_path.is_some() {
+        c.close_conflict();
+        if c.conflict_path.is_some() {
+            return; // edited: the user is asked first
+        }
+    }
     if c.shown.as_ref() != Some(&(path.to_string(), side)) {
         c.shown = Some((path.to_string(), side));
         c.diff = None;
@@ -218,11 +231,49 @@ const FILE_COLUMNS: &[Column] = &[Column {
 
 fn file_lists(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let staged: Vec<FileStatus> = cx.state.changes.staged().cloned().collect();
-    let unstaged: Vec<FileStatus> = cx.state.changes.unstaged().cloned().collect();
+    let conflicted: Vec<FileStatus> = cx.state.changes.conflicted().cloned().collect();
+    let unstaged: Vec<FileStatus> = cx
+        .state
+        .changes
+        .unstaged()
+        .filter(|f| f.unstaged != Some(Change::Conflicted))
+        .cloned()
+        .collect();
+    if !conflicted.is_empty() {
+        conflicts_group(ui, cx, &conflicted);
+        ui.add_space(4.0);
+    }
     let half = ((ui.available_height() - 60.0) / 2.0).max(60.0);
     group(ui, cx, &staged, Side::Staged, half);
     ui.add_space(4.0);
     group(ui, cx, &unstaged, Side::Unstaged, half);
+}
+
+/// Files to resolve, above the staged and unstaged lists; a click opens the editor.
+fn conflicts_group(ui: &mut egui::Ui, cx: &mut Ctx<'_>, files: &[FileStatus]) {
+    ui.label(
+        RichText::new(format!("{} ({})", s::CONFLICTS, files.len()))
+            .color(egui::Color32::from_rgb(0xA0, 0, 0)),
+    );
+    let selected = cx
+        .state
+        .changes
+        .conflict_path
+        .as_ref()
+        .and_then(|p| files.iter().position(|f| &f.path == p));
+    let height = (files.len() as f32 * 18.0 + 6.0).min(120.0);
+    let resp = ListView::new("conflicted_files", FILE_COLUMNS, files.len())
+        .header(false)
+        .height(height)
+        .show(ui, selected, |row, _| {
+            Cell::from(format!("! {}", files[row].path))
+        });
+    if let Some(row) = resp.clicked.or(resp.double_clicked) {
+        let path = files[row].path.clone();
+        if cx.state.changes.open_conflict(&path) {
+            cx.worker.send(Command::LoadConflict(path));
+        }
+    }
 }
 
 fn group(ui: &mut egui::Ui, cx: &mut Ctx<'_>, files: &[FileStatus], side: Side, height: f32) {

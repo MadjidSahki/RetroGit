@@ -5,7 +5,7 @@ mod notifications;
 mod pulls;
 mod sync;
 
-pub use conflicts::{ConflictConfirm, ConflictEditor};
+pub use conflicts::{ConflictConfirm, ConflictEditor, text_as_diff};
 pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};
 pub use pulls::{
     PullDialog, PullTab, PullsView, default_merge_method, merge_defaults, merge_disabled_reason,

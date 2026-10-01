@@ -198,6 +198,11 @@ impl AppState {
                     Target::Pull if self.pulls.file_diff.as_ref() == Some(&diff) => {
                         self.pulls.file_colors = value
                     }
+                    Target::ConflictMine | Target::ConflictTheirs | Target::ConflictResult => {
+                        if let Some(ed) = self.changes.conflict.as_mut() {
+                            ed.colors_loaded(target, &diff, value);
+                        }
+                    }
                     _ => {}
                 }
             }

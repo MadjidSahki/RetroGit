@@ -178,3 +178,80 @@ fn a_failed_resolution_keeps_the_file_conflicted() {
     let evs = until(&w, |e| matches!(e, Event::Error { .. }));
     assert!(!evs.iter().any(|e| matches!(e, Event::ConflictResolved(_))));
 }
+
+#[test]
+fn a_pull_with_rebase_that_conflicts_is_resolved_and_continued() {
+    if !gitcore::git_available() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let root = retrogit::watch::canonical(d.path());
+    let seed = root.join("seed");
+    std::fs::create_dir_all(&seed).unwrap();
+    git(&seed, &["-c", "init.defaultBranch=main", "init", "-q"]);
+    let configure = |dir: &Path| {
+        for (k, v) in [
+            ("user.name", "Ada"),
+            ("user.email", "ada@example.com"),
+            ("commit.gpgsign", "false"),
+            ("core.hooksPath", ".git/hooks"),
+            ("core.autocrlf", "false"),
+        ] {
+            git(dir, &["config", k, v]);
+        }
+    };
+    configure(&seed);
+    std::fs::write(seed.join("f.txt"), "base\n").unwrap();
+    git(&seed, &["add", "-A"]);
+    git(&seed, &["commit", "-q", "-m", "base"]);
+    git(&root, &["clone", "-q", "--bare", "seed", "origin.git"]);
+    git(&root, &["clone", "-q", "origin.git", "work"]);
+    git(&root, &["clone", "-q", "origin.git", "other"]);
+    let (work, other) = (root.join("work"), root.join("other"));
+    configure(&work);
+    configure(&other);
+    std::fs::write(other.join("f.txt"), "upstream\n").unwrap();
+    git(&other, &["commit", "-qam", "upstream"]);
+    git(&other, &["push", "-q"]);
+    std::fs::write(work.join("f.txt"), "mine\n").unwrap();
+    git(&work, &["commit", "-qam", "mine"]);
+
+    let w = start();
+    w.send(Command::OpenRepo(work.clone()));
+    until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+    w.send(Command::Pull(gitcore::PullMode::Rebase));
+    until(&w, |e| {
+        matches!(e, Event::Pulled(gitcore::PullOutcome::Conflicts))
+    });
+    w.send(Command::LoadConflict("f.txt".into()));
+    let evs = until(&w, |e| matches!(e, Event::ConflictLoaded(_)));
+    let Some(Event::ConflictLoaded(file)) = evs.last() else {
+        unreachable!()
+    };
+    assert_eq!(file.operation, Some(gitcore::Operation::Rebase));
+    assert_eq!(
+        file.mine.as_deref(),
+        Some("upstream\n"),
+        "ours = upstream in a rebase"
+    );
+    w.send(Command::ResolveConflict {
+        path: "f.txt".into(),
+        content: "upstream\nmine\n".into(),
+    });
+    until(&w, |e| matches!(e, Event::ConflictResolved(_)));
+    w.send(Command::ContinueRebase);
+    let evs = until(&w, |e| matches!(e, Event::OperationChanged(None)));
+    assert!(
+        !evs.iter().any(|e| matches!(e, Event::Error { .. })),
+        "{evs:?}"
+    );
+    let log = Cmd::new("git")
+        .current_dir(&work)
+        .args(["log", "--format=%s"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&log.stdout),
+        "mine\nupstream\nbase\n"
+    );
+}

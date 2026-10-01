@@ -58,11 +58,15 @@ impl Colors {
 }
 
 /// Which diff view a highlighting result is for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Target {
     Changes,
     History,
     Pull,
+    /// The three panes of the conflict editor.
+    ConflictMine,
+    ConflictTheirs,
+    ConflictResult,
 }
 
 /// A finished highlighting job.
@@ -219,49 +223,67 @@ pub fn highlight_diff(diff: &FileDiff, cancelled: &dyn Fn() -> bool) -> Option<D
     Some(out)
 }
 
-/// Background highlighting thread. Only the latest request matters: an older one still
-/// running is cancelled as soon as a newer one arrives.
+/// Background highlighting thread. Only the latest request of each target matters: an
+/// older one for the same target still running is cancelled as soon as a newer one
+/// arrives; requests for other targets (the panes of the conflict editor) are all served.
 pub struct Service {
     tx: Sender<(u64, Target, FileDiff)>,
-    latest: Arc<AtomicU64>,
+    latest: Arc<std::sync::Mutex<std::collections::HashMap<Target, u64>>>,
+    next: Arc<AtomicU64>,
 }
 
 impl Service {
     /// `deliver` is called on the highlighting thread for each finished request.
     pub fn start(deliver: impl Fn(Highlighted) + Send + 'static) -> Service {
         let (tx, rx) = channel::<(u64, Target, FileDiff)>();
-        let latest = Arc::new(AtomicU64::new(0));
+        let latest: Arc<std::sync::Mutex<std::collections::HashMap<Target, u64>>> = Arc::default();
         let current = latest.clone();
         let spawned = std::thread::Builder::new()
             .name("retrogit-highlight".into())
             .spawn(move || {
-                while let Ok(mut job) = rx.recv() {
-                    // Skip to the newest queued request.
-                    while let Ok(newer) = rx.try_recv() {
-                        job = newer;
+                let is_latest = |target: Target, id: u64| {
+                    current
+                        .lock()
+                        .map(|m| m.get(&target) == Some(&id))
+                        .unwrap_or(false)
+                };
+                while let Ok(first) = rx.recv() {
+                    // Everything queued, keeping only the newest request of each target.
+                    let mut jobs = vec![first];
+                    while let Ok(more) = rx.try_recv() {
+                        jobs.push(more);
                     }
-                    let (id, target, diff) = job;
-                    let started = std::time::Instant::now();
-                    let superseded = || current.load(Ordering::SeqCst) != id;
-                    let cancelled = || superseded() || started.elapsed() > TIME_BUDGET;
-                    let colors = highlight_diff(&diff, &cancelled);
-                    if !superseded() {
-                        deliver(Highlighted {
-                            target,
-                            diff,
-                            colors,
-                        });
+                    jobs.retain(|(id, target, _)| is_latest(*target, *id));
+                    for (id, target, diff) in jobs {
+                        let started = std::time::Instant::now();
+                        let superseded = || !is_latest(target, id);
+                        let cancelled = || superseded() || started.elapsed() > TIME_BUDGET;
+                        let colors = highlight_diff(&diff, &cancelled);
+                        if !superseded() {
+                            deliver(Highlighted {
+                                target,
+                                diff,
+                                colors,
+                            });
+                        }
                     }
                 }
             });
         if let Err(e) = spawned {
             log::warn!("syntax highlighting disabled: {e}");
         }
-        Service { tx, latest }
+        Service {
+            tx,
+            latest,
+            next: Arc::new(AtomicU64::new(0)),
+        }
     }
 
     pub fn request(&self, target: Target, diff: FileDiff) {
-        let id = self.latest.fetch_add(1, Ordering::SeqCst) + 1;
+        let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Ok(mut m) = self.latest.lock() {
+            m.insert(target, id);
+        }
         let _ = self.tx.send((id, target, diff));
     }
 }
@@ -637,6 +659,25 @@ mod tests {
             vec![hunk(1, vec![dl(LineKind::Added, "fn a() {}\n")])],
         );
         assert!(highlight_diff(&d, &|| true).is_none(), "cancelled");
+    }
+
+    #[test]
+    fn requests_for_different_panes_are_all_delivered() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let service = Service::start(move |r| {
+            let _ = tx.send(r);
+        });
+        let d = |t: &str| file("a.rs", vec![hunk(1, vec![dl(LineKind::Added, t)])]);
+        // The three panes of the conflict editor ask in the same frame.
+        service.request(Target::ConflictMine, d("fn mine() {}\n"));
+        service.request(Target::ConflictTheirs, d("fn theirs() {}\n"));
+        service.request(Target::ConflictResult, d("fn result() {}\n"));
+        let mut got = Vec::new();
+        while got.len() < 3 {
+            let r = rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+            got.push(r.target);
+        }
+        assert!(got.contains(&Target::ConflictMine) && got.contains(&Target::ConflictTheirs));
     }
 
     #[test]

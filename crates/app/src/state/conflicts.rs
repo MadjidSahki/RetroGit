@@ -1,10 +1,46 @@
 //! State of the conflict editor (sub-project 6a).
 
-use gitcore::{Change, Choice, ConflictFile, Pick, apply_choice, conflict_count};
+use gitcore::{
+    Change, Choice, ConflictFile, DiffLine, FileDiff, Hunk, LineKind, Pick, Side, apply_choice,
+    conflict_count,
+};
+
+use crate::highlight::{Colors, Target};
 
 use super::{AppState, ChangesView};
 use crate::protocol::{AppError, Severity};
 use crate::strings as s;
+
+/// A whole text as a one-hunk diff of unchanged lines: what the background highlighter
+/// colors (the conflict panes reuse the diff highlighting service).
+pub fn text_as_diff(path: &str, text: &str) -> FileDiff {
+    let lines = text
+        .split_inclusive('\n')
+        .enumerate()
+        .map(|(i, l)| DiffLine {
+            kind: LineKind::Context,
+            old_no: Some(i as u32 + 1),
+            new_no: Some(i as u32 + 1),
+            text: l.to_string(),
+            raw: l.as_bytes().to_vec(),
+            no_newline_at_eof: !l.ends_with('\n'),
+        })
+        .collect::<Vec<_>>();
+    let n = lines.len() as u32;
+    FileDiff {
+        path: path.to_string(),
+        side: Side::Unstaged,
+        binary: false,
+        hunks: vec![Hunk {
+            header: String::new(),
+            old_start: 1,
+            old_lines: n,
+            new_start: 1,
+            new_lines: n,
+            lines,
+        }],
+    }
+}
 
 /// What waits for the user's confirmation in the conflict editor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +51,8 @@ pub enum ConflictConfirm {
     ResolveWithMarkers,
     /// Leave the edited file for another one (`Some(path)`) or close the editor (`None`).
     Discard(Option<String>),
+    /// Abort the merge / rebase although the file was edited.
+    Abort,
 }
 
 /// The file being resolved.
@@ -30,6 +68,14 @@ pub struct ConflictEditor {
     /// The file changed on disk while edited: offered with Reload.
     pub on_disk: Option<ConflictFile>,
     pub confirm: Option<ConflictConfirm>,
+    /// Syntax colors of each pane (computed in the background; `result_colors` again after
+    /// every change of the result).
+    pub mine_colors: Colors,
+    pub theirs_colors: Colors,
+    pub result_colors: Colors,
+    /// Last colors computed for the result, still drawn (line by line, where the text did
+    /// not change) while new ones are computed: no flicker while typing.
+    pub result_colors_shown: Colors,
 }
 
 impl ConflictEditor {
@@ -41,6 +87,27 @@ impl ConflictEditor {
             edited: false,
             on_disk: None,
             confirm: None,
+            mine_colors: Colors::NotRequested,
+            theirs_colors: Colors::NotRequested,
+            result_colors: Colors::NotRequested,
+            result_colors_shown: Colors::NotRequested,
+        }
+    }
+
+    /// Colors computed for `diff`, kept only if `diff` is still what the pane shows.
+    pub fn colors_loaded(&mut self, target: Target, diff: &FileDiff, colors: Colors) {
+        let path = &self.file.path;
+        let (text, slot) = match target {
+            Target::ConflictMine => (self.file.mine.as_deref(), &mut self.mine_colors),
+            Target::ConflictTheirs => (self.file.theirs.as_deref(), &mut self.theirs_colors),
+            Target::ConflictResult => (Some(self.result.as_str()), &mut self.result_colors),
+            _ => return,
+        };
+        if text.is_some_and(|t| text_as_diff(path, t) == *diff) {
+            if target == Target::ConflictResult {
+                self.result_colors_shown = colors.clone();
+            }
+            *slot = colors;
         }
     }
 
@@ -54,6 +121,7 @@ impl ConflictEditor {
             return;
         }
         self.result = apply_choice(&self.result, self.current, choice);
+        self.result_colors = Colors::NotRequested;
         self.edited = true;
         self.clamp();
     }
@@ -76,6 +144,7 @@ impl ConflictEditor {
     pub fn edit(&mut self, text: String) {
         if text != self.result {
             self.result = text;
+            self.result_colors = Colors::NotRequested;
             self.edited = true;
             self.clamp();
         }
@@ -123,6 +192,20 @@ impl ChangesView {
         }
         self.conflict = None;
         self.conflict_path = None;
+    }
+
+    /// Abort the operation: asks first if the open conflict was edited. Returns whether it
+    /// can be aborted now.
+    pub fn request_abort(&mut self) -> bool {
+        if let Some(ed) = self.conflict.as_mut()
+            && ed.edited
+        {
+            ed.confirm = Some(ConflictConfirm::Abort);
+            return false;
+        }
+        self.conflict = None;
+        self.conflict_path = None;
+        true
     }
 
     /// The user confirmed dropping the edits: go where they wanted.
