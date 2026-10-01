@@ -82,6 +82,15 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             filter: p.filter,
         });
     }
+    if p.load_selected {
+        p.load_selected = false;
+        if let Some(number) = p.selected {
+            cx.worker.send(Command::LoadPull {
+                slug: slug.clone(),
+                number,
+            });
+        }
+    }
     toolbar(ui, cx, &slug);
     ui.add_space(2.0);
     egui::Panel::left("pulls_list")

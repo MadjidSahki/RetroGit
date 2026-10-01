@@ -85,6 +85,10 @@ pub struct PullsView {
     pub meta: Option<RepoMeta>,
     /// Status bar note after the last change.
     pub note: Option<String>,
+    /// The selected pull request must be loaded (selected from outside the list).
+    pub load_selected: bool,
+    /// Pull request to show once this repository is open (from a notification).
+    pub open_after_switch: Option<(Slug, u64)>,
 }
 
 impl PullsView {

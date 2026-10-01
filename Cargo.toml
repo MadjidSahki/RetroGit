@@ -29,6 +29,7 @@ trash = "5"
 getrandom = "0.3"
 syntect = { version = "5.3", default-features = false, features = ["regex-fancy"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+tauri-winrt-notification = "0.8"
 mockito = "1"
 tempfile = "3"
 

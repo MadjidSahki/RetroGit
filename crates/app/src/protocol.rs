@@ -288,6 +288,8 @@ pub enum Event {
         number: u64,
         note: String,
     },
+    /// Changes on the user's pull requests (from the watcher thread).
+    PrEvents(Vec<github::PrEvent>),
     Error {
         during: Op,
         error: AppError,

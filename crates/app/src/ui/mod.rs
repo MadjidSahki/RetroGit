@@ -8,6 +8,7 @@ pub mod discard;
 pub mod history;
 pub mod main_window;
 pub mod message;
+pub mod notifications;
 pub mod pull_detail;
 pub mod pull_dialogs;
 pub mod pulls;

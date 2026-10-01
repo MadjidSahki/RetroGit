@@ -30,6 +30,9 @@ getrandom.workspace = true
 syntect.workspace = true
 two-face.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification.workspace = true
+
 [dev-dependencies]
 egui_kittest.workspace = true
 mockito.workspace = true

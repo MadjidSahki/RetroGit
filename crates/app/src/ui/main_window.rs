@@ -194,6 +194,8 @@ fn toolbar(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         }
         ui.separator();
         super::sync_toolbar::toolbar(ui, cx);
+        ui.separator();
+        super::notifications::toolbar_button(ui, cx);
     });
 }
 

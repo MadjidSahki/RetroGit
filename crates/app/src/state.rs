@@ -1,8 +1,10 @@
 //! All UI state, updated by the pure `apply` function.
 
+mod notifications;
 mod pulls;
 mod sync;
 
+pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};
 pub use pulls::{
     PullDialog, PullTab, PullsView, default_merge_method, merge_defaults, merge_disabled_reason,
     prefill_title, review_events_allowed,
@@ -171,6 +173,7 @@ pub struct AppState {
     pub ides: Vec<crate::ide::Ide>,
     // --- Sub-project 4 ---
     pub pulls: PullsView,
+    pub notifications: NotificationsView,
 }
 
 impl AppState {
@@ -203,6 +206,7 @@ impl AppState {
             signing: None,
             ides: Vec::new(),
             pulls: PullsView::default(),
+            notifications: NotificationsView::default(),
         }
     }
 
@@ -340,6 +344,7 @@ impl AppState {
             | Event::RepoMetaLoaded { .. }
             | Event::PullCreated { .. }
             | Event::PullActionDone { .. }) => self.apply_pulls(ev),
+            Event::PrEvents(events) => self.add_notifications(events),
             Event::Error { during, error } => {
                 self.on_error(during);
                 self.messages.push_back(error);
@@ -406,12 +411,19 @@ impl AppState {
             self.dialog = None;
             self.operation = None;
             self.signing = None;
-            self.pulls = PullsView::for_repo(
-                summary
-                    .origin_url
-                    .as_deref()
-                    .and_then(gitcore::parse_github_slug),
-            );
+            let slug = summary
+                .origin_url
+                .as_deref()
+                .and_then(gitcore::parse_github_slug);
+            let open_after = self.pulls.open_after_switch.take();
+            self.pulls = PullsView::for_repo(slug.clone());
+            // Opened from a notification: show that pull request.
+            if let (Some((want, number)), Some(slug)) = (open_after, slug)
+                && want.0.eq_ignore_ascii_case(&slug.0)
+                && want.1.eq_ignore_ascii_case(&slug.1)
+            {
+                self.show_pull(number);
+            }
         }
         self.current = Some(summary);
     }

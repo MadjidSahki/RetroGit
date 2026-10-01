@@ -1,0 +1,233 @@
+#![allow(clippy::unwrap_used)]
+//! Pull request notifications: watcher thread against a mock GitHub, and the state.
+
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use gitcore::{Head, RepoSummary};
+use github::{Client, PrEvent, PrEventKind, TokenProvider};
+use retrogit::config::Config;
+use retrogit::pr_watch::{Poller, PrWatcher, WatchState};
+use retrogit::protocol::Event;
+use retrogit::state::{AppState, MAX_NOTIFICATIONS, NotificationTarget, Tab};
+use serde_json::json;
+
+fn search(state: &str, checks: &str) -> String {
+    json!({ "data": { "search": { "nodes": [ {
+        "number": 7, "title": "Fix login", "url": "https://github.com/o/r/pull/7",
+        "state": state, "repository": { "nameWithOwner": "o/r" },
+        "author": { "login": "ada" }, "mergedBy": null,
+        "comments": { "totalCount": 0, "nodes": [] },
+        "reviews": { "totalCount": 0, "nodes": [] },
+        "commits": { "nodes": [ { "commit": { "oid": "abc",
+            "statusCheckRollup": { "state": checks, "contexts": { "nodes": [] } } } } ] }
+    } ] } } })
+    .to_string()
+}
+
+#[test]
+fn the_watcher_announces_changes_after_a_silent_first_pass() {
+    let mut server = mockito::Server::new();
+    let first = server
+        .mock("POST", "/graphql")
+        .match_header("authorization", "Bearer gho_t")
+        .with_body(search("OPEN", "PENDING"))
+        .expect(1)
+        .create();
+    let session = Arc::new(Mutex::new(Some(("gho_t".to_string(), "ada".to_string()))));
+    let got: Arc<Mutex<Vec<PrEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = got.clone();
+    let _w = PrWatcher::start(
+        Client::with_bases(&server.url(), &server.url()),
+        TokenProvider::without_gh(),
+        session,
+        Duration::from_millis(300),
+        move |events| sink.lock().unwrap().extend(events),
+    );
+    std::thread::sleep(Duration::from_millis(150));
+    first.assert();
+    assert!(got.lock().unwrap().is_empty(), "first pass: reference only");
+    server
+        .mock("POST", "/graphql")
+        .with_body(search("OPEN", "SUCCESS"))
+        .create();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while got.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let events = got.lock().unwrap().clone();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].kind, PrEventKind::ChecksPassed);
+    assert_eq!(events[0].key, "o/r#7");
+}
+
+#[test]
+fn signing_in_as_someone_else_starts_a_new_reference() {
+    let snap = |checks| github::PrSnapshot {
+        key: "o/r#1".into(),
+        repo: "o/r".into(),
+        number: 1,
+        title: "t".into(),
+        url: "u".into(),
+        state: github::PrState::Open,
+        merged_by: None,
+        head: "h".into(),
+        checks,
+        failed_checks: 0,
+        review_count: 0,
+        last_review: None,
+        comment_count: 0,
+        last_commenter: None,
+    };
+    let mut w = WatchState::default();
+    assert!(
+        w.advance("ada", vec![snap(github::ChecksState::Pending)])
+            .is_empty()
+    );
+    assert!(
+        w.advance("bob", vec![snap(github::ChecksState::Success)])
+            .is_empty()
+    );
+    assert_eq!(
+        w.advance("bob", vec![snap(github::ChecksState::Failure)])
+            .len(),
+        0,
+        "settled to settled: nothing"
+    );
+    w.reset();
+    assert!(
+        w.advance("bob", vec![snap(github::ChecksState::Pending)])
+            .is_empty()
+    );
+    assert_eq!(
+        w.advance("bob", vec![snap(github::ChecksState::Success)])
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn the_gh_token_adds_pull_requests_only_for_the_same_account() {
+    let mut server = mockito::Server::new();
+    server
+        .mock("POST", "/graphql")
+        .match_header("authorization", "Bearer gho_app")
+        .with_body(search("OPEN", "PENDING"))
+        .create();
+    let other = json!({ "data": { "search": { "nodes": [ {
+        "number": 9, "title": "Restricted org PR", "url": "u", "state": "OPEN",
+        "repository": { "nameWithOwner": "corp/x" }, "author": { "login": "ada" },
+        "comments": { "totalCount": 0, "nodes": [] }, "reviews": { "totalCount": 0, "nodes": [] },
+        "commits": { "nodes": [] } } ] } } })
+    .to_string();
+    server
+        .mock("POST", "/graphql")
+        .match_header("authorization", "Bearer gho_cli")
+        .with_body(other)
+        .create();
+    let user = server
+        .mock("GET", "/user")
+        .match_header("authorization", "Bearer gho_cli")
+        .with_body(r#"{"login":"Ada","name":null}"#)
+        .expect(1)
+        .create();
+    let tokens = TokenProvider::new(Arc::new(|_: Option<&str>| Some("gho_cli".to_string())));
+    let mut p = Poller::new(Client::with_bases(&server.url(), &server.url()), tokens);
+    let keys: Vec<String> = p
+        .poll("gho_app", "ada", 1_790_856_000)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.key)
+        .collect();
+    assert_eq!(keys, ["o/r#7", "corp/x#9"]);
+    // The account check is cached.
+    p.poll("gho_app", "ada", 1_790_856_000).unwrap();
+    user.assert();
+    // Another account behind gh: its pull requests are not the user's.
+    let keys: Vec<String> = p
+        .poll("gho_app", "bob", 1_790_856_000)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.key)
+        .collect();
+    assert_eq!(keys, ["o/r#7"]);
+}
+
+fn event(repo: &str, number: u64) -> PrEvent {
+    PrEvent {
+        key: format!("{repo}#{number}"),
+        repo: repo.into(),
+        number,
+        title: "t".into(),
+        url: format!("https://github.com/{repo}/pull/{number}"),
+        kind: PrEventKind::Merged,
+    }
+}
+
+fn opened(state: &mut AppState, path: &str, origin: &str) {
+    state.apply(Event::RepoOpened(RepoSummary {
+        name: Path::new(path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+        path: PathBuf::from(path),
+        head: Head::Branch("main".into()),
+        origin_url: Some(origin.into()),
+        last_commit: None,
+    }));
+}
+
+#[test]
+fn notifications_are_kept_newest_first_with_an_unread_count() {
+    let mut st = AppState::new(Config::default());
+    st.apply(Event::PrEvents(vec![event("o/r", 1), event("o/r", 2)]));
+    assert_eq!(st.notifications.unread, 2);
+    assert_eq!(st.notifications.items[0].number, 2);
+    st.open_notifications();
+    assert_eq!(st.notifications.unread, 0);
+    assert!(st.notifications.open);
+    st.apply(Event::PrEvents((0..60).map(|n| event("o/r", n)).collect()));
+    assert_eq!(st.notifications.items.len(), MAX_NOTIFICATIONS);
+    assert_eq!(st.notifications.unread, MAX_NOTIFICATIONS);
+}
+
+#[test]
+fn clicking_a_notification_finds_the_local_repo() {
+    let mut st = AppState::new(Config::default());
+    let here = std::env::temp_dir();
+    let a = here.join("a").display().to_string();
+    let b = here.join("b").display().to_string();
+    st.config.add_recent("b", Path::new(&b));
+    opened(&mut st, &a, "https://github.com/o/a.git");
+    let slug_of = |p: &Path| (p == Path::new(&b)).then(|| ("O".to_string(), "B".to_string()));
+    assert_eq!(
+        st.notification_target(&event("o/a", 3), slug_of),
+        NotificationTarget::Current(3)
+    );
+    assert_eq!(
+        st.notification_target(&event("o/b", 4), slug_of),
+        NotificationTarget::Local(PathBuf::from(&b), 4),
+        "case-insensitive"
+    );
+    assert_eq!(
+        st.notification_target(&event("x/y", 5), slug_of),
+        NotificationTarget::Browser("https://github.com/x/y/pull/5".into())
+    );
+}
+
+#[test]
+fn the_pull_request_opens_once_its_repository_is_open() {
+    let mut st = AppState::new(Config::default());
+    opened(&mut st, "/tmp/a", "https://github.com/o/a.git");
+    st.pulls.open_after_switch = Some((("o".into(), "b".into()), 4));
+    opened(&mut st, "/tmp/b", "git@github.com:o/b.git");
+    assert_eq!(st.tab, Tab::PullRequests);
+    assert_eq!(st.pulls.selected, Some(4));
+    assert!(st.pulls.load_selected);
+    assert!(st.pulls.open_after_switch.is_none());
+    // In the open repository: straight away.
+    st.show_pull(9);
+    assert_eq!(st.pulls.selected, Some(9));
+}

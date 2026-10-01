@@ -1,0 +1,102 @@
+//! Toolbar button and list of pull request notifications.
+
+use win95::{Button95, Dialog};
+
+use super::Ctx;
+use crate::protocol::Command;
+use crate::state::{NotificationTarget, split_repo};
+use crate::strings as s;
+
+/// "Notifications (3)" while some are unread.
+pub fn button_label(unread: usize) -> String {
+    if unread == 0 {
+        s::NOTIFICATIONS.to_string()
+    } else {
+        format!("{} ({unread})", s::NOTIFICATIONS)
+    }
+}
+
+pub fn toolbar_button(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
+    let label = button_label(cx.state.notifications.unread);
+    if ui
+        .add(Button95::new(label).min_size(egui::vec2(110.0, 22.0)))
+        .clicked()
+    {
+        cx.state.open_notifications();
+    }
+}
+
+pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
+    if !cx.state.notifications.open {
+        return;
+    }
+    let mut picked = None;
+    let mut close = false;
+    let mut clear = false;
+    let r = Dialog::new("notifications", s::NOTIFICATIONS_TITLE)
+        .width(520.0)
+        .show(egui_ctx, |ui| {
+            let items = &cx.state.notifications.items;
+            if items.is_empty() {
+                ui.label(s::NO_NOTIFICATIONS);
+            }
+            egui::ScrollArea::vertical()
+                .max_height(360.0)
+                .show(ui, |ui| {
+                    for (i, e) in items.iter().enumerate() {
+                        let (title, body) = crate::notify::notification_text(e);
+                        if ui
+                            .selectable_label(false, format!("{title}  {body}"))
+                            .clicked()
+                        {
+                            picked = Some(i);
+                        }
+                    }
+                });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add(Button95::new(s::CLOSE).min_size(egui::vec2(90.0, 23.0)))
+                    .clicked()
+                {
+                    close = true;
+                }
+                if ui
+                    .add(Button95::new(s::CLEAR).min_size(egui::vec2(90.0, 23.0)))
+                    .clicked()
+                {
+                    clear = true;
+                }
+            });
+        });
+    if clear {
+        cx.state.notifications.items.clear();
+    }
+    if close || r.close_requested {
+        cx.state.notifications.open = false;
+    }
+    let Some(e) = picked.and_then(|i| cx.state.notifications.items.get(i).cloned()) else {
+        return;
+    };
+    cx.state.notifications.open = false;
+    let target = cx.state.notification_target(&e, |path| {
+        gitcore::Repo::open(path).ok().and_then(|r| r.github_slug())
+    });
+    match target {
+        NotificationTarget::Current(number) => cx.state.show_pull(number),
+        NotificationTarget::Local(path, number) => {
+            cx.state.pulls.open_after_switch = split_repo(&e.repo).map(|slug| (slug, number));
+            cx.worker.send(Command::OpenRepo(path));
+        }
+        NotificationTarget::Browser(url) => egui_ctx.open_url(egui::OpenUrl::new_tab(url)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_button_counts_unread_notifications() {
+        assert_eq!(super::button_label(0), "Notifications");
+        assert_eq!(super::button_label(3), "Notifications (3)");
+    }
+}
