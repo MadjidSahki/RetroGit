@@ -132,6 +132,9 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
             .replace("{head}", &d.summary.head)
             .replace("{base}", &d.summary.base);
         ui.label(format!("{} {what}", d.summary.author));
+        ui.label(
+            RichText::new(format!("({} @{})", s::AS_ACCOUNT, d.viewer)).color(win95::theme::GRAY),
+        );
     });
     ui.horizontal_wrapped(|ui| {
         ui.label(s::LABELS);
@@ -187,7 +190,13 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                 .enabled(why.is_none() && !busy),
         );
         if let Some(why) = why {
-            merge.on_disabled_hover_text(why);
+            // With several accounts, another one may be allowed: say how to switch.
+            let why = if why == s::WHY_NO_PERMISSION && cx.state.accounts.len() > 1 {
+                format!("{why} {}", s::SWITCH_ACCOUNT_HINT)
+            } else {
+                why.to_string()
+            };
+            merge.on_disabled_hover_text(&why);
             ui.label(RichText::new(why).color(win95::theme::GRAY));
         } else if merge.clicked()
             && let Some(method) = default_merge_method(d)

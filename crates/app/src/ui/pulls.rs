@@ -73,6 +73,13 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         });
         return;
     };
+    if cx.state.auth == crate::state::Auth::SignedOut {
+        bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 8, |ui| {
+            ui.set_min_size(ui.available_size());
+            ui.label(s::PULLS_SIGN_IN);
+        });
+        return;
+    }
     let p = &mut cx.state.pulls;
     if p.stale && !p.loading {
         p.stale = false;

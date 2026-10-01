@@ -201,16 +201,6 @@ impl Worker {
         self.send_repo_account();
     }
 
-    pub(super) fn sign_out_all(&mut self) {
-        let logins = self.accounts.logins();
-        if logins.is_empty() {
-            return self.emit(Event::SignedOut);
-        }
-        for login in logins {
-            self.remove_account(&login);
-        }
-    }
-
     /// GitHub refused `login`'s token: that account only must sign in again.
     pub(super) fn invalidate(&mut self, login: &str, during: Op) {
         let _ = self.deps.store.clear(login);

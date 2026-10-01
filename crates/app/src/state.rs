@@ -139,6 +139,8 @@ pub struct CloneDialog {
     /// `full_name` of the selected repository (stable across filtering).
     pub selected: Option<String>,
     pub dest_parent: String,
+    /// "Or clone from URL": when set, it is cloned instead of the selected repository.
+    pub url: String,
     /// `Some` while a clone is running.
     pub progress: Option<CloneProgress>,
     pub cloning_name: String,
@@ -173,6 +175,10 @@ pub struct AppState {
     pub ides: Vec<crate::ide::Ide>,
     // --- Sub-project 5 ---
     pub accounts: Vec<github::AccountStatus>,
+    /// File > Accounts... is open.
+    pub accounts_dialog: bool,
+    /// Repository > Account... is open.
+    pub repo_account_dialog: bool,
     /// Account of the open repository, once the worker said (`Some(None)`: none).
     pub repo_account: Option<Option<String>>,
     // --- Sub-project 4 ---
@@ -212,6 +218,8 @@ impl AppState {
             pulls: PullsView::default(),
             notifications: NotificationsView::default(),
             accounts: Vec::new(),
+            accounts_dialog: false,
+            repo_account_dialog: false,
             repo_account: None,
         }
     }

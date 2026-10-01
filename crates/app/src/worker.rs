@@ -237,7 +237,6 @@ impl Worker {
             Command::ValidateToken => self.validate(),
             Command::StartDeviceFlow => self.device_flow(),
             Command::SavePat(t) => self.sign_in_with(t.trim().to_string(), true),
-            Command::SignOut => self.sign_out_all(),
             Command::RemoveAccount(login) => self.remove_account(&login),
             Command::SetRepoAccount { slug, login } => self.set_repo_account(&slug, login),
             Command::ListRepos => self.list_repos(),

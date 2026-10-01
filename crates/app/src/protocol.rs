@@ -19,8 +19,6 @@ pub enum Command {
     ValidateToken,
     StartDeviceFlow,
     SavePat(String),
-    /// Remove every account.
-    SignOut,
     RemoveAccount(String),
     /// Use `login` for `slug` from now on (`None`: choose automatically again).
     SetRepoAccount {
