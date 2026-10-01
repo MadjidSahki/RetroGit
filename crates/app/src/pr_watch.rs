@@ -7,9 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use github::{Client, GithubError, PrEvent, PrSnapshot, TokenProvider, diff_snapshots};
-
-use crate::worker::Session;
+use github::{Accounts, Client, GithubError, PrEvent, PrSnapshot, TokenProvider, diff_snapshots};
 
 /// Normal polling interval.
 pub const INTERVAL: Duration = Duration::from_secs(120);
@@ -30,8 +28,8 @@ pub fn next_delay(failures: u32) -> Duration {
 pub struct Poller {
     client: Client,
     tokens: TokenProvider,
-    /// `gh` token already checked, and the account it belongs to.
-    gh_checked: Option<(String, Option<String>)>,
+    /// `gh` tokens already checked, and the account each belongs to.
+    gh_checked: HashMap<String, Option<String>>,
 }
 
 impl Poller {
@@ -39,18 +37,18 @@ impl Poller {
         Poller {
             client,
             tokens,
-            gh_checked: None,
+            gh_checked: HashMap::new(),
         }
     }
 
     /// The `gh` token if it belongs to `login` (its account is looked up once per token).
     fn gh_token_for(&mut self, login: &str) -> Option<String> {
-        let gh = self.tokens.gh_token()?;
-        if self.gh_checked.as_ref().map(|(t, _)| t) != Some(&gh) {
+        let gh = self.tokens.gh_token_for(login)?;
+        if !self.gh_checked.contains_key(&gh) {
             let account = self.client.current_user(&gh).ok().map(|u| u.login);
-            self.gh_checked = Some((gh.clone(), account));
+            self.gh_checked.insert(gh.clone(), account);
         }
-        let account = self.gh_checked.as_ref().and_then(|(_, a)| a.as_deref());
+        let account = self.gh_checked.get(&gh).and_then(|a| a.as_deref());
         account
             .is_some_and(|a| a.eq_ignore_ascii_case(login))
             .then_some(gh)
@@ -123,12 +121,13 @@ impl Drop for PrWatcher {
 }
 
 impl PrWatcher {
-    /// Poll now, then every `interval` (longer after failures). `deliver` gets each
-    /// non-empty batch of events, on the watcher thread.
+    /// Poll every account now, then every `interval` (longer after failures). `deliver`
+    /// gets each non-empty batch of events, on the watcher thread. An account's first poll
+    /// is only a reference; a removed account stops being watched.
     pub fn start(
         client: Client,
         tokens: TokenProvider,
-        session: Session,
+        accounts: Accounts,
         interval: Duration,
         deliver: impl Fn(Vec<PrEvent>) + Send + 'static,
     ) -> PrWatcher {
@@ -138,32 +137,37 @@ impl PrWatcher {
             .name("retrogit-pr-watch".into())
             .spawn(move || {
                 let mut poller = Poller::new(client, tokens);
-                let mut state = WatchState::default();
+                let mut states: HashMap<String, WatchState> = HashMap::new();
                 let mut failures = 0;
                 while !stopped.load(Ordering::SeqCst) {
-                    let current = session.lock().ok().and_then(|s| s.clone());
-                    match current {
-                        None => state.reset(),
-                        Some((token, login)) => {
-                            let now = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_secs() as i64)
-                                .unwrap_or(0);
-                            match poller.poll(&token, &login, now) {
-                                Ok(snaps) => {
-                                    failures = 0;
-                                    let events = state.advance(&login, snaps);
-                                    if !events.is_empty() {
-                                        deliver(events);
-                                    }
-                                }
-                                Err(e) => {
-                                    failures += 1;
-                                    log::info!("pull request watch failed: {e}");
-                                }
+                    let current = accounts.list();
+                    let watched: Vec<String> =
+                        current.iter().map(|a| a.login.to_lowercase()).collect();
+                    states.retain(|login, _| watched.contains(login));
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    let mut failed = false;
+                    let mut events = Vec::new();
+                    for account in current {
+                        match poller.poll(&account.token, &account.login, now) {
+                            Ok(snaps) => events.extend(
+                                states
+                                    .entry(account.login.to_lowercase())
+                                    .or_default()
+                                    .advance(&account.login, snaps),
+                            ),
+                            Err(e) => {
+                                failed = true;
+                                log::info!("pull request watch failed for {}: {e}", account.login);
                             }
                         }
                     }
+                    if !events.is_empty() {
+                        deliver(events);
+                    }
+                    failures = if failed { failures + 1 } else { 0 };
                     let wait = if failures == 0 {
                         interval
                     } else {

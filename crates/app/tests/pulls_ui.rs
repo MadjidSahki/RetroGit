@@ -8,8 +8,8 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use gitcore::{Head, RepoSummary};
 use github::{
-    ChecksState, Client, Label, MemoryStore, MergeMethod, Mergeable, PrDetail, PrState, PrSummary,
-    ReviewDecision, TokenProvider,
+    ChecksState, Client, Label, MemoryAccounts, MergeMethod, Mergeable, PrDetail, PrState,
+    PrSummary, ReviewDecision, TokenProvider,
 };
 use retrogit::config::Config;
 use retrogit::protocol::Event;
@@ -51,10 +51,12 @@ fn world(draft: bool) -> World {
     let worker = spawn(
         WorkerDeps {
             client: Client::with_bases(&server.url(), &server.url()),
-            store: Arc::new(MemoryStore::default()),
+            store: Arc::new(MemoryAccounts::default()),
             client_id: String::new(),
             commit_backend: gitcore::CommitBackend::Git2,
             tokens: TokenProvider::without_gh(),
+            known_accounts: Vec::new(),
+            repo_accounts: Default::default(),
         },
         || {},
     );

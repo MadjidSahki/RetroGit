@@ -35,13 +35,20 @@ fn the_watcher_announces_changes_after_a_silent_first_pass() {
         .with_body(search("OPEN", "PENDING"))
         .expect(1)
         .create();
-    let session = Arc::new(Mutex::new(Some(("gho_t".to_string(), "ada".to_string()))));
+    let accounts = github::Accounts::default();
+    accounts.upsert(
+        github::Account {
+            login: "ada".into(),
+            token: "gho_t".into(),
+        },
+        None,
+    );
     let got: Arc<Mutex<Vec<PrEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = got.clone();
     let _w = PrWatcher::start(
         Client::with_bases(&server.url(), &server.url()),
         TokenProvider::without_gh(),
-        session,
+        accounts,
         Duration::from_millis(300),
         move |events| sink.lock().unwrap().extend(events),
     );
@@ -60,6 +67,57 @@ fn the_watcher_announces_changes_after_a_silent_first_pass() {
     assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(events[0].kind, PrEventKind::ChecksPassed);
     assert_eq!(events[0].key, "o/r#7");
+}
+
+#[test]
+fn every_account_is_watched_and_events_say_whose_they_are() {
+    let mut server = mockito::Server::new();
+    let accounts = github::Accounts::default();
+    for login in ["ada", "bob"] {
+        accounts.upsert(
+            github::Account {
+                login: login.into(),
+                token: format!("gho_{login}"),
+            },
+            None,
+        );
+    }
+    for login in ["ada", "bob"] {
+        server
+            .mock("POST", "/graphql")
+            .match_header("authorization", format!("Bearer gho_{login}").as_str())
+            .with_body(search("OPEN", "PENDING"))
+            .expect(1)
+            .create();
+    }
+    let got: Arc<Mutex<Vec<PrEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = got.clone();
+    let _w = PrWatcher::start(
+        Client::with_bases(&server.url(), &server.url()),
+        TokenProvider::without_gh(),
+        accounts.clone(),
+        Duration::from_millis(300),
+        move |events| sink.lock().unwrap().extend(events),
+    );
+    std::thread::sleep(Duration::from_millis(150));
+    assert!(
+        got.lock().unwrap().is_empty(),
+        "first passes: references only"
+    );
+    // bob is removed; ada's pull request finishes its checks.
+    accounts.remove("bob");
+    server
+        .mock("POST", "/graphql")
+        .match_header("authorization", "Bearer gho_ada")
+        .with_body(search("OPEN", "SUCCESS"))
+        .create();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while got.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let events = got.lock().unwrap().clone();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].account, "ada");
 }
 
 #[test]
@@ -132,8 +190,7 @@ fn the_gh_token_adds_pull_requests_only_for_the_same_account() {
         .with_body(r#"{"login":"Ada","name":null}"#)
         .expect(1)
         .create();
-    let tokens = TokenProvider::new(Arc::new(|_: Option<&str>| Some("gho_cli".to_string())));
-    tokens.set_login(Some("ada"));
+    let tokens = TokenProvider::new(Arc::new(|_: &str| Some("gho_cli".to_string())));
     let mut p = Poller::new(Client::with_bases(&server.url(), &server.url()), tokens);
     let keys: Vec<String> = p
         .poll("gho_app", "ada", 1_790_856_000)
@@ -157,6 +214,7 @@ fn the_gh_token_adds_pull_requests_only_for_the_same_account() {
 
 fn event(repo: &str, number: u64) -> PrEvent {
     PrEvent {
+        account: "ada".into(),
         key: format!("{repo}#{number}"),
         repo: repo.into(),
         number,

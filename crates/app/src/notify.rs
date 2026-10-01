@@ -98,6 +98,7 @@ mod tests {
 
     fn event(kind: PrEventKind) -> PrEvent {
         PrEvent {
+            account: "me".into(),
             key: "o/r#7".into(),
             repo: "o/r".into(),
             number: 7,

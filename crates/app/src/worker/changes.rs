@@ -19,6 +19,7 @@ impl Worker {
         } else {
             Event::RepoOpened(summary)
         });
+        self.send_repo_account();
         self.refresh();
         let Some(repo) = self.open_current(Op::History) else {
             return;

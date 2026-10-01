@@ -171,6 +171,10 @@ pub struct AppState {
     pub signing: Option<gitcore::SigningConfig>,
     /// IDEs installed on this machine (detected at startup).
     pub ides: Vec<crate::ide::Ide>,
+    // --- Sub-project 5 ---
+    pub accounts: Vec<github::AccountStatus>,
+    /// Account of the open repository, once the worker said (`Some(None)`: none).
+    pub repo_account: Option<Option<String>>,
     // --- Sub-project 4 ---
     pub pulls: PullsView,
     pub notifications: NotificationsView,
@@ -207,6 +211,8 @@ impl AppState {
             ides: Vec::new(),
             pulls: PullsView::default(),
             notifications: NotificationsView::default(),
+            accounts: Vec::new(),
+            repo_account: None,
         }
     }
 
@@ -222,6 +228,28 @@ impl AppState {
             Event::SignedIn(user) => {
                 self.auth = Auth::SignedIn(user);
                 self.sign_in = None;
+            }
+            Event::AccountsChanged(accounts) => {
+                let logins: Vec<String> = accounts.iter().map(|a| a.login.clone()).collect();
+                if self.config.accounts != logins {
+                    self.config.accounts = logins;
+                    self.config_dirty = true;
+                }
+                self.accounts = accounts;
+            }
+            Event::RepoAccount { slug, login } => {
+                if self.github_slug().is_some_and(|s| {
+                    s.0.eq_ignore_ascii_case(&slug.0) && s.1.eq_ignore_ascii_case(&slug.1)
+                }) {
+                    self.repo_account = Some(login);
+                }
+            }
+            Event::RepoAccountLearned { key, account } => {
+                let changed = match account {
+                    Some(a) => self.config.repo_accounts.insert(key, a.clone()) != Some(a),
+                    None => self.config.repo_accounts.remove(&key).is_some(),
+                };
+                self.config_dirty |= changed;
             }
             Event::SignedOut => {
                 self.auth = Auth::SignedOut;
@@ -414,6 +442,7 @@ impl AppState {
             self.dialog = None;
             self.operation = None;
             self.signing = None;
+            self.repo_account = None;
             let slug = summary
                 .origin_url
                 .as_deref()

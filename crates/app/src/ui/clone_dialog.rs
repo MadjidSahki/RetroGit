@@ -93,7 +93,7 @@ fn progress(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
 }
 
 fn picker(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
-    let mut start: Option<(String, PathBuf, String)> = None;
+    let mut start: Option<(String, PathBuf, String, Option<String>)> = None;
     let mut refresh = false;
     let mut close = false;
     let loading = cx.state.repos_loading;
@@ -174,19 +174,20 @@ fn picker(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                         repo.clone_url.clone(),
                         PathBuf::from(parent).join(&repo.name),
                         repo.name.clone(),
+                        repo.accounts.first().cloned(),
                     ));
                 }
                 close = ui.add(Button95::new(s::CANCEL)).clicked();
             });
         });
 
-    if let Some((url, dest, name)) = start {
+    if let Some((url, dest, name, account)) = start {
         let parent = dialog.dest_parent.trim().to_string();
         dialog.progress = Some(Default::default());
         dialog.cloning_name = name;
         cx.state.config.last_clone_dir = Some(PathBuf::from(parent));
         cx.state.config_dirty = true;
-        cx.worker.send(Command::Clone { url, dest });
+        cx.worker.send(Command::Clone { url, dest, account });
     } else if r.close_requested || close {
         cx.state.clone = None;
     }

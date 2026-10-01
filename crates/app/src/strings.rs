@@ -341,3 +341,5 @@ pub const RESOLVE: &str = "Resolve conversation";
 pub const UNRESOLVE: &str = "Unresolve conversation";
 pub const NOTE_RESOLVED: &str = "Conversation resolved";
 pub const NOTE_UNRESOLVED: &str = "Conversation unresolved";
+pub const ERR_ACCOUNT_REJECTED: &str =
+    "GitHub rejected the session of @{login}. Sign in again with File > Accounts...";

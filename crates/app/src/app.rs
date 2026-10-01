@@ -109,7 +109,7 @@ impl RetroGitApp {
         let watcher = crate::pr_watch::PrWatcher::start(
             client,
             tokens,
-            self.worker.session(),
+            self.worker.accounts(),
             crate::pr_watch::INTERVAL,
             move |events: Vec<github::PrEvent>| {
                 for e in &events {
