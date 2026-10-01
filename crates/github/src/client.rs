@@ -67,9 +67,9 @@ impl From<RawRepo> for RepoInfo {
 /// Stateless GitHub client: the token is passed to each call.
 #[derive(Clone)]
 pub struct Client {
-    agent: Agent,
-    api_base: String,
-    web_base: String,
+    pub(crate) agent: Agent,
+    pub(crate) api_base: String,
+    pub(crate) web_base: String,
 }
 
 const USER_AGENT: &str = concat!("RetroGit/", env!("CARGO_PKG_VERSION"));
@@ -167,7 +167,7 @@ impl Client {
         }
     }
 
-    fn api_get(&self, url: &str, token: &str) -> Result<Response<Body>, GithubError> {
+    pub(crate) fn api_get(&self, url: &str, token: &str) -> Result<Response<Body>, GithubError> {
         let resp = self
             .agent
             .get(url)
@@ -179,7 +179,7 @@ impl Client {
     }
 }
 
-fn header<'a>(resp: &'a Response<Body>, name: &str) -> Option<&'a str> {
+pub(crate) fn header<'a>(resp: &'a Response<Body>, name: &str) -> Option<&'a str> {
     resp.headers().get(name).and_then(|v| v.to_str().ok())
 }
 
@@ -201,7 +201,7 @@ fn partial_sso_orgs(value: &str) -> Vec<String> {
 }
 
 /// Map non-2xx statuses to typed errors.
-fn check(resp: Response<Body>) -> Result<Response<Body>, GithubError> {
+pub(crate) fn check(resp: Response<Body>) -> Result<Response<Body>, GithubError> {
     let status = resp.status().as_u16();
     if (200..300).contains(&status) {
         return Ok(resp);
@@ -217,6 +217,12 @@ fn check(resp: Response<Body>) -> Result<Response<Body>, GithubError> {
     }
     if (status == 403 || status == 429) && header(&resp, "x-ratelimit-remaining") == Some("0") {
         return Err(GithubError::RateLimited);
+    }
+    if status == 403 {
+        let text = resp.into_body().read_to_string().unwrap_or_default();
+        if let Some(e) = crate::error::oauth_restriction(&text) {
+            return Err(e);
+        }
     }
     Err(GithubError::Http(status))
 }
