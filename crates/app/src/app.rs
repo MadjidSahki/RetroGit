@@ -20,6 +20,13 @@ pub struct RetroGitApp {
     was_focused: bool,
     highlighter: crate::highlight::Service,
     highlighted: std::sync::mpsc::Receiver<crate::highlight::Highlighted>,
+    /// Result of the IDE detection started at launch.
+    ides: Option<std::sync::mpsc::Receiver<Vec<crate::ide::Ide>>>,
+    notices_tx: std::sync::mpsc::Sender<crate::protocol::AppError>,
+    notices: std::sync::mpsc::Receiver<crate::protocol::AppError>,
+    /// Folders sent by `retrogit` from a terminal (see `instance`).
+    to_open: Option<std::sync::mpsc::Receiver<PathBuf>>,
+    _instance: Option<crate::instance::Server>,
 }
 
 impl RetroGitApp {
@@ -31,12 +38,25 @@ impl RetroGitApp {
         ctx: egui::Context,
     ) -> RetroGitApp {
         worker.send(Command::ValidateToken);
+        let ides_ctx = ctx.clone();
         let (tx, highlighted) = std::sync::mpsc::channel();
         let highlighter = crate::highlight::Service::start(move |h| {
             let _ = tx.send(h);
             ctx.request_repaint();
         });
+        let (notices_tx, notices) = std::sync::mpsc::channel();
+        let (ides_tx, ides) = std::sync::mpsc::channel();
+        let repaint = ides_ctx;
+        std::thread::spawn(move || {
+            let _ = ides_tx.send(crate::ide::detect());
+            repaint.request_repaint();
+        });
         RetroGitApp {
+            ides: Some(ides),
+            notices_tx,
+            notices,
+            to_open: None,
+            _instance: None,
             highlighter,
             highlighted,
             state,
@@ -46,6 +66,31 @@ impl RetroGitApp {
             watcher: None,
             was_focused: true,
         }
+    }
+
+    /// Accept folders from the `retrogit` command (single instance), and open `initial`.
+    pub fn with_instance(
+        mut self,
+        dir: Option<&std::path::Path>,
+        ctx: egui::Context,
+        initial: Option<PathBuf>,
+    ) -> RetroGitApp {
+        if let Some(path) = initial {
+            self.worker.send(Command::OpenRepo(path));
+        }
+        let Some(dir) = dir else { return self };
+        let (tx, rx) = std::sync::mpsc::channel();
+        match crate::instance::Server::start(dir, move |p| {
+            let _ = tx.send(p);
+            ctx.request_repaint();
+        }) {
+            Ok(server) => {
+                self._instance = Some(server);
+                self.to_open = Some(rx);
+            }
+            Err(e) => log::warn!("single-instance listener not started: {e}"),
+        }
+        self
     }
 
     /// Keep the file watcher on the current repository.
@@ -87,6 +132,23 @@ impl eframe::App for RetroGitApp {
         while let Ok(ev) = self.worker.events.try_recv() {
             self.state.apply(ev);
         }
+        let requested: Vec<PathBuf> = self
+            .to_open
+            .as_ref()
+            .map(|rx| rx.try_iter().collect())
+            .unwrap_or_default();
+        for path in requested {
+            self.worker.send(Command::OpenRepo(path));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+        if let Some(found) = self.ides.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.state.ides = found;
+            self.ides = None;
+        }
+        while let Ok(notice) = self.notices.try_recv() {
+            self.state.messages.push_back(notice);
+        }
         while let Ok(h) = self.highlighted.try_recv() {
             self.state.apply(crate::protocol::Event::ColorsLoaded {
                 target: h.target,
@@ -125,6 +187,7 @@ impl eframe::App for RetroGitApp {
             state: &mut self.state,
             worker: &self.worker,
             highlighter: &self.highlighter,
+            notices: &self.notices_tx,
         };
         ui::main_window::show(ui, &mut cx);
         ui::clone_dialog::show(&egui_ctx, &mut cx);

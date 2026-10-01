@@ -17,8 +17,23 @@ fn main() -> eframe::Result {
         println!("{}", gitcore::askpass_answer(&prompt, &token));
         return Ok(());
     }
-    if let Some(dir) = dirs::data_local_dir() {
-        logging::init(&dir.join("RetroGit").join("retrogit.log"));
+    // RETROGIT_DATA_DIR overrides the data folder (separate profile, tests).
+    let data_dir = std::env::var_os("RETROGIT_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::data_local_dir().map(|d| d.join("RetroGit")));
+    let initial = match retrogit::cli::parse(&std::env::args().collect::<Vec<_>>()) {
+        retrogit::cli::Launch::Cli { target } => return run_cli(&target, data_dir.as_deref()),
+        retrogit::cli::Launch::Gui { open } => open,
+    };
+    // `--open` (also used by the command when it starts a window): join a window that is
+    // already open instead of starting a second one.
+    if let (Some(path), Some(dir)) = (&initial, &data_dir)
+        && retrogit::instance::send(dir, path).is_ok()
+    {
+        return Ok(());
+    }
+    if let Some(dir) = &data_dir {
+        logging::init(&dir.join("retrogit.log"));
     }
     logging::install_panic_hook();
     log::info!("RetroGit {} starting", env!("CARGO_PKG_VERSION"));
@@ -72,12 +87,54 @@ fn main() -> eframe::Result {
                 commit_backend: gitcore::CommitBackend::PreferCli,
             };
             let worker = spawn(deps, move || repaint.request_repaint());
-            Ok(Box::new(RetroGitApp::new(
-                AppState::new(config),
-                worker,
-                config_path,
+            let state = AppState::new(config);
+            let app = RetroGitApp::new(state, worker, config_path, cc.egui_ctx.clone());
+            Ok(Box::new(app.with_instance(
+                data_dir.as_deref(),
                 cc.egui_ctx.clone(),
+                initial,
             )))
         }),
     )
+}
+
+/// `retrogit [path]` from a terminal: hand the repository to the running window, or start
+/// one (detached, so the terminal gets its prompt back).
+fn run_cli(target: &std::path::Path, data_dir: Option<&std::path::Path>) -> eframe::Result {
+    let folder = match retrogit::cli::repo_root(target) {
+        Ok(root) => root,
+        Err(e) => {
+            eprintln!("retrogit: {e}");
+            // Windows: no console to print to; let the window show the error instead.
+            if cfg!(windows) {
+                target.to_path_buf()
+            } else {
+                std::process::exit(1);
+            }
+        }
+    };
+    if let Some(dir) = data_dir
+        && retrogit::instance::send(dir, &folder).is_ok()
+    {
+        return Ok(());
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        std::process::exit(1)
+    };
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("--open")
+        .arg(&folder)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0); // not killed with the terminal
+    }
+    if let Err(e) = cmd.spawn() {
+        eprintln!("{} {e}", strings::ERR_CLI_START);
+        std::process::exit(1);
+    }
+    Ok(())
 }

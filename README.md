@@ -55,6 +55,24 @@ The binaries are not code-signed yet:
 network operations (so your hooks, signing, SSH keys and credential helpers keep working).
 Without it, RetroGit can still browse history and stage files.
 
+## Open from a terminal and in your IDE
+
+**`retrogit` command.** Use **File → Install command line tool…** once (macOS asks for your
+administrator password to create `/usr/local/bin/retrogit`; Windows adds the command to your
+user `PATH`). Then, from any folder of a repository:
+
+```bash
+retrogit          # opens the repository of the current folder
+retrogit ../other # or another folder
+```
+
+If RetroGit is already open, the repository opens in that window (and is added to the
+repository list); otherwise RetroGit starts. The terminal is not blocked.
+
+**Open in IDE.** The toolbar button opens the repository in your editor. RetroGit detects
+installed IDEs (VS Code, Cursor, Visual Studio, Rider, IntelliJ IDEA, WebStorm, PyCharm,
+GoLand, RustRover, Zed, Sublime Text, Xcode) and remembers your choice for each repository.
+
 ## Sign in to GitHub
 
 1. Open RetroGit: the **Sign in to GitHub** window appears.

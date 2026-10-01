@@ -3192,6 +3192,7 @@ dependencies = [
  "dirs",
  "eframe",
  "egui",
+ "getrandom 0.3.4",
  "git2",
  "gitcore",
  "github",

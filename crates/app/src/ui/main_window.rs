@@ -110,6 +110,26 @@ fn menu(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                 open_folder(cx);
             }
             ui.separator();
+            if ui.button(s::INSTALL_CLI_MENU).clicked() {
+                // Blocking (password prompt, PowerShell): never on the UI thread.
+                let tx = cx.notices.clone();
+                let repaint = ui.ctx().clone();
+                std::thread::spawn(move || {
+                    use crate::protocol::{AppError, Severity};
+                    let msg = match crate::cli::install_command_line_tool() {
+                        Ok(Some(done)) => AppError::new(Severity::Info, &done),
+                        Ok(None) => return, // cancelled at the password prompt
+                        Err(e) => {
+                            let mut a = AppError::new(Severity::Error, s::ERR_INSTALL_CLI);
+                            a.detail = Some(e);
+                            a
+                        }
+                    };
+                    let _ = tx.send(msg);
+                    repaint.request_repaint();
+                });
+            }
+            ui.separator();
             if ui.button(s::EXIT).clicked() {
                 ui.ctx().send_viewport_cmd(ViewportCommand::Close);
             }
