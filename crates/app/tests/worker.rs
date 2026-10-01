@@ -520,6 +520,21 @@ fn stale_selection_reports_and_resyncs() {
 }
 
 #[test]
+fn opening_a_repository_shows_its_files_before_looking_for_its_account() {
+    let server = mockito::Server::new();
+    let d = repo_for_changes();
+    let r = git2::Repository::open(d.path()).unwrap();
+    r.remote("origin", "https://github.com/o/r.git").unwrap();
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "");
+    w.send(Command::OpenRepo(d.path().to_path_buf()));
+    let evs = until(&w, |e| matches!(e, Event::RepoAccount { .. }));
+    assert!(
+        evs.iter().any(|e| matches!(e, Event::StatusLoaded(_))),
+        "status first: {evs:?}"
+    );
+}
+
+#[test]
 fn changes_commands_without_an_open_repo_do_nothing() {
     let server = mockito::Server::new();
     let w = start(&server, Arc::new(MemoryAccounts::default()), "");

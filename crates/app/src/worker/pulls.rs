@@ -16,7 +16,10 @@ impl Worker {
         call: impl Fn(&Client, &str, &str, &str) -> Result<T, GithubError>,
     ) -> Result<T, GithubError> {
         let r = self.on_github_once(slug, &call);
-        if matches!(&r, Err(e) if github::repository_missing(e)) && self.forget_learned(slug) {
+        if matches!(&r, Err(e) if github::repository_missing(e))
+            && let Some(failed) = self.last_account.clone()
+            && self.replace_account(slug, &failed)
+        {
             return self.on_github_once(slug, &call);
         }
         r
@@ -28,6 +31,13 @@ impl Worker {
         call: &impl Fn(&Client, &str, &str, &str) -> Result<T, GithubError>,
     ) -> Result<T, GithubError> {
         let (owner, repo) = slug;
+        if let Some(login) = self.unusable_choice(slug) {
+            self.last_account = None;
+            return Err(GithubError::Rejected {
+                status: 401,
+                message: s::ERR_ACCOUNT_MUST_SIGN_IN.replace("{login}", &login),
+            });
+        }
         let Some(account) = self.account_for(slug) else {
             self.last_account = None;
             // No signed-in account can see it: say so as GitHub would.

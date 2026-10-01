@@ -28,6 +28,22 @@ pub fn who_text(st: &AppState) -> String {
     }
 }
 
+/// URL to clone: github.com SSH URLs become HTTPS (RetroGit clones over HTTPS with the
+/// account's token); other SSH URLs are refused, as cloning has no SSH support.
+pub fn clone_url_for(url: &str) -> Result<String, &'static str> {
+    let url = url.trim();
+    if let Some((owner, repo)) = gitcore::parse_github_slug(url) {
+        return Ok(format!("https://github.com/{owner}/{repo}.git"));
+    }
+    if url.starts_with("https://") || url.starts_with("http://") {
+        return Ok(url.to_string());
+    }
+    if url.starts_with("ssh://") || url.contains('@') && url.contains(':') {
+        return Err(s::ERR_SSH_CLONE);
+    }
+    Err(s::ERR_CLONE_URL)
+}
+
 /// Folder name for cloning `url`: its last path segment without `.git`.
 pub fn folder_from_url(url: &str) -> Option<String> {
     let url = url.trim().trim_end_matches('/');

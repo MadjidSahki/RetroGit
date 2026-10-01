@@ -57,7 +57,9 @@ impl TokenProvider {
             .unwrap_or(false)
     }
 
-    fn remember(&self, login: &str, owner: &str) {
+    /// Remember that `owner` restricts `login`'s RetroGit token (also learned when only the
+    /// GitHub CLI's token lists its repositories).
+    pub fn remember(&self, login: &str, owner: &str) {
         if let Ok(mut s) = self.restricted.lock() {
             s.insert(Self::key(login, owner));
         }
@@ -117,7 +119,7 @@ impl TokenProvider {
 
 /// Errors an organization restricting OAuth Apps produces: the explicit restriction, or
 /// the repository looking missing (GraphQL `NOT_FOUND`, REST 404).
-fn hidden_by_restriction(e: &GithubError) -> bool {
+pub fn hidden_by_restriction(e: &GithubError) -> bool {
     matches!(
         e,
         GithubError::OAuthRestricted { .. }

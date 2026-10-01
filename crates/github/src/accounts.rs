@@ -170,17 +170,22 @@ pub struct RepoAccount {
     pub manual: bool,
 }
 
-/// Steps 1 to 3 of choosing the account of a repository of `owner`: the user's choice,
-/// then the account seen to have access, then an account that is the owner or a member of
-/// it. `None`: try the accounts one by one (step 4). Only usable accounts are returned.
+/// Steps 1 to 3 of choosing the account of a repository of `owner`: the remembered one
+/// (chosen or learned), then one `seen` with the repository in its lists, then the owner or
+/// a member of it. `None`: try the accounts one by one (step 4). Only usable accounts are
+/// returned.
 pub fn choose_account(
     owner: &str,
     accounts: &Accounts,
     remembered: Option<&RepoAccount>,
+    seen: &[String],
 ) -> Option<String> {
     if let Some(r) = remembered
         && let Some(a) = accounts.get(&r.login)
     {
+        return Some(a.login);
+    }
+    if let Some(a) = seen.iter().find_map(|l| accounts.get(l)) {
         return Some(a.login);
     }
     accounts.owners_accounts(owner).into_iter().next()
@@ -356,31 +361,43 @@ mod tests {
             manual: true,
         };
         assert_eq!(
-            choose_account("Corp", &a, Some(&manual)).as_deref(),
+            choose_account("Corp", &a, Some(&manual), &[]).as_deref(),
             Some("pro2")
         );
         assert_eq!(
-            choose_account("CORP", &a, None).as_deref(),
+            choose_account("CORP", &a, None, &[]).as_deref(),
             Some("pro1"),
             "first member"
         );
         assert_eq!(
-            choose_account("Perso", &a, None).as_deref(),
+            choose_account("Perso", &a, None, &[]).as_deref(),
             Some("perso"),
             "owner"
         );
-        assert_eq!(choose_account("someone", &a, None), None, "try them all");
+        assert_eq!(
+            choose_account("someone", &a, None, &[]),
+            None,
+            "try them all"
+        );
         // A remembered account that is gone (removed, invalid): the other rules apply.
         let gone = RepoAccount {
             login: "old".into(),
             manual: false,
         };
         assert_eq!(
-            choose_account("corp", &a, Some(&gone)).as_deref(),
+            choose_account("corp", &a, Some(&gone), &[]).as_deref(),
             Some("pro1")
         );
+        // Listed with the repository: preferred to a plain member.
+        assert_eq!(
+            choose_account("corp", &a, None, &["pro2".to_string()]).as_deref(),
+            Some("pro2")
+        );
         a.invalidate("pro1");
-        assert_eq!(choose_account("corp", &a, None).as_deref(), Some("pro2"));
+        assert_eq!(
+            choose_account("corp", &a, None, &[]).as_deref(),
+            Some("pro2")
+        );
     }
 
     #[test]

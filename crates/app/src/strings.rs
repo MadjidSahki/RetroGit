@@ -363,3 +363,6 @@ pub const CLONE_SIGN_IN_HINT: &str =
 pub const COL_ACCOUNTS: &str = "Account";
 pub const AS_ACCOUNT: &str = "as";
 pub const SWITCH_ACCOUNT_HINT: &str = "Repository > Account... to use another account.";
+pub const ERR_SSH_CLONE: &str = "Cloning over SSH is only supported for github.com (cloned over HTTPS). Use the HTTPS URL of this repository.";
+pub const ERR_CLONE_URL: &str = "Enter an HTTPS URL, or a github.com SSH URL.";
+pub const ERR_ACCOUNT_MUST_SIGN_IN: &str = "@{login} is the account chosen for this repository and must sign in again (File > Accounts...), or choose another one with Repository > Account...";

@@ -19,12 +19,13 @@ impl Worker {
         } else {
             Event::RepoOpened(summary)
         });
-        self.send_repo_account();
         self.refresh();
         let Some(repo) = self.open_current(Op::History) else {
             return;
         };
         self.load_repo_extras(&repo);
+        // After the local data: finding the account may need the network.
+        self.send_repo_account();
         if new_repo && !cloned {
             self.auto_fetch(&repo);
         }

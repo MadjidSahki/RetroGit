@@ -277,10 +277,6 @@ fn a_learned_account_that_lost_access_is_replaced() {
         matches!(evs.last(), Some(Event::PullsLoaded { .. })),
         "{evs:?}"
     );
-    assert!(
-        evs.iter()
-            .any(|e| matches!(e, Event::RepoAccountLearned { account: None, .. }))
-    );
     assert!(evs.iter().any(
         |e| matches!(e, Event::RepoAccountLearned { account: Some(a), .. } if a.login == "bob")
     ));
@@ -364,4 +360,144 @@ fn repositories_of_every_account_are_listed_together() {
     let shared = repos.iter().find(|r| r.full_name == "shared/s").unwrap();
     assert_eq!(shared.accounts, ["ada", "bob"]);
     assert_eq!(repos.len(), 3);
+}
+
+/// `check_repo` answers for `token` on `owner/name`: seen, or GitHub's NOT_FOUND.
+fn probe(
+    server: &mut mockito::Server,
+    token: &str,
+    owner: &str,
+    name: &str,
+    seen: bool,
+) -> mockito::Mock {
+    let body = if seen {
+        r#"{"data":{"repository":{"id":"R"}}}"#.to_string()
+    } else {
+        format!(
+            r#"{{"data":{{"repository":null}},"errors":[{{"type":"NOT_FOUND","message":"Could not resolve to a Repository with the name '{owner}/{name}'."}}]}}"#
+        )
+    };
+    server
+        .mock("POST", "/graphql")
+        .match_header("authorization", format!("Bearer {token}").as_str())
+        .match_body(Matcher::AllOf(vec![
+            Matcher::Regex("\\{ id \\} \\}".into()),
+            Matcher::PartialJson(json!({ "variables": { "owner": owner, "name": name } })),
+        ]))
+        .with_body(body)
+        .create()
+}
+
+#[test]
+fn among_members_of_an_organization_the_one_with_access_is_found() {
+    let mut server = mockito::Server::new();
+    user(&mut server, "gho_ada", "ada", &["corp"]);
+    user(&mut server, "gho_bob", "bob", &["corp"]);
+    let store = Arc::new(MemoryAccounts::with("ada", "gho_ada"));
+    store.save("bob", "gho_bob").unwrap();
+    let w = start(&server, store, &["ada", "bob"], &[]);
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::SignedIn(_)));
+    // ada is a member but cannot see corp/x; bob can.
+    server
+        .mock("POST", "/graphql")
+        .match_header("authorization", "Bearer gho_ada")
+        .match_body(Matcher::Regex("ListPulls".into()))
+        .with_body(r#"{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","message":"Could not resolve to a Repository with the name 'corp/x'."}]}"#)
+        .create();
+    probe(&mut server, "gho_bob", "corp", "x", true);
+    let bob = list(&mut server, "gho_bob");
+    let evs = load_pulls(&w, "corp", "x");
+    assert!(
+        matches!(evs.last(), Some(Event::PullsLoaded { .. })),
+        "{evs:?}"
+    );
+    assert!(evs.iter().any(
+        |e| matches!(e, Event::RepoAccountLearned { account: Some(a), .. } if a.login == "bob")
+    ));
+    bob.assert();
+}
+
+#[test]
+fn a_network_error_while_probing_is_not_remembered_as_no_access() {
+    let mut server = mockito::Server::new();
+    let (w, _) = two_accounts(&mut server);
+    let down = server
+        .mock("POST", "/graphql")
+        .match_body(Matcher::Regex("\\{ id \\} \\}".into()))
+        .with_status(502)
+        .expect_at_least(1)
+        .create();
+    load_pulls(&w, "third", "app");
+    down.remove();
+    probe(&mut server, "gho_ada", "third", "app", true);
+    list(&mut server, "gho_ada");
+    let evs = load_pulls(&w, "third", "app");
+    assert!(
+        matches!(evs.last(), Some(Event::PullsLoaded { .. })),
+        "tried again: {evs:?}"
+    );
+}
+
+#[test]
+fn a_chosen_account_that_must_sign_in_again_is_not_replaced_silently() {
+    let mut server = mockito::Server::new();
+    user(&mut server, "gho_ada", "ada", &["corp"]);
+    let store = Arc::new(MemoryAccounts::with("ada", "gho_ada"));
+    // bob was chosen for corp/x, but his token is gone.
+    let w = start(&server, store, &["ada", "bob"], &[("corp/x", "bob", true)]);
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::SignedIn(_)));
+    let probes = server.mock("POST", "/graphql").expect(0).create();
+    let evs = load_pulls(&w, "corp", "x");
+    assert!(
+        matches!(
+            evs.last(),
+            Some(Event::Error { error, .. }) if error.message.contains("@bob")
+        ),
+        "{evs:?}"
+    );
+    probes.assert();
+}
+
+#[test]
+fn repositories_seen_only_with_gh_mark_their_owner_as_restricted() {
+    let mut server = mockito::Server::new();
+    user(&mut server, "gho_ada", "ada", &[]);
+    let store = Arc::new(MemoryAccounts::with("ada", "gho_ada"));
+    let tokens = TokenProvider::new(Arc::new(|_: &str| Some("gho_cli".to_string())));
+    let deps = WorkerDeps {
+        client: Client::with_bases(&server.url(), &server.url()),
+        store,
+        client_id: String::new(),
+        commit_backend: gitcore::CommitBackend::Git2,
+        tokens: tokens.clone(),
+        known_accounts: vec!["ada".into()],
+        repo_accounts: Default::default(),
+    };
+    let w = spawn(deps, || {});
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::SignedIn(_)));
+    let repo = |full: &str| {
+        let (o, n) = full.split_once('/').unwrap();
+        json!({ "full_name": full, "name": n, "owner": { "login": o }, "private": true,
+                "clone_url": format!("https://github.com/{full}.git"), "updated_at": "2026-09-30T10:00:00Z" })
+    };
+    server
+        .mock("GET", "/user/repos")
+        .match_query(Matcher::Any)
+        .match_header("authorization", "Bearer gho_ada")
+        .with_body(json!([repo("ada/mine")]).to_string())
+        .create();
+    server
+        .mock("GET", "/user/repos")
+        .match_query(Matcher::Any)
+        .match_header("authorization", "Bearer gho_cli")
+        .with_body(json!([repo("ada/mine"), repo("Corp/x")]).to_string())
+        .create();
+    w.send(Command::ListRepos);
+    until(&w, |e| matches!(e, Event::ReposLoaded(_)));
+    // Cloning corp/x will then use gh's token straight away.
+    assert!(tokens.is_restricted("ada", "corp"));
+    assert!(!tokens.is_restricted("ada", "ada"));
 }

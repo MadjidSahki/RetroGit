@@ -236,38 +236,52 @@ impl Worker {
         }
     }
 
-    /// Forget a learned (not chosen) account that lost access to `slug`.
-    pub(super) fn forget_learned(&mut self, slug: &Slug) -> bool {
-        let key = repo_key(slug);
-        if self.repo_accounts.get(&key).is_some_and(|r| !r.manual) {
-            self.repo_accounts.remove(&key);
-            self.seen.remove(&key);
-            self.emit(Event::RepoAccountLearned { key, account: None });
-            return true;
-        }
-        false
+    /// Login chosen by the user for `slug` whose account cannot be used (must sign in
+    /// again): nothing else is used in its place.
+    pub(super) fn unusable_choice(&self, slug: &Slug) -> Option<String> {
+        let r = self.repo_accounts.get(&repo_key(slug))?;
+        (r.manual && self.accounts.get(&r.login).is_none()).then(|| r.login.clone())
     }
 
-    /// The account to use for `slug`: the user's choice, the one seen with access, the
-    /// owner or a member of the organization, else the first that can see it (tried in
-    /// order, with the GitHub CLI fallback; the result is remembered).
+    fn is_manual(&self, slug: &Slug) -> bool {
+        self.repo_accounts
+            .get(&repo_key(slug))
+            .is_some_and(|r| r.manual)
+    }
+
+    /// The account to use for `slug`: the user's choice or the one learned, then one that
+    /// lists it, then the owner or a member of the organization, else the first that can
+    /// see it (tried in order, with the GitHub CLI fallback; the result is remembered).
     pub(super) fn account_for(&mut self, slug: &Slug) -> Option<Account> {
-        let key = repo_key(slug);
-        if let Some(login) = choose_account(&slug.0, &self.accounts, self.repo_accounts.get(&key)) {
-            return self.accounts.get(&login);
-        }
-        if let Some(login) = self
-            .seen
-            .get(&key)
-            .and_then(|ls| ls.iter().find(|l| self.accounts.get(l).is_some()).cloned())
-        {
-            self.learn(slug, &login);
-            return self.accounts.get(&login);
-        }
-        if self.no_account.contains(&key) {
+        if self.unusable_choice(slug).is_some() {
             return None;
         }
+        let key = repo_key(slug);
+        let seen = self.seen.get(&key).cloned().unwrap_or_default();
+        if let Some(login) =
+            choose_account(&slug.0, &self.accounts, self.repo_accounts.get(&key), &seen)
+        {
+            if seen.iter().any(|l| l.eq_ignore_ascii_case(&login)) {
+                self.learn(slug, &login);
+            }
+            return self.accounts.get(&login);
+        }
+        self.probe(slug, None)
+    }
+
+    /// Try each account (except `exclude`) until one can see `slug`, and remember it.
+    /// "No account can see it" is remembered for the session only when every account got
+    /// that answer (not after a network error).
+    pub(super) fn probe(&mut self, slug: &Slug, exclude: Option<&str>) -> Option<Account> {
+        let key = repo_key(slug);
+        if exclude.is_none() && self.no_account.contains(&key) {
+            return None;
+        }
+        let mut all_hidden = true;
         for account in self.accounts.list() {
+            if exclude.is_some_and(|x| x.eq_ignore_ascii_case(&account.login)) {
+                continue;
+            }
             let found = self
                 .deps
                 .tokens
@@ -275,13 +289,28 @@ impl Worker {
                     logging::add_secret(t);
                     self.deps.client.check_repo(t, &slug.0, &slug.1)
                 });
-            if found.is_ok() {
-                self.learn(slug, &account.login);
-                return Some(account);
+            match found {
+                Ok(()) => {
+                    self.learn(slug, &account.login);
+                    return Some(account);
+                }
+                Err(e) if github::hidden_by_restriction(&e) => {}
+                Err(e) => {
+                    log::info!("cannot check {}'s access to {key}: {e}", account.login);
+                    all_hidden = false;
+                }
             }
         }
-        self.no_account.insert(key);
+        if all_hidden && exclude.is_none() {
+            self.no_account.insert(key);
+        }
         None
+    }
+
+    /// `failed` (chosen automatically) cannot see `slug`: find another account. Returns
+    /// whether one was found (and remembered).
+    pub(super) fn replace_account(&mut self, slug: &Slug, failed: &str) -> bool {
+        !self.is_manual(slug) && self.probe(slug, Some(failed)).is_some()
     }
 
     /// The token to give `git` for `slug` (the GitHub CLI's for a restricted owner).
@@ -370,6 +399,19 @@ impl Worker {
             {
                 logging::add_secret(&gh);
                 if let Ok(listing) = self.deps.client.list_repos(&gh) {
+                    // Owners listed only with gh restrict RetroGit's token: clone and fetch
+                    // their repositories with gh's token straight away.
+                    let own: Vec<String> = lists
+                        .last()
+                        .map(|(_, repos): &(String, Vec<RepoInfo>)| {
+                            repos.iter().map(|r| r.owner.to_lowercase()).collect()
+                        })
+                        .unwrap_or_default();
+                    for r in &listing.repos {
+                        if !own.contains(&r.owner.to_lowercase()) {
+                            self.deps.tokens.remember(&a.login, &r.owner);
+                        }
+                    }
                     lists.push((a.login.clone(), listing.repos));
                 }
             }

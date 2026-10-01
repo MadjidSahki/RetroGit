@@ -137,6 +137,28 @@ fn folders_are_named_after_the_url() {
 }
 
 #[test]
+fn ssh_urls_of_github_are_cloned_over_https_and_others_are_refused() {
+    use retrogit::ui::accounts::clone_url_for;
+    assert_eq!(
+        clone_url_for("git@github.com:o/r.git").as_deref(),
+        Ok("https://github.com/o/r.git")
+    );
+    assert_eq!(
+        clone_url_for("ssh://git@github.com/o/r").as_deref(),
+        Ok("https://github.com/o/r.git")
+    );
+    assert_eq!(
+        clone_url_for(" https://gitlab.com/g/p.git ").as_deref(),
+        Ok("https://gitlab.com/g/p.git")
+    );
+    assert_eq!(
+        clone_url_for("git@gitlab.com:g/p.git"),
+        Err(s::ERR_SSH_CLONE)
+    );
+    assert_eq!(clone_url_for("not a url"), Err(s::ERR_CLONE_URL));
+}
+
+#[test]
 fn the_accounts_window_lists_accounts_and_adds_one() {
     let mut w = world();
     w.state.accounts_dialog = true;

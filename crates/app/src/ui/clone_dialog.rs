@@ -182,7 +182,14 @@ fn picker(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                         )
                     })
             } else {
-                super::accounts::folder_from_url(&url).map(|name| (url.clone(), name, None))
+                match super::accounts::clone_url_for(&url) {
+                    Ok(clone_url) => super::accounts::folder_from_url(&clone_url)
+                        .map(|name| (clone_url, name, None)),
+                    Err(why) => {
+                        ui.label(egui::RichText::new(why).color(win95::theme::GRAY));
+                        None
+                    }
+                }
             };
             let parent = dialog.dest_parent.trim();
             if let Some((_, name, _)) = &target

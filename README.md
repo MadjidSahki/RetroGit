@@ -25,7 +25,8 @@ and a pixel font.
 - Tokens are stored in the macOS Keychain / Windows Credential Manager (one entry per
   account), never on disk, never in logs
 - List the repositories of all your accounts in one list (with the accounts that see each),
-  filter, and clone with progress and cancel — or clone any Git URL (HTTPS or SSH)
+  filter, and clone with progress and cancel — or clone from an HTTPS URL (github.com SSH
+  URLs are cloned over HTTPS with the right account)
 - SSO-aware: tells you when an organization needs you to authorize the app, with the link
 - Organizations that restrict third-party OAuth apps: fetch, pull and push retry with your own git
   credentials; pull requests use the [GitHub CLI](https://cli.github.com/) token of the same account
@@ -201,6 +202,8 @@ Licenses of embedded third-party data: [THIRD_PARTY.md](THIRD_PARTY.md).
   Notifications list). Windows: they appear under "Windows PowerShell".
 
 **General**
+- Cloning works over HTTPS only (github.com SSH URLs are converted); fetch, pull and push
+  use your remotes as they are, SSH included.
 - Binaries are not code-signed or notarized. No Linux build.
 - Conflicts are resolved in your editor (RetroGit shows them and lets you abort or continue).
 - Syntax highlighting is skipped for very large diffs (over 5,000 lines or 256 KB) and diffs

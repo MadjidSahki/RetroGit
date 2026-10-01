@@ -27,7 +27,9 @@ pub use pulls::{
     ThreadComment, TimelineItem, parse_color, search_query,
 };
 pub use pulls_write::{LineComment, Merge, NewPull, RepoMeta, Review, ReviewEvent, encode_segment};
-pub use token::{GhTokenSource, TokenProvider, gh_auth_token, parse_gh_token};
+pub use token::{
+    GhTokenSource, TokenProvider, gh_auth_token, hidden_by_restriction, parse_gh_token,
+};
 pub use token_store::{KeyringStore, MemoryStore, TokenStore, TokenStoreError};
 pub use watch::{PrEvent, PrEventKind, PrSnapshot, date_days_before, diff_snapshots};
 

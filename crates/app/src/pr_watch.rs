@@ -23,6 +23,42 @@ pub fn next_delay(failures: u32) -> Duration {
     Duration::from_secs(minutes * 60)
 }
 
+/// When each account is polled next: every `interval`, longer after its own failures, so
+/// a revoked or unreachable account does not slow down the others.
+#[derive(Default)]
+pub struct Schedule {
+    /// Lowercase login => (failures in a row, next poll).
+    next: HashMap<String, (u32, std::time::Instant)>,
+}
+
+impl Schedule {
+    pub fn due(&self, login: &str, now: std::time::Instant) -> bool {
+        self.next
+            .get(&login.to_lowercase())
+            .is_none_or(|(_, at)| now >= *at)
+    }
+
+    pub fn record(&mut self, login: &str, ok: bool, now: std::time::Instant, interval: Duration) {
+        let key = login.to_lowercase();
+        let failures = if ok {
+            0
+        } else {
+            self.next.get(&key).map_or(0, |(f, _)| *f) + 1
+        };
+        let wait = if failures == 0 {
+            interval
+        } else {
+            next_delay(failures).max(interval)
+        };
+        self.next.insert(key, (failures, now + wait));
+    }
+
+    /// Keep only `logins` (lowercase); removed accounts start afresh if added again.
+    pub fn forget_others(&mut self, logins: &[String]) {
+        self.next.retain(|l, _| logins.contains(l));
+    }
+}
+
 /// Snapshots of every token that sees the user's pull requests, merged by key (RetroGit's
 /// token, plus `gh`'s when it is the same account: it sees restricted organizations).
 pub struct Poller {
@@ -138,41 +174,46 @@ impl PrWatcher {
             .spawn(move || {
                 let mut poller = Poller::new(client, tokens);
                 let mut states: HashMap<String, WatchState> = HashMap::new();
-                let mut failures = 0;
+                let mut schedule = Schedule::default();
                 while !stopped.load(Ordering::SeqCst) {
                     let current = accounts.list();
                     let watched: Vec<String> =
                         current.iter().map(|a| a.login.to_lowercase()).collect();
                     states.retain(|login, _| watched.contains(login));
+                    schedule.forget_others(&watched);
+                    let instant = std::time::Instant::now();
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_secs() as i64)
                         .unwrap_or(0);
-                    let mut failed = false;
                     let mut events = Vec::new();
-                    for account in current {
-                        match poller.poll(&account.token, &account.login, now) {
-                            Ok(snaps) => events.extend(
-                                states
-                                    .entry(account.login.to_lowercase())
-                                    .or_default()
-                                    .advance(&account.login, snaps),
-                            ),
-                            Err(e) => {
-                                failed = true;
-                                log::info!("pull request watch failed for {}: {e}", account.login);
+                    let due: Vec<_> = current
+                        .iter()
+                        .filter(|a| schedule.due(&a.login, instant))
+                        .collect();
+                    for account in due {
+                        let ok = match poller.poll(&account.token, &account.login, now) {
+                            Ok(snaps) => {
+                                events.extend(
+                                    states
+                                        .entry(account.login.to_lowercase())
+                                        .or_default()
+                                        .advance(&account.login, snaps),
+                                );
+                                true
                             }
-                        }
+                            Err(e) => {
+                                log::info!("pull request watch failed for {}: {e}", account.login);
+                                false
+                            }
+                        };
+                        schedule.record(&account.login, ok, instant, interval);
                     }
                     if !events.is_empty() {
                         deliver(events);
                     }
-                    failures = if failed { failures + 1 } else { 0 };
-                    let wait = if failures == 0 {
-                        interval
-                    } else {
-                        next_delay(failures).max(interval)
-                    };
+                    // Wake up often enough to poll each account when it is due.
+                    let wait = interval.min(Duration::from_secs(30));
                     let end = std::time::Instant::now() + wait;
                     while std::time::Instant::now() < end && !stopped.load(Ordering::SeqCst) {
                         std::thread::sleep(Duration::from_millis(200).min(wait));
@@ -189,6 +230,21 @@ impl PrWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failing_account_does_not_slow_the_others() {
+        let t0 = std::time::Instant::now();
+        let mut s = Schedule::default();
+        assert!(s.due("ada", t0) && s.due("bob", t0), "first poll at once");
+        s.record("ada", false, t0, INTERVAL);
+        s.record("bob", true, t0, INTERVAL);
+        let later = t0 + INTERVAL;
+        assert!(s.due("bob", later), "bob every 2 minutes");
+        assert!(!s.due("ada", later), "ada waits 5 minutes after a failure");
+        assert!(s.due("ada", t0 + next_delay(1)));
+        s.forget_others(&["bob".to_string()]);
+        assert!(s.due("ada", t0), "a removed account starts afresh");
+    }
 
     #[test]
     fn backoff_schedule() {
