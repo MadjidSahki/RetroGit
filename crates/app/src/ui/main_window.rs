@@ -34,19 +34,19 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(2)))
             .show(ui, |ui| {
                 if cx.state.current.is_some() {
-                    let mut tab = match cx.state.tab {
-                        crate::state::Tab::Changes => 0,
-                        crate::state::Tab::History => 1,
-                    };
-                    win95::tabs(ui, &mut tab, &[s::TAB_CHANGES, s::TAB_HISTORY]);
-                    cx.state.tab = if tab == 0 {
-                        crate::state::Tab::Changes
-                    } else {
-                        crate::state::Tab::History
-                    };
+                    use crate::state::Tab;
+                    const TABS: [Tab; 3] = [Tab::Changes, Tab::History, Tab::PullRequests];
+                    let mut tab = TABS.iter().position(|t| *t == cx.state.tab).unwrap_or(0);
+                    win95::tabs(
+                        ui,
+                        &mut tab,
+                        &[s::TAB_CHANGES, s::TAB_HISTORY, s::TAB_PULLS],
+                    );
+                    cx.state.tab = TABS[tab];
                     match cx.state.tab {
-                        crate::state::Tab::Changes => super::changes::show(ui, cx),
-                        crate::state::Tab::History => super::history::show(ui, cx),
+                        Tab::Changes => super::changes::show(ui, cx),
+                        Tab::History => super::history::show(ui, cx),
+                        Tab::PullRequests => super::pulls::show(ui, cx),
                     }
                 } else {
                     bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 8, |ui| {
@@ -244,6 +244,12 @@ fn status(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             crate::protocol::SyncOp::Pull => s::PULLING,
             crate::protocol::SyncOp::Push => s::PUSHING,
         }
+    } else if cx.state.pulls.busy {
+        s::SENDING
+    } else if let Some(note) = cx.state.pulls.note.as_deref()
+        && cx.state.tab == crate::state::Tab::PullRequests
+    {
+        note
     } else if let Some(note) = cx.state.sync.note.as_deref() {
         note
     } else if cx.state.changes.committing {

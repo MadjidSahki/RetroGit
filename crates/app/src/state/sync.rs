@@ -17,6 +17,7 @@ pub enum Tab {
     #[default]
     Changes,
     History,
+    PullRequests,
 }
 
 #[derive(Debug, Clone, PartialEq)]

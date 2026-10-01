@@ -305,3 +305,17 @@ pub const WARN_BRANCH_NOT_DELETED: &str =
     "The pull request was merged, but its branch could not be deleted.";
 pub const ERR_FORK_GONE: &str =
     "The fork holding this pull request's branch was deleted: it cannot be checked out.";
+pub const NO_PATCH: &str = "Binary file, or a diff too large for GitHub to show.";
+pub const WANTS_TO_MERGE: &str = "wants to merge {head} into {base}";
+pub const COMMENTED: &str = "commented";
+pub const REVIEW_VERB_APPROVED: &str = "approved";
+pub const REVIEW_VERB_CHANGES: &str = "requested changes";
+pub const REVIEW_VERB_COMMENTED: &str = "reviewed";
+pub const REVIEW_VERB_DISMISSED: &str = "reviewed (dismissed)";
+pub const CHECK_PASSED: &str = "passed";
+pub const CHECK_FAILED: &str = "failed";
+pub const CHECK_RUNNING: &str = "running";
+pub const CHECK_SKIPPED: &str = "skipped";
+pub const CHECK_DETAILS: &str = "details";
+pub const PENDING_TAG: &str = "(pending)";
+pub const SENDING: &str = "Sending to GitHub...";

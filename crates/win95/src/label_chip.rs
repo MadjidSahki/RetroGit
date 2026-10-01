@@ -13,25 +13,47 @@ pub fn text_color_on(bg: [u8; 3]) -> Color32 {
     }
 }
 
-/// A GitHub label: its name on its color, with a thin darker border.
-pub fn label_chip(ui: &mut Ui, text: &str, color: [u8; 3]) -> Response {
-    let font = theme::font(theme::FONT_SIZE);
+/// Paint a label chip whose left edge is at `left_center`; returns its rectangle.
+/// For custom-drawn rows (lists); `label_chip` is the interactive widget.
+pub fn paint_chip(
+    painter: &egui::Painter,
+    left_center: egui::Pos2,
+    text: &str,
+    color: [u8; 3],
+) -> egui::Rect {
     let fg = text_color_on(color);
-    let galley = ui.painter().layout_no_wrap(text.to_string(), font, fg);
-    let size = vec2(galley.size().x + 10.0, 16.0);
-    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    let owned = text.to_string();
-    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &owned));
+    let galley = painter.layout_no_wrap(text.to_string(), theme::font(theme::FONT_SIZE), fg);
+    let rect = egui::Rect::from_min_size(
+        left_center - vec2(0.0, 8.0),
+        vec2(galley.size().x + 10.0, 16.0),
+    );
     let bg = Color32::from_rgb(color[0], color[1], color[2]);
-    let p = ui.painter();
-    p.rect_filled(rect, 3.0, bg);
-    p.rect_stroke(
+    painter.rect_filled(rect, 3.0, bg);
+    painter.rect_stroke(
         rect,
         3.0,
         Stroke::new(1.0, bg.gamma_multiply(0.7)),
         egui::StrokeKind::Inside,
     );
-    p.galley(rect.center() - galley.size() / 2.0, galley, fg);
+    painter.galley(rect.center() - galley.size() / 2.0, galley, fg);
+    rect
+}
+
+/// A GitHub label: its name on its color, with a thin darker border.
+pub fn label_chip(ui: &mut Ui, text: &str, color: [u8; 3]) -> Response {
+    let width = ui
+        .painter()
+        .layout_no_wrap(
+            text.to_string(),
+            theme::font(theme::FONT_SIZE),
+            theme::BLACK,
+        )
+        .size()
+        .x;
+    let (rect, resp) = ui.allocate_exact_size(vec2(width + 10.0, 16.0), Sense::click());
+    let owned = text.to_string();
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &owned));
+    paint_chip(ui.painter(), rect.left_center(), text, color);
     resp
 }
 

@@ -195,6 +195,7 @@ impl eframe::App for RetroGitApp {
         ui::about::show(&egui_ctx, &mut cx);
         ui::discard::show(&egui_ctx, &mut cx);
         ui::sync_dialogs::show(&egui_ctx, &mut cx);
+        ui::pull_dialogs::show(&egui_ctx, &mut cx);
         ui::message::show(&egui_ctx, &mut cx);
     }
 

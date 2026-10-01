@@ -249,6 +249,34 @@ fn actions_end_busy_and_mark_the_list_stale() {
 }
 
 #[test]
+fn pending_comments_are_cleared_only_when_the_review_went_through() {
+    let mut st = opened(Some("https://github.com/o/r"));
+    st.pulls.select(4);
+    st.queue_line_comment(github::LineComment {
+        path: "a".into(),
+        line: 1,
+        side: github::DiffSide::Right,
+        body: "x".into(),
+    });
+    st.pulls.dialog = Some(retrogit::state::PullDialog::Review {
+        event: ReviewEvent::Comment,
+        body: String::new(),
+    });
+    st.pulls.busy = true;
+    st.apply(Event::Error {
+        during: Op::PullAction,
+        error: AppError::new(Severity::Warning, "422"),
+    });
+    assert_eq!(st.pulls.pending.len(), 1, "failed: kept, dialog still open");
+    assert!(st.pulls.dialog.is_some());
+    st.apply(Event::PullActionDone {
+        number: 4,
+        note: s::NOTE_REVIEW_SENT.into(),
+    });
+    assert!(st.pulls.pending.is_empty() && st.pulls.dialog.is_none());
+}
+
+#[test]
 fn a_created_pull_request_is_selected() {
     let mut st = opened(Some("https://github.com/o/r"));
     st.pulls.busy = true;

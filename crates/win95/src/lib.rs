@@ -26,7 +26,7 @@ pub use checkbox::checkbox;
 pub use combo_box::combo_box;
 pub use dialog::{Dialog, DialogResponse};
 pub use icon::Icon;
-pub use label_chip::{label_chip, text_color_on};
+pub use label_chip::{label_chip, paint_chip, text_color_on};
 pub use list_view::{Cell, Column, ListResponse, ListView};
 pub use markdown::markdown_view;
 pub use panel::bevel_frame;

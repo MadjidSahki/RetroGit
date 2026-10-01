@@ -296,6 +296,10 @@ impl AppState {
                 p.note = Some(note);
                 p.stale = true;
                 if p.selected == Some(number) {
+                    // The review went through with its line comments.
+                    if matches!(p.dialog, Some(PullDialog::Review { .. })) {
+                        p.pending.clear();
+                    }
                     p.dialog = None;
                 }
             }
