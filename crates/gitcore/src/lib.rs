@@ -26,7 +26,7 @@ pub use branch::{Branch, parse_overwritten_files};
 pub use commit_detail::{ChangedFile, CommitDetail, SignatureStatus, parse_signature_status};
 pub use conflict::{
     Choice, ConflictFile, ConflictKind, Pane, Pick, Segment, apply_choice, block_lines,
-    conflict_count, has_marker_lines, parse_conflicts,
+    conflict_count, has_marker_lines, locate_blocks, parse_conflicts,
 };
 pub use github::parse_github_slug;
 pub use graph::{Edge, GraphRow, GraphState, layout};

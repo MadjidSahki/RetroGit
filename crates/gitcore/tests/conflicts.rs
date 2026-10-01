@@ -171,3 +171,36 @@ fn a_rebase_conflict_says_so() {
     assert_eq!(c.mine.as_deref(), Some("upstream\n"));
     assert_eq!(c.theirs.as_deref(), Some("my commit\n"));
 }
+
+#[test]
+fn paths_are_literal_not_patterns() {
+    let Some(d) = tmp() else { return };
+    let dir = d.path();
+    git(dir, &["-c", "init.defaultBranch=main", "init", "-q"]);
+    configure(dir);
+    let write = |f: &str, t: &str| std::fs::write(dir.join(f), t).unwrap();
+    write("a[1].txt", "base\n");
+    write("a1.txt", "other\n");
+    git(dir, &["add", "-A"]);
+    git(dir, &["commit", "-q", "-m", "base"]);
+    git(dir, &["switch", "-q", "-c", "feature"]);
+    write("a[1].txt", "theirs\n");
+    git(dir, &["commit", "-qam", "theirs"]);
+    git(dir, &["switch", "-q", "main"]);
+    write("a[1].txt", "ours\n");
+    git(dir, &["commit", "-qam", "ours"]);
+    let _ = std::process::Command::new("git")
+        .current_dir(dir)
+        .args(["merge", "feature"])
+        .output();
+    // A local change to a file the pattern `a[1].txt` would match.
+    write("a1.txt", "my unstaged work\n");
+    let r = Repo::open(dir).unwrap();
+    r.resolve_with("a[1].txt", Pick::Theirs).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.join("a1.txt")).unwrap(),
+        "my unstaged work\n"
+    );
+    let staged = git(dir, &["diff", "--cached", "--name-only"]);
+    assert!(!staged.contains("a1.txt"), "{staged}");
+}

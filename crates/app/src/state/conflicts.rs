@@ -1,11 +1,11 @@
 //! State of the conflict editor (sub-project 6a).
 
 use gitcore::{
-    Change, Choice, ConflictFile, DiffLine, FileDiff, Hunk, LineKind, Pick, Side, apply_choice,
-    conflict_count,
+    Change, Choice, ConflictFile, DiffLine, FileDiff, Hunk, LineKind, Pane, Pick, Segment, Side,
+    apply_choice, locate_blocks, parse_conflicts,
 };
 
-use crate::highlight::{Colors, Target};
+use crate::highlight::{Colors, MAX_BYTES, MAX_LINES, Target};
 
 use super::{AppState, ChangesView};
 use crate::protocol::{AppError, Severity};
@@ -53,6 +53,8 @@ pub enum ConflictConfirm {
     Discard(Option<String>),
     /// Abort the merge / rebase although the file was edited.
     Abort,
+    /// Open another repository although the file was edited.
+    OpenRepo(std::path::PathBuf),
 }
 
 /// The file being resolved.
@@ -76,12 +78,30 @@ pub struct ConflictEditor {
     /// Last colors computed for the result, still drawn (line by line, where the text did
     /// not change) while new ones are computed: no flicker while typing.
     pub result_colors_shown: Colors,
+    /// `result` cut into blocks, kept in step with it (not parsed again every frame).
+    pub segments: Vec<Segment>,
+    /// The file as Git left it, cut into blocks (maps blocks to the full versions).
+    original: Vec<Segment>,
+    /// Where each original block is in the full mine / theirs versions.
+    mine_blocks: Vec<Option<(usize, usize)>>,
+    theirs_blocks: Vec<Option<(usize, usize)>>,
 }
 
 impl ConflictEditor {
     pub fn new(file: ConflictFile) -> ConflictEditor {
+        let result = file.working.clone().unwrap_or_default();
+        let original = parse_conflicts(&result);
+        let locate = |text: &Option<String>, pane| {
+            text.as_deref()
+                .map(|t| locate_blocks(&original, t, pane))
+                .unwrap_or_default()
+        };
         ConflictEditor {
-            result: file.working.clone().unwrap_or_default(),
+            mine_blocks: locate(&file.mine, Pane::Mine),
+            theirs_blocks: locate(&file.theirs, Pane::Theirs),
+            segments: original.clone(),
+            original,
+            result,
             file,
             current: 0,
             edited: false,
@@ -112,7 +132,83 @@ impl ConflictEditor {
     }
 
     pub fn conflicts_left(&self) -> usize {
-        conflict_count(&self.result)
+        self.segments
+            .iter()
+            .filter(|s| matches!(s, Segment::Conflict { .. }))
+            .count()
+    }
+
+    fn set_result(&mut self, text: String) {
+        self.segments = parse_conflicts(&text);
+        self.result = text;
+        self.result_colors = Colors::NotRequested;
+        self.edited = true;
+        self.clamp();
+    }
+
+    /// Lines of the current block in the full version of `pane` (Mine or Theirs), found by
+    /// matching it with the block Git wrote.
+    pub fn current_side_block(&self, pane: Pane) -> Option<(usize, usize)> {
+        let raw = self
+            .segments
+            .iter()
+            .filter_map(|s| match s {
+                Segment::Conflict { raw, .. } => Some(raw),
+                Segment::Common(_) => None,
+            })
+            .nth(self.current)?;
+        let index = self
+            .original
+            .iter()
+            .filter_map(|s| match s {
+                Segment::Conflict { raw, .. } => Some(raw),
+                Segment::Common(_) => None,
+            })
+            .position(|r| r == raw)?;
+        let blocks = match pane {
+            Pane::Mine => &self.mine_blocks,
+            Pane::Theirs => &self.theirs_blocks,
+            Pane::Result => return None,
+        };
+        blocks.get(index).copied().flatten()
+    }
+
+    /// Highlighting jobs for the panes still without colors (each asked once); texts too
+    /// large for highlighting stay plain without being sent.
+    pub fn colors_to_request(&mut self) -> Vec<(Target, FileDiff)> {
+        let path = self.file.path.clone();
+        let too_big = |t: &str| t.len() > MAX_BYTES || t.lines().count() > MAX_LINES;
+        let mut out = Vec::new();
+        let panes = [
+            (
+                Target::ConflictMine,
+                self.file.mine.as_deref(),
+                &mut self.mine_colors,
+            ),
+            (
+                Target::ConflictTheirs,
+                self.file.theirs.as_deref(),
+                &mut self.theirs_colors,
+            ),
+            (
+                Target::ConflictResult,
+                Some(self.result.as_str()),
+                &mut self.result_colors,
+            ),
+        ];
+        for (target, text, slot) in panes {
+            if *slot != Colors::NotRequested {
+                continue;
+            }
+            match text {
+                Some(t) if !too_big(t) => {
+                    out.push((target, text_as_diff(&path, t)));
+                    *slot = Colors::Pending;
+                }
+                _ => *slot = Colors::Plain,
+            }
+        }
+        out
     }
 
     /// Replace the current block by `choice`; the next block becomes current.
@@ -120,10 +216,8 @@ impl ConflictEditor {
         if self.current >= self.conflicts_left() {
             return;
         }
-        self.result = apply_choice(&self.result, self.current, choice);
-        self.result_colors = Colors::NotRequested;
-        self.edited = true;
-        self.clamp();
+        let text = apply_choice(&self.result, self.current, choice);
+        self.set_result(text);
     }
 
     pub fn next(&mut self) {
@@ -140,13 +234,15 @@ impl ConflictEditor {
         self.current = self.current.min(self.conflicts_left().saturating_sub(1));
     }
 
+    /// The result pane's text after the user typed in it.
+    pub fn typed(&mut self, text: String) {
+        self.set_result(text);
+    }
+
     /// The user typed in the result pane.
     pub fn edit(&mut self, text: String) {
         if text != self.result {
-            self.result = text;
-            self.result_colors = Colors::NotRequested;
-            self.edited = true;
-            self.clamp();
+            self.set_result(text);
         }
     }
 
@@ -192,6 +288,18 @@ impl ChangesView {
         }
         self.conflict = None;
         self.conflict_path = None;
+    }
+
+    /// Open another repository: asks first if the open conflict was edited. Returns
+    /// whether it can be opened now.
+    pub fn request_open_repo(&mut self, path: &std::path::Path) -> bool {
+        match self.conflict.as_mut() {
+            Some(ed) if ed.edited => {
+                ed.confirm = Some(ConflictConfirm::OpenRepo(path.to_path_buf()));
+                false
+            }
+            _ => true,
+        }
     }
 
     /// Abort the operation: asks first if the open conflict was edited. Returns whether it

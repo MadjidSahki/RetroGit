@@ -56,6 +56,9 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                 }
             });
     });
+    // Questions of the conflict editor, whatever the tab shown.
+    let ctx = ui.ctx().clone();
+    super::conflict_view::confirm_dialog(&ctx, cx);
     win95::resize_edges(ui, full);
 }
 
@@ -82,7 +85,9 @@ fn title(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
 }
 
 fn open_folder(cx: &mut Ctx<'_>) {
-    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+    if let Some(folder) = rfd::FileDialog::new().pick_folder()
+        && cx.state.changes.request_open_repo(&folder)
+    {
         cx.worker.send(Command::OpenRepo(folder));
     }
 }
@@ -231,7 +236,9 @@ fn recents(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             text: recent[row].name.clone(),
             dimmed: missing.contains(&recent[row].path),
         });
-    if let Some(row) = resp.clicked {
+    if let Some(row) = resp.clicked
+        && cx.state.changes.request_open_repo(&recent[row].path)
+    {
         cx.worker.send(Command::OpenRepo(recent[row].path.clone()));
     }
     if let Some(row) = remove {

@@ -222,3 +222,34 @@ fn syntax_colors_arrive_in_the_background_for_each_pane() {
         "colors of an older text are ignored"
     );
 }
+
+#[test]
+fn opening_another_repository_with_edits_asks_first() {
+    let mut st = state();
+    open(&mut st, "a.rs");
+    st.changes.conflict.as_mut().unwrap().edit("typed\n".into());
+    let other = PathBuf::from("/tmp/other");
+    assert!(!st.changes.request_open_repo(&other), "asks");
+    assert_eq!(
+        st.changes.conflict.as_ref().unwrap().confirm,
+        Some(ConflictConfirm::OpenRepo(other.clone()))
+    );
+    st.changes.conflict.as_mut().unwrap().confirm = None;
+    st.changes.conflict.as_mut().unwrap().edited = false;
+    assert!(
+        st.changes.request_open_repo(&other),
+        "nothing typed: at once"
+    );
+}
+
+#[test]
+fn big_files_are_not_sent_to_the_highlighter() {
+    let mut st = state();
+    open(&mut st, "a.rs");
+    let ed = st.changes.conflict.as_mut().unwrap();
+    assert_eq!(ed.colors_to_request().len(), 3, "the three panes");
+    assert!(ed.colors_to_request().is_empty(), "asked once");
+    ed.edit("x\n".repeat(retrogit::highlight::MAX_LINES + 1));
+    assert!(ed.colors_to_request().is_empty(), "too large: plain");
+    assert_eq!(ed.result_colors, retrogit::highlight::Colors::Plain);
+}

@@ -1,7 +1,9 @@
 //! Conflict editor: Mine | Result (editable) | Theirs, with a choice per block.
 
 use egui::{Color32, Panel, RichText, ScrollArea, TextEdit};
-use gitcore::{Choice, ConflictKind, Operation, Pane, Pick, Segment, block_lines, parse_conflicts};
+#[cfg(test)]
+use gitcore::parse_conflicts;
+use gitcore::{Choice, ConflictKind, Operation, Pane, Pick, Segment, block_lines};
 use win95::{Bevel, Button95, Dialog, bevel_frame};
 
 use super::Ctx;
@@ -40,6 +42,44 @@ pub fn pane_titles(op: Option<Operation>, segments: &[Segment]) -> (String, Stri
     }
 }
 
+/// How each side is called: during a rebase Git's "ours" is the upstream and "theirs"
+/// the user's commit; after a stash, "theirs" is the user's stashed work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SideNames {
+    /// For buttons: "Use mine", "Use upstream"...
+    pub mine: &'static str,
+    pub theirs: &'static str,
+    /// In sentences: "your version", "the upstream"...
+    pub mine_long: &'static str,
+    pub theirs_long: &'static str,
+}
+
+pub fn side_names(op: Option<Operation>, segments: &[Segment]) -> SideNames {
+    let stash = segments.iter().any(|seg| {
+        matches!(seg, Segment::Conflict { theirs_label, .. } if theirs_label == "Stashed changes")
+    });
+    match op {
+        Some(Operation::Rebase) => SideNames {
+            mine: s::SIDE_UPSTREAM,
+            theirs: s::SIDE_MY_COMMIT,
+            mine_long: s::SIDE_UPSTREAM_LONG,
+            theirs_long: s::SIDE_MY_COMMIT_LONG,
+        },
+        _ if stash => SideNames {
+            mine: s::SIDE_CURRENT,
+            theirs: s::SIDE_MY_STASH,
+            mine_long: s::SIDE_CURRENT_LONG,
+            theirs_long: s::SIDE_MY_STASH_LONG,
+        },
+        _ => SideNames {
+            mine: s::SIDE_MINE,
+            theirs: s::SIDE_THEIRS,
+            mine_long: s::SIDE_MINE_LONG,
+            theirs_long: s::SIDE_THEIRS_LONG,
+        },
+    }
+}
+
 /// "1 conflict left", "3 conflicts left".
 pub fn conflicts_left_text(n: usize) -> String {
     if n == 1 {
@@ -70,7 +110,6 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         c.load_conflict = false;
         cx.worker.send(Command::LoadConflict(path));
     }
-    confirm_dialog(ui.ctx(), cx);
     bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 4, |ui| {
         ui.set_min_size(ui.available_size());
         // Taken out while drawing (no copy of large files every frame), then put back.
@@ -91,50 +130,44 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
 /// Binary files, and files deleted on one side: keep one version, or the deletion.
 fn whole_file_only(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &ConflictEditor) {
     let path = ed.file.path.clone();
+    let names = side_names(ed.file.operation, &ed.segments);
     ui.label(RichText::new(&path).color(win95::theme::NAVY));
-    let (question, choices): (&str, Vec<(&str, Command)>) = match ed.file.kind {
+    let keep = |pick| Command::ResolveConflictWith {
+        path: path.clone(),
+        pick,
+    };
+    let (question, choices): (String, Vec<(String, Command)>) = match ed.file.kind {
         ConflictKind::DeletedByUs => (
-            s::CONFLICT_DELETED_BY_US,
+            s::CONFLICT_DELETED_IN
+                .replace("{deleted}", names.mine_long)
+                .replace("{changed}", names.theirs_long),
             vec![
+                (s::KEEP_FILE.to_string(), keep(Pick::Theirs)),
                 (
-                    s::KEEP_FILE,
-                    Command::ResolveConflictWith {
-                        path: path.clone(),
-                        pick: Pick::Theirs,
-                    },
+                    s::DELETE_FILE.to_string(),
+                    Command::ResolveDelete(path.clone()),
                 ),
-                (s::DELETE_FILE, Command::ResolveDelete(path.clone())),
             ],
         ),
         ConflictKind::DeletedByThem => (
-            s::CONFLICT_DELETED_BY_THEM,
+            s::CONFLICT_DELETED_IN
+                .replace("{deleted}", names.theirs_long)
+                .replace("{changed}", names.mine_long),
             vec![
+                (s::KEEP_FILE.to_string(), keep(Pick::Ours)),
                 (
-                    s::KEEP_FILE,
-                    Command::ResolveConflictWith {
-                        path: path.clone(),
-                        pick: Pick::Ours,
-                    },
+                    s::DELETE_FILE.to_string(),
+                    Command::ResolveDelete(path.clone()),
                 ),
-                (s::DELETE_FILE, Command::ResolveDelete(path.clone())),
             ],
         ),
         _ => (
-            s::CONFLICT_BINARY,
+            s::CONFLICT_BINARY.to_string(),
             vec![
+                (s::USE_SIDE.replace("{side}", names.mine), keep(Pick::Ours)),
                 (
-                    s::KEEP_MINE,
-                    Command::ResolveConflictWith {
-                        path: path.clone(),
-                        pick: Pick::Ours,
-                    },
-                ),
-                (
-                    s::TAKE_THEIRS,
-                    Command::ResolveConflictWith {
-                        path: path.clone(),
-                        pick: Pick::Theirs,
-                    },
+                    s::USE_SIDE.replace("{side}", names.theirs),
+                    keep(Pick::Theirs),
                 ),
             ],
         ),
@@ -154,14 +187,14 @@ fn whole_file_only(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &ConflictEditor) {
 }
 
 fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor) {
-    let segments = parse_conflicts(&ed.result);
     let left = ed.conflicts_left();
-    let (mine_title, theirs_title) = pane_titles(ed.file.operation, &segments);
+    let (mine_title, theirs_title) = pane_titles(ed.file.operation, &ed.segments);
+    let names = side_names(ed.file.operation, &ed.segments);
     // Toolbar.
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(&ed.file.path).color(win95::theme::NAVY));
         ui.label(conflicts_left_text(left));
-        let b = |t| Button95::new(t).min_size(egui::vec2(70.0, 20.0));
+        let b = |t: &str| Button95::new(t.to_string()).min_size(egui::vec2(70.0, 20.0));
         if ui
             .add(b(s::PREV_CONFLICT).enabled(ed.current > 0))
             .clicked()
@@ -176,21 +209,22 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor) {
         }
         ui.separator();
         for (label, choice) in [
-            (s::USE_MINE, Choice::Mine),
-            (s::USE_THEIRS, Choice::Theirs),
-            (s::USE_BOTH, Choice::Both),
+            (s::USE_SIDE.replace("{side}", names.mine), Choice::Mine),
+            (s::USE_SIDE.replace("{side}", names.theirs), Choice::Theirs),
+            (s::USE_BOTH.to_string(), Choice::Both),
         ] {
-            if ui.add(b(label).enabled(left > 0)).clicked() {
+            if ui.add(b(&label).enabled(left > 0)).clicked() {
                 ed.choose(choice);
             }
         }
         ui.separator();
-        ui.label(s::WHOLE_FILE);
-        if ui.add(b(s::WHOLE_MINE)).clicked() {
-            ed.confirm = Some(ConflictConfirm::WholeFile(Pick::Ours));
-        }
-        if ui.add(b(s::WHOLE_THEIRS)).clicked() {
-            ed.confirm = Some(ConflictConfirm::WholeFile(Pick::Theirs));
+        for (side, pick) in [(names.mine, Pick::Ours), (names.theirs, Pick::Theirs)] {
+            if ui
+                .add(b(&s::WHOLE_FILE_SIDE.replace("{side}", side)))
+                .clicked()
+            {
+                ed.confirm = Some(ConflictConfirm::WholeFile(pick));
+            }
         }
         if let Some(repo) = cx.state.current.as_ref().map(|c| c.path.clone())
             && let Some(ide) = crate::ide::ide_for(&cx.state.config, &cx.state.ides, &repo)
@@ -235,11 +269,13 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor) {
                 }
             });
         });
-    request_colors(cx, ed);
+    for (target, diff) in ed.colors_to_request() {
+        cx.highlighter.request(target, diff);
+    }
     let width = ui.available_width();
-    let mine_text = ed.file.mine.clone().unwrap_or_default();
-    let theirs_text = ed.file.theirs.clone().unwrap_or_default();
-    let current = ed.current;
+    let mine_block = ed.current_side_block(Pane::Mine);
+    let theirs_block = ed.current_side_block(Pane::Theirs);
+    let path = ed.file.path.clone();
     Panel::left("conflict_mine")
         .frame(egui::Frame::NONE)
         .resizable(true)
@@ -248,11 +284,10 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor) {
         .show(ui, |ui| {
             side_pane(
                 ui,
-                "mine",
+                ("mine", &path),
                 &mine_title,
-                &mine_text,
-                &block_lines(&segments, Pane::Mine),
-                current,
+                ed.file.mine.as_deref().unwrap_or_default(),
+                mine_block,
                 &ed.mine_colors,
             )
         });
@@ -264,37 +299,35 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor) {
         .show(ui, |ui| {
             side_pane(
                 ui,
-                "theirs",
+                ("theirs", &path),
                 &theirs_title,
-                &theirs_text,
-                &block_lines(&segments, Pane::Theirs),
-                current,
+                ed.file.theirs.as_deref().unwrap_or_default(),
+                theirs_block,
                 &ed.theirs_colors,
             )
         });
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 0)))
-        .show(ui, |ui| result_pane(ui, ed, &segments));
+        .show(ui, |ui| result_pane(ui, ed));
 }
 
 /// Read-only file with the current block's lines highlighted and scrolled into view.
 fn side_pane(
     ui: &mut egui::Ui,
-    id: &str,
+    id: (&str, &str),
     title: &str,
     text: &str,
-    blocks: &[(usize, usize)],
-    current: usize,
+    block: Option<(usize, usize)>,
     colors: &crate::highlight::Colors,
 ) {
     ui.label(RichText::new(title).color(win95::theme::NAVY));
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let bg = line_backgrounds(blocks, current, lines.len());
+    let bg = line_backgrounds(block.as_slice(), 0, lines.len());
     let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
     let mut area = ScrollArea::both()
         .id_salt(("conflict_side", id))
         .auto_shrink([false, false]);
-    let target = blocks.get(current).map(|(start, _)| *start as f32 * ROW);
+    let target = block.map(|(start, _)| start as f32 * ROW);
     let key = egui::Id::new(("conflict_scrolled", id));
     if ui.ctx().data(|d| d.get_temp::<Option<f32>>(key)) != Some(target) {
         if let Some(y) = target {
@@ -324,13 +357,14 @@ fn side_pane(
 }
 
 /// The editable result, conflict blocks highlighted (the ancestor's lines in gray).
-fn result_pane(ui: &mut egui::Ui, ed: &mut ConflictEditor, segments: &[Segment]) {
+fn result_pane(ui: &mut egui::Ui, ed: &mut ConflictEditor) {
     ui.label(RichText::new(s::PANE_RESULT).color(win95::theme::NAVY));
-    let blocks = block_lines(segments, Pane::Result);
+    let blocks = block_lines(&ed.segments, Pane::Result);
     let current = ed.current;
-    let base_lines = base_line_set(segments);
-    let colors = ed.result_colors_shown.clone();
-    let mut text = ed.result.clone();
+    let base_lines = base_line_set(&ed.segments);
+    let colors = std::mem::replace(&mut ed.result_colors_shown, crate::highlight::Colors::Plain);
+    let path = ed.file.path.clone();
+    let mut text = std::mem::take(&mut ed.result);
     let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap: f32| {
         let s = buf.as_str();
         let lines: Vec<&str> = s.split_inclusive('\n').collect();
@@ -345,9 +379,16 @@ fn result_pane(ui: &mut egui::Ui, ed: &mut ConflictEditor, segments: &[Segment])
         };
         for (i, line) in lines.iter().enumerate() {
             let body = line.trim_end_matches(['\n', '\r']);
-            let spans = colors
-                .line(0, i)
-                .filter(|sp| sp.iter().map(|x| x.text.as_str()).collect::<String>() == body);
+            let spans = colors.line(0, i).filter(|sp| {
+                let mut rest = body;
+                sp.iter().all(|x| match rest.strip_prefix(x.text.as_str()) {
+                    Some(r) => {
+                        rest = r;
+                        true
+                    }
+                    None => false,
+                }) && rest.is_empty()
+            });
             match spans {
                 // Colors computed for this very line: drawn while new ones are computed.
                 Some(spans) if !base_lines.contains(&i) => {
@@ -369,50 +410,27 @@ fn result_pane(ui: &mut egui::Ui, ed: &mut ConflictEditor, segments: &[Segment])
         job.wrap.max_width = wrap;
         ui.fonts_mut(|f| f.layout_job(job))
     };
-    ScrollArea::both()
-        .id_salt("conflict_result")
+    let changed = ScrollArea::both()
+        .id_salt(("conflict_result_scroll", &path))
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add(
                 TextEdit::multiline(&mut text)
+                    // One undo history per file: undo never brings another file's text.
+                    .id_salt(("conflict_result", &path))
                     .code_editor()
                     .desired_width(f32::INFINITY)
                     .desired_rows(20)
                     .layouter(&mut layouter),
             )
-        });
-    ed.edit(text);
-}
-
-/// Ask the background highlighter for the panes whose colors are missing.
-fn request_colors(cx: &Ctx<'_>, ed: &mut ConflictEditor) {
-    use crate::highlight::{Colors, Target};
-    let path = ed.file.path.clone();
-    let panes = [
-        (
-            Target::ConflictMine,
-            ed.file.mine.clone(),
-            &mut ed.mine_colors,
-        ),
-        (
-            Target::ConflictTheirs,
-            ed.file.theirs.clone(),
-            &mut ed.theirs_colors,
-        ),
-        (
-            Target::ConflictResult,
-            Some(ed.result.clone()),
-            &mut ed.result_colors,
-        ),
-    ];
-    for (target, text, slot) in panes {
-        if *slot == Colors::NotRequested
-            && let Some(text) = text
-        {
-            cx.highlighter
-                .request(target, crate::state::text_as_diff(&path, &text));
-            *slot = Colors::Pending;
-        }
+            .changed()
+        })
+        .inner;
+    ed.result_colors_shown = colors;
+    if changed {
+        ed.typed(text);
+    } else {
+        ed.result = text;
     }
 }
 
@@ -438,7 +456,8 @@ fn base_line_set(segments: &[Segment]) -> std::collections::HashSet<usize> {
     out
 }
 
-fn confirm_dialog(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
+/// Questions of the conflict editor (drawn by the main window, whatever the tab).
+pub fn confirm_dialog(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
     let Some(confirm) = cx
         .state
         .changes
@@ -448,17 +467,31 @@ fn confirm_dialog(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
     else {
         return;
     };
+    let names = cx
+        .state
+        .changes
+        .conflict
+        .as_ref()
+        .map(|e| side_names(e.file.operation, &e.segments))
+        .unwrap_or_else(|| side_names(None, &[]));
     let question = match &confirm {
-        ConflictConfirm::WholeFile(Pick::Ours) => s::CONFIRM_WHOLE_MINE,
-        ConflictConfirm::WholeFile(Pick::Theirs) => s::CONFIRM_WHOLE_THEIRS,
-        ConflictConfirm::ResolveWithMarkers => s::CONFIRM_MARKERS_LEFT,
-        ConflictConfirm::Discard(_) | ConflictConfirm::Abort => s::CONFIRM_DISCARD_EDITS,
+        ConflictConfirm::WholeFile(Pick::Ours) => s::CONFIRM_WHOLE_SIDE
+            .replace("{kept}", names.mine_long)
+            .replace("{dropped}", names.theirs_long),
+        ConflictConfirm::WholeFile(Pick::Theirs) => s::CONFIRM_WHOLE_SIDE
+            .replace("{kept}", names.theirs_long)
+            .replace("{dropped}", names.mine_long),
+        ConflictConfirm::ResolveWithMarkers => s::CONFIRM_MARKERS_LEFT.to_string(),
+        ConflictConfirm::Discard(_) | ConflictConfirm::OpenRepo(_) => {
+            s::CONFIRM_DISCARD_EDITS.to_string()
+        }
+        ConflictConfirm::Abort => s::CONFIRM_ABORT_EDITS.to_string(),
     };
     let (mut yes, mut no) = (false, false);
     let r = Dialog::new("conflict_confirm", s::CONFLICT_TITLE)
         .width(400.0)
         .show(egui_ctx, |ui| {
-            ui.add(egui::Label::new(question).wrap());
+            ui.add(egui::Label::new(question.as_str()).wrap());
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 yes = ui
@@ -502,6 +535,11 @@ fn confirm_dialog(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             c.conflict = None;
             c.conflict_path = None;
             cx.worker.send(Command::AbortOperation);
+        }
+        ConflictConfirm::OpenRepo(path) => {
+            c.conflict = None;
+            c.conflict_path = None;
+            cx.worker.send(Command::OpenRepo(path));
         }
     }
 }

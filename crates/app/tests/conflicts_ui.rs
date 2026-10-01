@@ -26,6 +26,10 @@ const MARKED: &str =
     "fn login() {\n<<<<<<< HEAD\n    check(a);\n=======\n    verify(a, b);\n>>>>>>> feat/x\n}\n";
 
 pub fn world(kind: ConflictKind) -> World {
+    world_in(kind, Operation::Merge)
+}
+
+pub fn world_in(kind: ConflictKind, op: Operation) -> World {
     let server = mockito::Server::new();
     let worker = spawn(
         WorkerDeps {
@@ -47,7 +51,7 @@ pub fn world(kind: ConflictKind) -> World {
         origin_url: None,
         last_commit: None,
     }));
-    state.apply(Event::OperationChanged(Some(Operation::Merge)));
+    state.apply(Event::OperationChanged(Some(op)));
     state.apply(Event::StatusLoaded(
         ["src/login.rs", "README.md"]
             .iter()
@@ -65,7 +69,7 @@ pub fn world(kind: ConflictKind) -> World {
         mine: Some("fn login() {\n    check(a);\n}\n".into()),
         theirs: Some("fn login() {\n    verify(a, b);\n}\n".into()),
         working: Some(MARKED.into()),
-        operation: Some(Operation::Merge),
+        operation: Some(op),
     })));
     let (notices, _rx) = std::sync::mpsc::channel();
     World {
@@ -147,16 +151,82 @@ fn marking_resolved_with_markers_left_asks_first() {
 fn the_whole_file_asks_before_dropping_the_other_side() {
     let mut h = harness(world(ConflictKind::Content));
     h.run();
-    h.get_by_label(s::WHOLE_THEIRS).click();
+    h.get_by_label("Whole file: theirs").click();
     h.run();
-    assert!(h.query_by_label(s::CONFIRM_WHOLE_THEIRS).is_some());
+    assert!(
+        h.query_by_label_contains("Keep the other version")
+            .is_some()
+    );
 }
 
 #[test]
 fn files_deleted_on_one_side_offer_keep_or_delete() {
     let mut h = harness(world(ConflictKind::DeletedByThem));
     h.run();
-    assert!(h.query_by_label(s::CONFLICT_DELETED_BY_THEM).is_some());
+    assert!(
+        h.query_by_label_contains("deleted in the other version")
+            .is_some()
+    );
     assert!(h.query_by_label(s::KEEP_FILE).is_some());
     assert!(h.query_by_label(s::DELETE_FILE).is_some());
+}
+
+#[test]
+fn during_a_rebase_every_button_names_the_right_side() {
+    let mut h = harness(world_in(ConflictKind::Content, Operation::Rebase));
+    h.run();
+    assert!(h.query_by_label("Use upstream").is_some());
+    assert!(h.query_by_label("Use my commit").is_some());
+    assert!(
+        h.query_by_label("Use mine").is_none(),
+        "no 'mine' during a rebase"
+    );
+    h.get_by_label("Whole file: my commit").click();
+    h.run();
+    assert!(
+        h.query_by_label_contains("your commit").is_some(),
+        "confirmation says what is kept"
+    );
+}
+
+/// The result pane (the commit description is another multiline input).
+fn result_input<'a>(h: &'a Harness<'static, World>, containing: &str) -> egui_kittest::Node<'a> {
+    h.get_all_by_role(egui::accesskit::Role::MultilineTextInput)
+        .find(|n| n.value().unwrap_or_default().contains(containing))
+        .unwrap()
+}
+
+#[test]
+fn undo_does_not_bring_back_another_files_text() {
+    let mut h = harness(world(ConflictKind::Content));
+    h.run();
+    result_input(&h, "login").focus();
+    h.run();
+    result_input(&h, "login").type_text("typed in login.rs ");
+    h.run();
+    // Move to README.md (edits discarded), then press undo there.
+    h.state_mut()
+        .state
+        .changes
+        .conflict
+        .as_mut()
+        .unwrap()
+        .edited = false;
+    assert!(h.state_mut().state.changes.open_conflict("README.md"));
+    h.state_mut()
+        .state
+        .apply(Event::ConflictLoaded(Box::new(ConflictFile {
+            path: "README.md".into(),
+            kind: ConflictKind::Content,
+            mine: Some("readme mine\n".into()),
+            theirs: Some("readme theirs\n".into()),
+            working: Some("<<<<<<< HEAD\nreadme mine\n=======\nreadme theirs\n>>>>>>> x\n".into()),
+            operation: Some(Operation::Merge),
+        })));
+    h.run();
+    result_input(&h, "readme").focus();
+    h.run();
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run();
+    assert!(!result(&h).contains("login"), "{}", result(&h));
 }

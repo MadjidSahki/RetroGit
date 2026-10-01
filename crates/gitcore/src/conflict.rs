@@ -185,6 +185,50 @@ pub fn block_lines(segments: &[Segment], pane: Pane) -> Vec<(usize, usize)> {
     out
 }
 
+/// Lines (`start`, `count`) of each conflict block of `segments` (cut from the file Git
+/// left) inside `side_text`, the full version of one side: Git may have merged other
+/// changes, so positions are found by searching each block's lines in order, not counted.
+/// `None` for a block not found (empty side, or text changed since).
+pub fn locate_blocks(
+    segments: &[Segment],
+    side_text: &str,
+    pane: Pane,
+) -> Vec<Option<(usize, usize)>> {
+    let lines: Vec<&str> = side_text.split_inclusive('\n').collect();
+    let mut from = 0;
+    let mut out = Vec::new();
+    for seg in segments {
+        let Segment::Conflict { mine, theirs, .. } = seg else {
+            continue;
+        };
+        let wanted: Vec<&str> = match pane {
+            Pane::Mine => mine,
+            Pane::Theirs => theirs,
+            Pane::Result => {
+                out.push(None);
+                continue;
+            }
+        }
+        .split_inclusive('\n')
+        .collect();
+        if wanted.is_empty() {
+            // Nothing on this side: point between the lines around it.
+            out.push(Some((from.min(lines.len()), 0)));
+            continue;
+        }
+        let found = (from..=lines.len().saturating_sub(wanted.len()))
+            .find(|&i| lines[i..i + wanted.len()] == wanted[..]);
+        match found {
+            Some(i) => {
+                out.push(Some((i, wanted.len())));
+                from = i + wanted.len();
+            }
+            None => out.push(None),
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictKind {
     /// Both sides changed the text: resolve block by block.
@@ -234,7 +278,7 @@ impl Repo {
         let map = |e: git2::Error| GitError::from_git2(&e);
         let mut index = repo.index().map_err(map)?;
         // libgit2 caches the index: `git` (resolving) changes it behind our back.
-        index.read(false).map_err(map)?;
+        index.read(true).map_err(map)?;
         let mut found = None;
         for c in index.conflicts().map_err(map)? {
             let c = c.map_err(map)?;
@@ -284,7 +328,8 @@ impl Repo {
     pub fn resolve_with_content(&self, path: &str, content: &str) -> Result<(), GitError> {
         std::fs::write(self.workdir()?.join(path), content)
             .map_err(|e| GitError::Other(format!("cannot write {path}: {e}")))?;
-        self.git_ok(&["add", "--", path]).map(|_| ())
+        self.git_ok(&["--literal-pathspecs", "add", "--", path])
+            .map(|_| ())
     }
 
     /// Keep one side's whole version of `path`.
@@ -293,13 +338,15 @@ impl Repo {
             Pick::Ours => "--ours",
             Pick::Theirs => "--theirs",
         };
-        self.git_ok(&["checkout", side, "--", path])?;
-        self.git_ok(&["add", "--", path]).map(|_| ())
+        self.git_ok(&["--literal-pathspecs", "checkout", side, "--", path])?;
+        self.git_ok(&["--literal-pathspecs", "add", "--", path])
+            .map(|_| ())
     }
 
     /// Resolve by deleting `path`.
     pub fn resolve_delete(&self, path: &str) -> Result<(), GitError> {
-        self.git_ok(&["rm", "-q", "--", path]).map(|_| ())
+        self.git_ok(&["--literal-pathspecs", "rm", "-q", "--", path])
+            .map(|_| ())
     }
 }
 
@@ -398,6 +445,22 @@ mod tests {
         );
         // A block number past the end changes nothing.
         assert_eq!(apply_choice(ONE, 5, Choice::Mine), ONE);
+    }
+
+    #[test]
+    fn blocks_are_found_in_the_full_versions() {
+        // Git merged "extra" from the other side before the block: the full version of
+        // mine has one more line than the result's common part.
+        let working = "a\nextra\n<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> x\nb\n";
+        let mine_file = "a\nmine\nb\n";
+        let theirs_file = "a\nextra\ntheirs\nb\n";
+        let segs = parse_conflicts(working);
+        assert_eq!(locate_blocks(&segs, mine_file, Pane::Mine), [Some((1, 1))]);
+        assert_eq!(
+            locate_blocks(&segs, theirs_file, Pane::Theirs),
+            [Some((2, 1))]
+        );
+        assert_eq!(locate_blocks(&segs, "unrelated\n", Pane::Mine), [None]);
     }
 
     #[test]
