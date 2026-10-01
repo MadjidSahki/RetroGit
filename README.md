@@ -45,6 +45,7 @@ and a pixel font.
 - Branches: create, switch (with stash-and-reapply when local changes are in the way), rename, delete, check out remote branches, publish new ones
 - Fetch (also automatically when a repository is opened), pull (fast-forward, or Merge / Rebase when branches diverged) and push, with progress and cancel
 - Conflicts are shown with Abort / Continue; force push is only offered after amending a pushed commit, and is protected by a lease
+- Resolve conflicts in RetroGit: a three-pane editor (Mine | Result | Theirs) with syntax colors, Use mine / theirs / both per block, the whole file at once, free editing of the result, and Mark resolved; binary and deleted files offer the simple choices; labels follow merge or rebase (where "ours" and "theirs" are swapped)
 
 **Pull requests** (github.com repositories)
 - List open, mine, review-requested or closed pull requests, with checks, review status, labels, author, target branch and age
@@ -205,7 +206,7 @@ Licenses of embedded third-party data: [THIRD_PARTY.md](THIRD_PARTY.md).
 - Cloning works over HTTPS only (github.com SSH URLs are converted); fetch, pull and push
   use your remotes as they are, SSH included.
 - Binaries are not code-signed or notarized. No Linux build.
-- Conflicts are resolved in your editor (RetroGit shows them and lets you abort or continue).
+- The conflict editor has no word-level merge (blocks are Git's), and no syntax colors above 5,000 lines.
 - Syntax highlighting is skipped for very large diffs (over 5,000 lines or 256 KB) and diffs
   over 20,000 lines are only shown on request.
 - History pages are recomputed on each reload; very large repositories (100k+ commits) may feel slow.
