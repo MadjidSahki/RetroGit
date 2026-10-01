@@ -13,7 +13,7 @@ mod watch;
 
 pub use client::{Client, RepoInfo, RepoListing, User};
 pub use device_flow::{DeviceCode, DeviceFlow, DeviceFlowFailure, PollResponse, Step};
-pub use error::GithubError;
+pub use error::{GithubError, repository_missing};
 pub use graphql::GraphqlResponse;
 pub use link::next_link;
 pub use pulls::{

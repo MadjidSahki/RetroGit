@@ -363,9 +363,12 @@ impl AppError {
                 ),
             ),
             GithubError::Rejected { message, .. } => AppError::new(Severity::Warning, message),
-            GithubError::NotFound(_) | GithubError::Http(404) => {
-                AppError::new(Severity::Warning, s::ERR_PULLS_NOT_FOUND).with_detail(e)
+            // How GitHub hides a repository from a restricted app; other misses (a deleted
+            // pull request or comment) keep GitHub's own words.
+            GithubError::NotFound(m) if github::repository_missing(e) => {
+                AppError::new(Severity::Warning, s::ERR_PULLS_NOT_FOUND).with_detail(m)
             }
+            GithubError::NotFound(m) => AppError::new(Severity::Warning, m),
             other => AppError::new(Severity::Error, &other.to_string()),
         }
     }

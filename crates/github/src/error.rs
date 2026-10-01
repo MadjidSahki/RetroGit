@@ -36,6 +36,12 @@ impl From<ureq::Error> for GithubError {
     }
 }
 
+/// GitHub's "this repository does not exist" (what a restricted OAuth App sees), as opposed
+/// to another missing object (pull request, comment).
+pub fn repository_missing(e: &GithubError) -> bool {
+    matches!(e, GithubError::NotFound(m) if m.starts_with("Could not resolve to a Repository"))
+}
+
 /// Marker GitHub puts in REST and GraphQL messages when an organization blocks the app.
 const OAUTH_RESTRICTED: &str = "OAuth App access restrictions";
 

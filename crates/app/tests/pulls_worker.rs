@@ -194,6 +194,45 @@ fn a_repository_looking_missing_is_read_with_the_gh_token() {
 }
 
 #[test]
+fn only_a_missing_repository_suggests_the_restriction() {
+    let mut server = mockito::Server::new();
+    let w = signed_in(&mut server, TokenProvider::without_gh());
+    server
+        .mock("POST", "/graphql")
+        .match_body(Matcher::PartialJson(json!({ "variables": { "q": "repo:o/r is:pr is:open sort:updated-desc" } })))
+        .with_body(r#"{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","message":"Could not resolve to a Repository with the name 'o/r'."}]}"#)
+        .create();
+    server
+        .mock("POST", "/graphql")
+        .match_body(Matcher::PartialJson(json!({ "variables": { "number": 99 } })))
+        .with_body(r#"{"data":{"repository":{"pullRequest":null}},"errors":[{"type":"NOT_FOUND","message":"Could not resolve to a PullRequest with the number of 99."}]}"#)
+        .create();
+    w.send(Command::LoadPulls {
+        slug: slug(),
+        filter: PrFilter::Open,
+    });
+    let evs = until(&w, |e| matches!(e, Event::Error { .. }));
+    let Some(Event::Error { error, .. }) = evs.last() else {
+        unreachable!()
+    };
+    assert_eq!(error.message, retrogit::strings::ERR_PULLS_NOT_FOUND);
+    assert!(error.link.is_some());
+    w.send(Command::LoadPull {
+        slug: slug(),
+        number: 99,
+    });
+    let evs = until(&w, |e| matches!(e, Event::Error { .. }));
+    let Some(Event::Error { error, .. }) = evs.last() else {
+        unreachable!()
+    };
+    assert_eq!(
+        error.message,
+        "Could not resolve to a PullRequest with the number of 99."
+    );
+    assert!(error.link.is_none(), "not an access problem");
+}
+
+#[test]
 fn without_gh_the_restriction_is_explained_with_a_link() {
     let mut server = mockito::Server::new();
     let w = signed_in(&mut server, TokenProvider::without_gh());

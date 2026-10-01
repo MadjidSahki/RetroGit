@@ -133,6 +133,7 @@ fn the_gh_token_adds_pull_requests_only_for_the_same_account() {
         .expect(1)
         .create();
     let tokens = TokenProvider::new(Arc::new(|_: Option<&str>| Some("gho_cli".to_string())));
+    tokens.set_login(Some("ada"));
     let mut p = Poller::new(Client::with_bases(&server.url(), &server.url()), tokens);
     let keys: Vec<String> = p
         .poll("gho_app", "ada", 1_790_856_000)

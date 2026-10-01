@@ -104,11 +104,14 @@ fn rest_403_oauth_restriction_is_typed() {
     );
 }
 
+/// Provider for the signed-in user "ada".
 fn provider(gh: Option<&'static str>, calls: Arc<AtomicUsize>) -> TokenProvider {
-    TokenProvider::new(Arc::new(move |_login: Option<&str>| {
+    let p = TokenProvider::new(Arc::new(move |_login: Option<&str>| {
         calls.fetch_add(1, Ordering::SeqCst);
         gh.map(str::to_string)
-    }))
+    }));
+    p.set_login(Some("ada"));
+    p
 }
 
 fn restricted() -> GithubError {
@@ -174,12 +177,28 @@ fn provider_does_not_use_gh_for_other_errors() {
 }
 
 #[test]
-fn provider_without_retrogit_token_uses_gh() {
-    let p = provider(Some("gho_cli"), Arc::new(AtomicUsize::new(0)));
+fn provider_without_a_signed_in_account_never_uses_gh() {
+    // Signed out, or started offline (token kept, account unknown): gh's account could be
+    // anyone's, so nothing is done with it.
+    let calls = Arc::new(AtomicUsize::new(0));
+    let c = calls.clone();
+    let p = TokenProvider::new(Arc::new(move |_: Option<&str>| {
+        c.fetch_add(1, Ordering::SeqCst);
+        Some("gho_cli".to_string())
+    }));
     assert_eq!(
         p.with_token(None, "o", |t| Ok(t.to_string())),
-        Ok("gho_cli".into())
+        Err(GithubError::Unauthorized)
     );
+    assert_eq!(
+        p.with_token(
+            Some("gho_app"),
+            "ExampleOrg",
+            |_| Err::<(), _>(restricted())
+        ),
+        Err(restricted())
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
     let p = TokenProvider::without_gh();
     assert_eq!(
         p.with_token(None, "o", |t| Ok(t.to_string())),
@@ -195,10 +214,10 @@ fn provider_asks_gh_for_the_signed_in_account() {
         seen.lock().unwrap().push(login.map(str::to_string));
         Some("gho_cli".to_string())
     }));
-    let _ = p.gh_token();
+    assert_eq!(p.gh_token(), None, "nobody signed in");
     p.set_login(Some("ada"));
     let _ = p.gh_token();
-    assert_eq!(*asked.lock().unwrap(), vec![None, Some("ada".to_string())]);
+    assert_eq!(*asked.lock().unwrap(), vec![Some("ada".to_string())]);
 }
 
 #[test]

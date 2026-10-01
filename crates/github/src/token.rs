@@ -48,10 +48,11 @@ impl TokenProvider {
         }
     }
 
-    /// The `gh` token, if any.
+    /// The `gh` token of the signed-in account, if `gh` has it. Nobody signed in (or the
+    /// account is unknown, e.g. started offline): none, as `gh`'s account could be anyone's.
     pub fn gh_token(&self) -> Option<String> {
-        let login = self.login.lock().ok().and_then(|l| l.clone());
-        (self.gh)(login.as_deref())
+        let login = self.login.lock().ok().and_then(|l| l.clone())?;
+        (self.gh)(Some(&login))
     }
 
     fn is_restricted(&self, owner: &str) -> bool {
