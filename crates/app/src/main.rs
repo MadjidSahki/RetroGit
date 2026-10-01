@@ -44,6 +44,7 @@ fn main() -> eframe::Result {
     std::thread::spawn(|| {
         if let Some(path) = retrogit::env_path::login_shell_path(std::time::Duration::from_secs(10))
         {
+            retrogit::env_path::set_tool_path(path.clone());
             gitcore::set_git_search_path(path);
         }
     });
@@ -85,6 +86,14 @@ fn main() -> eframe::Result {
                 store: Arc::new(github::KeyringStore::new("RetroGit", "github.com")),
                 client_id: GITHUB_CLIENT_ID.to_string(),
                 commit_backend: gitcore::CommitBackend::PreferCli,
+                tokens: github::TokenProvider::new(std::sync::Arc::new(|login| {
+                    let token =
+                        github::gh_auth_token(retrogit::env_path::tool_path().as_deref(), login);
+                    if let Some(t) = &token {
+                        logging::add_secret(t);
+                    }
+                    token
+                })),
             };
             let worker = spawn(deps, move || repaint.request_repaint());
             let state = AppState::new(config);

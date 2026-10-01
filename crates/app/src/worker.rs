@@ -1,6 +1,7 @@
 //! The single background thread doing all network and Git work.
 
 mod changes;
+mod pulls;
 mod sync;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -22,6 +23,8 @@ pub struct WorkerDeps {
     /// Empty = Device Flow unavailable (PAT only).
     pub client_id: String,
     pub commit_backend: CommitBackend,
+    /// Chooses the token per organization (`gh` fallback for restricted organizations).
+    pub tokens: github::TokenProvider,
 }
 
 /// UI-side handle. Cancellation flags bypass the command queue so they act immediately.
@@ -254,6 +257,16 @@ impl Worker {
             Command::ForcePush => self.force_push(),
             Command::AbortOperation => self.abort_operation(),
             Command::ContinueRebase => self.continue_rebase(),
+            pr @ (Command::LoadPulls { .. }
+            | Command::LoadPull { .. }
+            | Command::LoadRepoMeta(_)
+            | Command::CreatePull { .. }
+            | Command::SubmitReview { .. }
+            | Command::ReplyToThread { .. }
+            | Command::AddPullComment { .. }
+            | Command::MergePull { .. }
+            | Command::SetLabels { .. }
+            | Command::CheckoutPull { .. }) => self.handle_pulls(pr),
         }
     }
 
@@ -270,6 +283,7 @@ impl Worker {
         match self.deps.client.current_user(&token) {
             Ok(user) => {
                 self.token = Some(token);
+                self.deps.tokens.set_login(Some(&user.login));
                 self.emit(Event::SignedIn(user));
             }
             Err(GithubError::Unauthorized) => {
@@ -295,6 +309,7 @@ impl Worker {
                     self.fail(Op::Auth, AppError::from_store(&e));
                 }
                 self.token = Some(token);
+                self.deps.tokens.set_login(Some(&user.login));
                 self.emit(Event::SignedIn(user));
             }
             Err(GithubError::Unauthorized) if is_pat => {
@@ -348,6 +363,7 @@ impl Worker {
 
     fn sign_out(&mut self) {
         self.token = None;
+        self.deps.tokens.set_login(None);
         if let Err(e) = self.deps.store.clear() {
             self.fail(Op::Auth, AppError::from_store(&e));
         }
@@ -423,6 +439,7 @@ impl Worker {
     /// The token was rejected: forget it everywhere and ask to sign in again.
     fn drop_token(&mut self, during: Op) {
         self.token = None;
+        self.deps.tokens.set_login(None);
         let _ = self.deps.store.clear();
         self.fail(during, AppError::from_github(&GithubError::Unauthorized));
         self.emit(Event::SignedOut);

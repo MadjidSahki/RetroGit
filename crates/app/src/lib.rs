@@ -9,6 +9,7 @@ pub mod highlight;
 pub mod ide;
 pub mod instance;
 pub mod logging;
+pub mod pr_diff;
 pub mod protocol;
 pub mod state;
 pub mod strings;

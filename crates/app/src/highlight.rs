@@ -62,6 +62,7 @@ impl Colors {
 pub enum Target {
     Changes,
     History,
+    Pull,
 }
 
 /// A finished highlighting job.

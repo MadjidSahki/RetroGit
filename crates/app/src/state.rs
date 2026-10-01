@@ -1,7 +1,12 @@
 //! All UI state, updated by the pure `apply` function.
 
+mod pulls;
 mod sync;
 
+pub use pulls::{
+    PullDialog, PullTab, PullsView, default_merge_method, merge_defaults, merge_disabled_reason,
+    prefill_title, review_events_allowed,
+};
 pub use sync::{HistoryView, LOG_PAGE, PendingDialog, SyncView, Tab, branch_name_error};
 
 use std::collections::{BTreeSet, HashSet, VecDeque};
@@ -164,6 +169,8 @@ pub struct AppState {
     pub signing: Option<gitcore::SigningConfig>,
     /// IDEs installed on this machine (detected at startup).
     pub ides: Vec<crate::ide::Ide>,
+    // --- Sub-project 4 ---
+    pub pulls: PullsView,
 }
 
 impl AppState {
@@ -195,6 +202,7 @@ impl AppState {
             operation: None,
             signing: None,
             ides: Vec::new(),
+            pulls: PullsView::default(),
         }
     }
 
@@ -326,6 +334,12 @@ impl AppState {
             | Event::WouldOverwrite { .. }
             | Event::NotMerged(_)
             | Event::ColorsLoaded { .. }) => self.apply_sync(ev),
+            ev @ (Event::PullsLoaded { .. }
+            | Event::PullLoaded { .. }
+            | Event::PullFilesLoaded { .. }
+            | Event::RepoMetaLoaded { .. }
+            | Event::PullCreated { .. }
+            | Event::PullActionDone { .. }) => self.apply_pulls(ev),
             Event::Error { during, error } => {
                 self.on_error(during);
                 self.messages.push_back(error);
@@ -359,10 +373,16 @@ impl AppState {
             Op::Sync => {
                 self.sync.running = None;
                 self.sync.progress = None;
+                // "Publish the branch first" failed: the pull request was not created.
+                self.pulls.busy = false;
             }
             Op::Commit => self.changes.committing = false,
+            Op::Pulls => self.pulls.loading = false,
+            Op::PullAction => self.pulls.busy = false,
             Op::Internal => {
                 self.repos_loading = false;
+                self.pulls.loading = false;
+                self.pulls.busy = false;
                 self.changes.committing = false;
                 if let Some(c) = self.clone.as_mut() {
                     c.progress = None;
@@ -386,6 +406,12 @@ impl AppState {
             self.dialog = None;
             self.operation = None;
             self.signing = None;
+            self.pulls = PullsView::for_repo(
+                summary
+                    .origin_url
+                    .as_deref()
+                    .and_then(gitcore::parse_github_slug),
+            );
         }
         self.current = Some(summary);
     }

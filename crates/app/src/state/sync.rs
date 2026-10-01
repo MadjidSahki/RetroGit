@@ -194,6 +194,9 @@ impl AppState {
                     Target::History if self.history.detail_diff.as_ref() == Some(&diff) => {
                         self.history.detail_colors = value
                     }
+                    Target::Pull if self.pulls.file_diff.as_ref() == Some(&diff) => {
+                        self.pulls.file_colors = value
+                    }
                     _ => {}
                 }
             }

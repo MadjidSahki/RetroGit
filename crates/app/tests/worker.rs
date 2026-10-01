@@ -15,6 +15,7 @@ fn start(server: &mockito::Server, store: Arc<MemoryStore>, client_id: &str) -> 
         store,
         client_id: client_id.into(),
         commit_backend: gitcore::CommitBackend::Git2,
+        tokens: github::TokenProvider::without_gh(),
     };
     spawn(deps, || {})
 }
