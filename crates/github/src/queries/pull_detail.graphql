@@ -1,0 +1,71 @@
+query PullDetail($owner: String!, $name: String!, $number: Int!) {
+  viewer { login }
+  repository(owner: $owner, name: $name) {
+    mergeCommitAllowed
+    squashMergeAllowed
+    rebaseMergeAllowed
+    viewerPermission
+    labels(first: 100) { nodes { name color description } }
+    pullRequest(number: $number) {
+      number
+      title
+      url
+      isDraft
+      state
+      updatedAt
+      body
+      author { login }
+      headRefName
+      baseRefName
+      headRefOid
+      isCrossRepository
+      headRepository { name owner { login } }
+      reviewDecision
+      mergeable
+      mergeStateStatus
+      viewerDidAuthor
+      labels(first: 20) { nodes { name color description } }
+      commits(first: 100) {
+        totalCount
+        nodes {
+          commit {
+            oid
+            abbreviatedOid
+            messageHeadline
+            committedDate
+            author { name user { login } }
+          }
+        }
+      }
+      lastCommit: commits(last: 1) {
+        nodes {
+          commit {
+            statusCheckRollup {
+              state
+              contexts(first: 100) {
+                nodes {
+                  __typename
+                  ... on CheckRun { name status conclusion detailsUrl startedAt completedAt }
+                  ... on StatusContext { context state targetUrl }
+                }
+              }
+            }
+          }
+        }
+      }
+      comments(last: 100) { nodes { author { login } body createdAt } }
+      reviews(last: 100) { nodes { author { login } state body submittedAt } }
+      reviewThreads(first: 100) {
+        nodes {
+          isResolved
+          isOutdated
+          path
+          line
+          originalLine
+          diffSide
+          comments(first: 50) { nodes { databaseId author { login } body createdAt } }
+        }
+      }
+    }
+  }
+}

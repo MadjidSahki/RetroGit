@@ -5,6 +5,7 @@ mod device_flow;
 mod error;
 mod graphql;
 mod link;
+mod pulls;
 mod token;
 mod token_store;
 
@@ -13,6 +14,11 @@ pub use device_flow::{DeviceCode, DeviceFlow, DeviceFlowFailure, PollResponse, S
 pub use error::GithubError;
 pub use graphql::GraphqlResponse;
 pub use link::next_link;
+pub use pulls::{
+    CheckRun, CheckStatus, ChecksState, DiffSide, Label, MergeMethod, Mergeable, PrCommit,
+    PrDetail, PrFile, PrFilter, PrState, PrSummary, ReviewDecision, ReviewState, ReviewThread,
+    ThreadComment, TimelineItem, parse_color, search_query,
+};
 pub use token::{GhTokenSource, TokenProvider, gh_auth_token, parse_gh_token};
 pub use token_store::{KeyringStore, MemoryStore, TokenStore, TokenStoreError};
 

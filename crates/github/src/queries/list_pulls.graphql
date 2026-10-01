@@ -1,0 +1,20 @@
+query ListPulls($q: String!) {
+  search(query: $q, type: ISSUE, first: 50) {
+    nodes {
+      ... on PullRequest {
+        number
+        title
+        url
+        isDraft
+        state
+        updatedAt
+        author { login }
+        headRefName
+        baseRefName
+        reviewDecision
+        labels(first: 20) { nodes { name color description } }
+        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+      }
+    }
+  }
+}
