@@ -201,6 +201,35 @@ impl Client {
         .map(|_| ())
     }
 
+    /// A line comment posted on its own (not part of a review), on commit `commit_id`.
+    pub fn add_line_comment(
+        &self,
+        token: &str,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        commit_id: &str,
+        comment: &LineComment,
+    ) -> Result<(), GithubError> {
+        let side = match comment.side {
+            DiffSide::Left => "LEFT",
+            DiffSide::Right => "RIGHT",
+        };
+        self.api_send(
+            "POST",
+            &format!("/repos/{owner}/{repo}/pulls/{number}/comments"),
+            token,
+            Some(&json!({
+                "commit_id": commit_id,
+                "path": comment.path,
+                "line": comment.line,
+                "side": side,
+                "body": comment.body,
+            })),
+        )
+        .map(|_| ())
+    }
+
     /// Comment in the conversation.
     pub fn add_issue_comment(
         &self,

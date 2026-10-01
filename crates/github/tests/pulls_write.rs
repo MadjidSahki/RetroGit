@@ -338,3 +338,32 @@ fn repo_meta_reads_default_branch_and_all_labels() {
     let names: Vec<_> = meta.labels.iter().map(|l| l.name.as_str()).collect();
     assert_eq!(names, ["bug", "docs"]);
 }
+
+#[test]
+fn a_single_line_comment_is_posted_at_once() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("POST", "/repos/o/r/pulls/7/comments")
+        .match_body(Matcher::Json(json!({
+            "commit_id": "abc", "path": "src/a.rs", "line": 12, "side": "LEFT", "body": "Why?"
+        })))
+        .with_status(201)
+        .with_body("{}")
+        .create();
+    client(&server)
+        .add_line_comment(
+            "t",
+            "o",
+            "r",
+            7,
+            "abc",
+            &LineComment {
+                path: "src/a.rs".into(),
+                line: 12,
+                side: DiffSide::Left,
+                body: "Why?".into(),
+            },
+        )
+        .unwrap();
+    m.assert();
+}

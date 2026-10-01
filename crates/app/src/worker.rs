@@ -285,6 +285,7 @@ impl Worker {
             | Command::SubmitReview { .. }
             | Command::ReplyToThread { .. }
             | Command::AddPullComment { .. }
+            | Command::AddLineComment { .. }
             | Command::MergePull { .. }
             | Command::SetLabels { .. }
             | Command::CheckoutPull { .. }) => self.handle_pulls(pr),

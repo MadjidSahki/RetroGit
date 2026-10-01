@@ -134,6 +134,13 @@ pub enum Command {
         number: u64,
         body: String,
     },
+    /// A line comment posted at once, outside a review.
+    AddLineComment {
+        slug: Slug,
+        number: u64,
+        commit_id: String,
+        comment: github::LineComment,
+    },
     /// `delete_branch`: head branch to delete afterwards (same repository only).
     MergePull {
         slug: Slug,

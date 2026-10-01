@@ -103,23 +103,48 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             body,
         } => {
             let mut body = body;
+            let busy = cx.state.pulls.busy;
+            let head = cx.state.pulls.detail.as_ref().map(|d| d.head_sha.clone());
+            let number = cx.state.pulls.selected.unwrap_or_default();
+            // Like github.com: post it now, or keep it for the review being written.
+            let choices: &[&str] = if busy {
+                &[]
+            } else {
+                &[s::ADD_SINGLE_COMMENT, s::ADD_TO_REVIEW]
+            };
+            let comment = |body: String| LineComment {
+                path: path.clone(),
+                line,
+                side,
+                body,
+            };
             match text_dialog(
                 egui_ctx,
                 s::LINE_COMMENT_TITLE,
                 &format!("{path}:{line}\n{quote}"),
                 &mut body,
-                s::ADD_TO_REVIEW,
+                choices,
             ) {
-                Some(true) => {
-                    cx.state.queue_line_comment(LineComment {
-                        path,
+                Some(Some(0)) if head.is_some() => Outcome::Send(
+                    Command::AddLineComment {
+                        slug: slug.clone(),
+                        number,
+                        commit_id: head.unwrap_or_default(),
+                        comment: comment(body.clone()),
+                    },
+                    PullDialog::LineComment {
+                        path: path.clone(),
                         line,
                         side,
+                        quote,
                         body,
-                    });
+                    },
+                ),
+                Some(Some(_)) => {
+                    cx.state.queue_line_comment(comment(body));
                     Outcome::Close
                 }
-                Some(false) => Outcome::Close,
+                Some(None) => Outcome::Close,
                 None => Outcome::Keep(PullDialog::LineComment {
                     path,
                     line,
@@ -150,8 +175,8 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                         .join("\n\n")
                 })
                 .unwrap_or_default();
-            match text_dialog(egui_ctx, s::REPLY_TITLE, &thread, &mut body, s::SEND) {
-                Some(true) => {
+            match text_dialog(egui_ctx, s::REPLY_TITLE, &thread, &mut body, &[s::SEND]) {
+                Some(Some(_)) => {
                     cx.state.pulls.busy = true;
                     Outcome::Send(
                         Command::ReplyToThread {
@@ -163,7 +188,7 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                         PullDialog::Reply { comment_id, body },
                     )
                 }
-                Some(false) => Outcome::Close,
+                Some(None) => Outcome::Close,
                 None => Outcome::Keep(PullDialog::Reply { comment_id, body }),
             }
         }
@@ -179,14 +204,15 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
     }
 }
 
-/// Context text, a text box, OK/Cancel. `Some(true)` = confirmed (non-empty text).
+/// Context text, a text box, one button per choice (enabled with some text) and Cancel.
+/// `Some(Some(i))` = choice `i`, `Some(None)` = cancelled, `None` = still open.
 fn text_dialog(
     egui_ctx: &egui::Context,
     title: &str,
     context: &str,
     body: &mut String,
-    ok: &str,
-) -> Option<bool> {
+    choices: &[&str],
+) -> Option<Option<usize>> {
     let mut result = None;
     let r = Dialog::new(("pull_text", title), title)
         .width(480.0)
@@ -200,23 +226,25 @@ fn text_dialog(
             text_area(ui, body, 460.0, 5);
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if ui
-                    .add(
-                        Button95::new(ok)
-                            .min_size(BUTTON)
-                            .enabled(!body.trim().is_empty()),
-                    )
-                    .clicked()
-                {
-                    result = Some(true);
+                for (i, choice) in choices.iter().enumerate() {
+                    if ui
+                        .add(
+                            Button95::new(*choice)
+                                .min_size(egui::vec2(140.0, 23.0))
+                                .enabled(!body.trim().is_empty()),
+                        )
+                        .clicked()
+                    {
+                        result = Some(Some(i));
+                    }
                 }
                 if ui.add(Button95::new(s::CANCEL).min_size(BUTTON)).clicked() {
-                    result = Some(false);
+                    result = Some(None);
                 }
             });
         });
     if r.close_requested {
-        return Some(false);
+        return Some(None);
     }
     result
 }
@@ -257,7 +285,7 @@ fn review(
                 ui.label(egui::RichText::new(s::OWN_PULL_REVIEW).color(win95::theme::GRAY));
             }
             if pending > 0 {
-                ui.label(format!("{pending} {}", s::PENDING_COMMENTS));
+                ui.label(format!("{pending} {}", s::PENDING_IN_REVIEW));
             }
             let ready = review_ready(event, &body, pending);
             if !ready {

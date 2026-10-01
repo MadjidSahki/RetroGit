@@ -74,6 +74,14 @@ impl Worker {
                     c.add_issue_comment(t, o, r, number, &body)
                 })
             }
+            Command::AddLineComment {
+                slug,
+                number,
+                commit_id,
+                comment,
+            } => self.pull_action(&slug, number, s::NOTE_COMMENTED, |c, t, o, r| {
+                c.add_line_comment(t, o, r, number, &commit_id, &comment)
+            }),
             Command::SetLabels {
                 slug,
                 number,

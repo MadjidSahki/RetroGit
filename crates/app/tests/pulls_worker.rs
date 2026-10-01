@@ -251,6 +251,38 @@ fn a_review_is_sent_then_the_pull_request_reloaded() {
 }
 
 #[test]
+fn a_single_line_comment_is_sent_then_the_pull_request_reloaded() {
+    let mut server = mockito::Server::new();
+    let w = signed_in(&mut server, TokenProvider::without_gh());
+    let posted = server
+        .mock("POST", "/repos/o/r/pulls/7/comments")
+        .match_body(Matcher::PartialJson(
+            json!({ "commit_id": "abc", "line": 2, "side": "RIGHT" }),
+        ))
+        .with_status(201)
+        .with_body("{}")
+        .create();
+    let (_d, _f) = mock_detail(&mut server, 7);
+    w.send(Command::AddLineComment {
+        slug: slug(),
+        number: 7,
+        commit_id: "abc".into(),
+        comment: github::LineComment {
+            path: "a.rs".into(),
+            line: 2,
+            side: github::DiffSide::Right,
+            body: "Typo".into(),
+        },
+    });
+    let evs = until(&w, |e| matches!(e, Event::PullFilesLoaded { .. }));
+    posted.assert();
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, Event::PullActionDone { number: 7, .. }))
+    );
+}
+
+#[test]
 fn a_merge_on_a_moved_head_is_refused_and_reloaded() {
     let mut server = mockito::Server::new();
     let w = signed_in(&mut server, TokenProvider::without_gh());
