@@ -1,0 +1,23 @@
+query ListPulls($q: String!, $owner: String!, $name: String!) {
+  # A search silently skips repositories the token may not read; asking for the
+  # repository makes GitHub report the reason (OAuth App restriction, SSO).
+  repository(owner: $owner, name: $name) { id }
+  search(query: $q, type: ISSUE, first: 50) {
+    nodes {
+      ... on PullRequest {
+        number
+        title
+        url
+        isDraft
+        state
+        updatedAt
+        author { login }
+        headRefName
+        baseRefName
+        reviewDecision
+        labels(first: 20) { nodes { name color description } }
+        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+      }
+    }
+  }
+}

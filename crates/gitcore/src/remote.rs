@@ -102,7 +102,7 @@ pub fn retry_without_token<T>(
 }
 
 impl Repo {
-    fn origin_url(&self) -> Option<String> {
+    pub(crate) fn origin_url(&self) -> Option<String> {
         self.git()
             .find_remote("origin")
             .ok()
@@ -110,7 +110,7 @@ impl Repo {
     }
 
     /// Run a network command; progress lines are reported; the process is killed on cancel.
-    fn run_net(
+    pub(crate) fn run_net(
         &self,
         auth: &NetAuth,
         args: &[&str],

@@ -8,6 +8,7 @@ mod commit_detail;
 mod diff;
 mod discard;
 mod error;
+mod github;
 mod graph;
 mod ignore;
 mod log;
@@ -22,6 +23,7 @@ mod status;
 
 pub use branch::{Branch, parse_overwritten_files};
 pub use commit_detail::{ChangedFile, CommitDetail, SignatureStatus, parse_signature_status};
+pub use github::parse_github_slug;
 pub use graph::{Edge, GraphRow, GraphState, layout};
 pub use log::{LogEntry, RefKind, RefLabel};
 pub use net::{

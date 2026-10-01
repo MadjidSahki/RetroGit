@@ -26,6 +26,32 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+/// Unix time of an ISO-8601 UTC timestamp such as `2026-10-01T08:38:17Z` (GitHub's format).
+pub fn parse_iso8601(text: &str) -> Option<i64> {
+    let t = text.trim().strip_suffix('Z')?;
+    let (date, time) = t.split_once('T')?;
+    let mut d = date.splitn(3, '-').map(|p| p.parse::<i64>().ok());
+    let (y, m, day) = (d.next()??, d.next()??, d.next()??);
+    let mut h = time
+        .split('.')
+        .next()?
+        .splitn(3, ':')
+        .map(|p| p.parse::<i64>().ok());
+    let (hh, mm, ss) = (h.next()??, h.next()??, h.next()??);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&day) || hh > 23 || mm > 59 || ss > 60 {
+        return None;
+    }
+    // Days from civil (inverse of `civil_from_days`).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + hh * 3600 + mm * 60 + ss)
+}
+
 /// Human-readable byte count: `512 B`, `1.5 KB`, `12.3 MB`.
 pub fn format_bytes(bytes: usize) -> String {
     const KB: f64 = 1024.0;
@@ -51,6 +77,16 @@ mod tests {
         assert_eq!(format_epoch(1_700_000_000), "2023-11-14 22:13");
         assert_eq!(format_epoch(951_782_400), "2000-02-29 00:00");
         assert_eq!(format_epoch(-86_400), "1969-12-31 00:00");
+    }
+
+    #[test]
+    fn iso_timestamps() {
+        assert_eq!(parse_iso8601("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(parse_iso8601("2023-11-14T22:13:20Z"), Some(1_700_000_000));
+        assert_eq!(parse_iso8601("2000-02-29T00:00:00.123Z"), Some(951_782_400));
+        assert_eq!(parse_iso8601("2026-10-01"), None);
+        assert_eq!(parse_iso8601("2026-13-01T00:00:00Z"), None);
+        assert_eq!(parse_iso8601(""), None);
     }
 
     #[test]

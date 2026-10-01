@@ -5,6 +5,18 @@ use std::time::Duration;
 
 const MARKER: &str = "__RG_PATH__";
 
+static TOOL_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Remember the login shell's PATH for other command-line tools (the GitHub CLI).
+pub fn set_tool_path(path: String) {
+    let _ = TOOL_PATH.set(path);
+}
+
+/// PATH to run command-line tools with, when the app's own PATH is not the user's.
+pub fn tool_path() -> Option<String> {
+    TOOL_PATH.get().cloned()
+}
+
 /// The PATH printed between two markers (shell startup files may print other text).
 pub fn extract_marked(output: &str) -> Option<String> {
     let start = output.find(MARKER)? + MARKER.len();

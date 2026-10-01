@@ -27,6 +27,9 @@ pub struct RetroGitApp {
     /// Folders sent by `retrogit` from a terminal (see `instance`).
     to_open: Option<std::sync::mpsc::Receiver<PathBuf>>,
     _instance: Option<crate::instance::Server>,
+    /// Pull request events from the watcher thread.
+    pr_events: Option<std::sync::mpsc::Receiver<Vec<github::PrEvent>>>,
+    _pr_watcher: Option<crate::pr_watch::PrWatcher>,
 }
 
 impl RetroGitApp {
@@ -57,6 +60,8 @@ impl RetroGitApp {
             notices,
             to_open: None,
             _instance: None,
+            pr_events: None,
+            _pr_watcher: None,
             highlighter,
             highlighted,
             state,
@@ -90,6 +95,33 @@ impl RetroGitApp {
             }
             Err(e) => log::warn!("single-instance listener not started: {e}"),
         }
+        self
+    }
+
+    /// Watch the user's pull requests (all repositories) for notifications.
+    pub fn with_pr_watch(
+        mut self,
+        client: github::Client,
+        tokens: github::TokenProvider,
+        ctx: egui::Context,
+    ) -> RetroGitApp {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let watcher = crate::pr_watch::PrWatcher::start(
+            client,
+            tokens,
+            self.worker.session(),
+            crate::pr_watch::INTERVAL,
+            move |events: Vec<github::PrEvent>| {
+                for e in &events {
+                    let (title, body) = crate::notify::notification_text(e);
+                    crate::notify::show(&title, &body);
+                }
+                let _ = tx.send(events);
+                ctx.request_repaint();
+            },
+        );
+        self.pr_events = Some(rx);
+        self._pr_watcher = Some(watcher);
         self
     }
 
@@ -146,6 +178,14 @@ impl eframe::App for RetroGitApp {
             self.state.ides = found;
             self.ides = None;
         }
+        let pr_events: Vec<Vec<github::PrEvent>> = self
+            .pr_events
+            .as_ref()
+            .map(|rx| rx.try_iter().collect())
+            .unwrap_or_default();
+        for events in pr_events {
+            self.state.apply(crate::protocol::Event::PrEvents(events));
+        }
         while let Ok(notice) = self.notices.try_recv() {
             self.state.messages.push_back(notice);
         }
@@ -195,6 +235,8 @@ impl eframe::App for RetroGitApp {
         ui::about::show(&egui_ctx, &mut cx);
         ui::discard::show(&egui_ctx, &mut cx);
         ui::sync_dialogs::show(&egui_ctx, &mut cx);
+        ui::pull_dialogs::show(&egui_ctx, &mut cx);
+        ui::notifications::show(&egui_ctx, &mut cx);
         ui::message::show(&egui_ctx, &mut cx);
     }
 

@@ -44,6 +44,7 @@ fn main() -> eframe::Result {
     std::thread::spawn(|| {
         if let Some(path) = retrogit::env_path::login_shell_path(std::time::Duration::from_secs(10))
         {
+            retrogit::env_path::set_tool_path(path.clone());
             gitcore::set_git_search_path(path);
         }
     });
@@ -80,20 +81,28 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             win95::theme::install(&cc.egui_ctx);
             let repaint = cc.egui_ctx.clone();
+            let tokens = github::TokenProvider::new(std::sync::Arc::new(|login| {
+                let token =
+                    github::gh_auth_token(retrogit::env_path::tool_path().as_deref(), login);
+                if let Some(t) = &token {
+                    logging::add_secret(t);
+                }
+                token
+            }));
             let deps = WorkerDeps {
                 client: github::Client::github_com(),
                 store: Arc::new(github::KeyringStore::new("RetroGit", "github.com")),
                 client_id: GITHUB_CLIENT_ID.to_string(),
                 commit_backend: gitcore::CommitBackend::PreferCli,
+                tokens: tokens.clone(),
             };
             let worker = spawn(deps, move || repaint.request_repaint());
             let state = AppState::new(config);
             let app = RetroGitApp::new(state, worker, config_path, cc.egui_ctx.clone());
-            Ok(Box::new(app.with_instance(
-                data_dir.as_deref(),
-                cc.egui_ctx.clone(),
-                initial,
-            )))
+            let app = app
+                .with_instance(data_dir.as_deref(), cc.egui_ctx.clone(), initial)
+                .with_pr_watch(github::Client::github_com(), tokens, cc.egui_ctx.clone());
+            Ok(Box::new(app))
         }),
     )
 }

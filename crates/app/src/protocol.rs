@@ -7,7 +7,10 @@ use gitcore::{
     NetProgress, Operation, PullMode, PullOutcome, PushMode, RepoSummary, Selection, Side,
     SignatureStatus, SigningConfig,
 };
-use github::{DeviceFlowFailure, GithubError, RepoInfo, TokenStoreError, User};
+use github::{
+    DeviceFlowFailure, GithubError, Merge, NewPull, PrDetail, PrFile, PrFilter, PrSummary,
+    RepoInfo, RepoMeta, Review, TokenStoreError, User,
+};
 
 use crate::strings as s;
 
@@ -97,7 +100,75 @@ pub enum Command {
     ForcePush,
     AbortOperation,
     ContinueRebase,
+    // --- Sub-project 4: pull requests of the github.com repository `slug`. ---
+    LoadPulls {
+        slug: Slug,
+        filter: PrFilter,
+    },
+    /// Detail, then files.
+    LoadPull {
+        slug: Slug,
+        number: u64,
+    },
+    /// Default branch and labels, for the "New pull request" dialog.
+    LoadRepoMeta(Slug),
+    /// `publish`: push the head branch (`push -u origin`) first.
+    CreatePull {
+        slug: Slug,
+        pull: NewPull,
+        publish: bool,
+    },
+    SubmitReview {
+        slug: Slug,
+        number: u64,
+        review: Review,
+    },
+    ReplyToThread {
+        slug: Slug,
+        number: u64,
+        comment_id: u64,
+        body: String,
+    },
+    AddPullComment {
+        slug: Slug,
+        number: u64,
+        body: String,
+    },
+    ResolveThread {
+        slug: Slug,
+        number: u64,
+        thread_id: String,
+        resolve: bool,
+    },
+    /// A line comment posted at once, outside a review.
+    AddLineComment {
+        slug: Slug,
+        number: u64,
+        commit_id: String,
+        comment: github::LineComment,
+    },
+    /// `delete_branch`: head branch to delete afterwards (same repository only).
+    MergePull {
+        slug: Slug,
+        number: u64,
+        merge: Merge,
+        delete_branch: Option<String>,
+    },
+    SetLabels {
+        slug: Slug,
+        number: u64,
+        labels: Vec<String>,
+    },
+    /// `head`: the head branch when it lives in this repository (checked out as a normal
+    /// tracking branch); `None` for forks (fetched into `pr/N`).
+    CheckoutPull {
+        number: u64,
+        head: Option<String>,
+    },
 }
+
+/// `(owner, repo)` of a github.com repository.
+pub type Slug = (String, String);
 
 /// Network operation shown in the UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,6 +191,10 @@ pub enum Op {
     /// History, branches.
     History,
     Sync,
+    /// Pull request reads.
+    Pulls,
+    /// Pull request changes (create, review, merge...).
+    PullAction,
     Internal,
 }
 
@@ -197,6 +272,37 @@ pub enum Event {
         diff: FileDiff,
         colors: Option<crate::highlight::DiffColors>,
     },
+    // --- Sub-project 4 ---
+    PullsLoaded {
+        slug: Slug,
+        filter: PrFilter,
+        list: Vec<PrSummary>,
+    },
+    PullLoaded {
+        slug: Slug,
+        detail: Box<PrDetail>,
+    },
+    PullFilesLoaded {
+        slug: Slug,
+        number: u64,
+        files: Vec<PrFile>,
+    },
+    RepoMetaLoaded {
+        slug: Slug,
+        meta: RepoMeta,
+    },
+    /// A pull request was opened (or already existed): show it.
+    PullCreated {
+        slug: Slug,
+        number: u64,
+    },
+    /// A change went through; the pull request is reloaded. `note` goes to the status bar.
+    PullActionDone {
+        number: u64,
+        note: String,
+    },
+    /// Changes on the user's pull requests (from the watcher thread).
+    PrEvents(Vec<github::PrEvent>),
     Error {
         during: Op,
         error: AppError,
@@ -241,13 +347,28 @@ impl AppError {
             GithubError::Unauthorized => AppError::new(Severity::Warning, s::ERR_UNAUTHORIZED),
             GithubError::SsoRequired { url } => {
                 let mut a = AppError::new(Severity::Warning, s::ERR_SSO);
-                a.link = Some(url.clone());
+                a.link = (!url.is_empty()).then(|| url.clone());
                 a
             }
             GithubError::RateLimited => AppError::new(Severity::Warning, s::ERR_RATE_LIMIT),
             GithubError::Network(d) => {
                 AppError::new(Severity::Warning, s::ERR_NO_NETWORK).with_detail(d)
             }
+            GithubError::OAuthRestricted { org } => AppError::new(
+                Severity::Warning,
+                &format!(
+                    "The organization {} restricts third-party applications and has not approved RetroGit. {}",
+                    org.as_deref().unwrap_or("of this repository"),
+                    s::ERR_OAUTH_RESTRICTED_HELP
+                ),
+            ),
+            GithubError::Rejected { message, .. } => AppError::new(Severity::Warning, message),
+            // How GitHub hides a repository from a restricted app; other misses (a deleted
+            // pull request or comment) keep GitHub's own words.
+            GithubError::NotFound(m) if github::repository_missing(e) => {
+                AppError::new(Severity::Warning, s::ERR_PULLS_NOT_FOUND).with_detail(m)
+            }
+            GithubError::NotFound(m) => AppError::new(Severity::Warning, m),
             other => AppError::new(Severity::Error, &other.to_string()),
         }
     }

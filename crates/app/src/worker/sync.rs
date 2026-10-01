@@ -10,7 +10,7 @@ use crate::state::LOG_PAGE;
 use crate::strings as s;
 
 impl Worker {
-    fn net_auth(&self) -> NetAuth {
+    pub(super) fn net_auth(&self) -> NetAuth {
         NetAuth {
             github_token: self.token.clone(),
         }
@@ -173,7 +173,7 @@ impl Worker {
     }
 
     /// Common shape of fetch / pull / push: start event, throttled progress, finish event.
-    fn network<T>(
+    pub(super) fn network<T>(
         &mut self,
         op: SyncOp,
         background: bool,
@@ -203,7 +203,7 @@ impl Worker {
     }
 
     /// Report a network failure (background fetches only log it).
-    fn net_failed(&mut self, op: SyncOp, background: bool, e: &GitError) {
+    pub(super) fn net_failed(&mut self, op: SyncOp, background: bool, e: &GitError) {
         if background {
             log::info!("background fetch failed: {e}");
         } else {

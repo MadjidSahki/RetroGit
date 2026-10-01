@@ -1,6 +1,7 @@
 //! The single background thread doing all network and Git work.
 
 mod changes;
+mod pulls;
 mod sync;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -22,10 +23,16 @@ pub struct WorkerDeps {
     /// Empty = Device Flow unavailable (PAT only).
     pub client_id: String,
     pub commit_backend: CommitBackend,
+    /// Chooses the token per organization (`gh` fallback for restricted organizations).
+    pub tokens: github::TokenProvider,
 }
+
+/// Token and login of the signed-in user, shared with the pull request watcher.
+pub type Session = Arc<std::sync::Mutex<Option<(String, String)>>>;
 
 /// UI-side handle. Cancellation flags bypass the command queue so they act immediately.
 pub struct WorkerHandle {
+    session: Session,
     tx: Sender<Command>,
     pub events: Receiver<Event>,
     cancel_flow: Arc<AtomicBool>,
@@ -50,6 +57,11 @@ impl WorkerHandle {
         if self.tx.send(cmd).is_err() {
             log::error!("worker thread is gone");
         }
+    }
+
+    /// Who is signed in, kept up to date by the worker (read by the pull request watcher).
+    pub fn session(&self) -> Session {
+        self.session.clone()
     }
 
     /// Thread-safe "please refresh the status" callback (for the file watcher).
@@ -126,7 +138,9 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
     let worker_busy = busy.clone();
     let refresh_pending = Arc::new(AtomicBool::new(false));
     let cancel_net = Arc::new(AtomicBool::new(false));
+    let session: Session = Arc::new(std::sync::Mutex::new(None));
     let mut worker = Worker {
+        session: session.clone(),
         cancel_net: cancel_net.clone(),
         deps,
         token: None,
@@ -165,6 +179,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
         log::error!("could not start worker thread: {e}");
     }
     WorkerHandle {
+        session,
         tx,
         events: erx,
         cancel_flow,
@@ -176,6 +191,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
 }
 
 struct Worker {
+    session: Session,
     deps: WorkerDeps,
     token: Option<String>,
     /// Repository opened last (target of all sub-project 2 commands).
@@ -193,6 +209,14 @@ struct Worker {
 }
 
 impl Worker {
+    /// Signed in (or out): tell the token provider and the watcher.
+    fn set_session(&self, session: Option<(&str, &str)>) {
+        self.deps.tokens.set_login(session.map(|(_, login)| login));
+        if let Ok(mut s) = self.session.lock() {
+            *s = session.map(|(t, l)| (t.to_string(), l.to_string()));
+        }
+    }
+
     fn emit(&self, ev: Event) {
         (self.emit)(ev);
     }
@@ -254,6 +278,18 @@ impl Worker {
             Command::ForcePush => self.force_push(),
             Command::AbortOperation => self.abort_operation(),
             Command::ContinueRebase => self.continue_rebase(),
+            pr @ (Command::LoadPulls { .. }
+            | Command::LoadPull { .. }
+            | Command::LoadRepoMeta(_)
+            | Command::CreatePull { .. }
+            | Command::SubmitReview { .. }
+            | Command::ReplyToThread { .. }
+            | Command::AddPullComment { .. }
+            | Command::AddLineComment { .. }
+            | Command::ResolveThread { .. }
+            | Command::MergePull { .. }
+            | Command::SetLabels { .. }
+            | Command::CheckoutPull { .. }) => self.handle_pulls(pr),
         }
     }
 
@@ -269,6 +305,7 @@ impl Worker {
         logging::add_secret(&token);
         match self.deps.client.current_user(&token) {
             Ok(user) => {
+                self.set_session(Some((&token, &user.login)));
                 self.token = Some(token);
                 self.emit(Event::SignedIn(user));
             }
@@ -294,6 +331,7 @@ impl Worker {
                     // Still signed in for this session; warn that it won't persist.
                     self.fail(Op::Auth, AppError::from_store(&e));
                 }
+                self.set_session(Some((&token, &user.login)));
                 self.token = Some(token);
                 self.emit(Event::SignedIn(user));
             }
@@ -348,6 +386,7 @@ impl Worker {
 
     fn sign_out(&mut self) {
         self.token = None;
+        self.set_session(None);
         if let Err(e) = self.deps.store.clear() {
             self.fail(Op::Auth, AppError::from_store(&e));
         }
@@ -423,6 +462,7 @@ impl Worker {
     /// The token was rejected: forget it everywhere and ask to sign in again.
     fn drop_token(&mut self, during: Op) {
         self.token = None;
+        self.set_session(None);
         let _ = self.deps.store.clear();
         self.fail(during, AppError::from_github(&GithubError::Unauthorized));
         self.emit(Event::SignedOut);

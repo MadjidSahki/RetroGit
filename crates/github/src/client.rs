@@ -67,9 +67,9 @@ impl From<RawRepo> for RepoInfo {
 /// Stateless GitHub client: the token is passed to each call.
 #[derive(Clone)]
 pub struct Client {
-    agent: Agent,
-    api_base: String,
-    web_base: String,
+    pub(crate) agent: Agent,
+    pub(crate) api_base: String,
+    pub(crate) web_base: String,
 }
 
 const USER_AGENT: &str = concat!("RetroGit/", env!("CARGO_PKG_VERSION"));
@@ -167,7 +167,7 @@ impl Client {
         }
     }
 
-    fn api_get(&self, url: &str, token: &str) -> Result<Response<Body>, GithubError> {
+    pub(crate) fn api_get(&self, url: &str, token: &str) -> Result<Response<Body>, GithubError> {
         let resp = self
             .agent
             .get(url)
@@ -177,9 +177,84 @@ impl Client {
             .call()?;
         check(resp)
     }
+
+    /// `POST` / `PUT` / `PATCH` / `DELETE` of a JSON body to `path` (relative to the API base).
+    /// Refusals that GitHub explains (403, 404, 405, 409, 422) become `Rejected { message }`.
+    pub(crate) fn api_send(
+        &self,
+        method: &str,
+        path: &str,
+        token: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<Response<Body>, GithubError> {
+        let url = format!("{}{path}", self.api_base);
+        let auth = format!("Bearer {token}");
+        let with_headers = |b: ureq::RequestBuilder<ureq::typestate::WithBody>| {
+            b.header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("Authorization", auth.as_str())
+        };
+        let json = body.cloned().unwrap_or(serde_json::Value::Null);
+        let resp = match method {
+            "POST" => with_headers(self.agent.post(&url)).send_json(&json)?,
+            "PUT" => with_headers(self.agent.put(&url)).send_json(&json)?,
+            "PATCH" => with_headers(self.agent.patch(&url)).send_json(&json)?,
+            _ if body.is_some() => {
+                with_headers(self.agent.delete(&url).force_send_body()).send_json(&json)?
+            }
+            _ => self
+                .agent
+                .delete(&url)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("Authorization", auth.as_str())
+                .call()?,
+        };
+        check_write(resp)
+    }
 }
 
-fn header<'a>(resp: &'a Response<Body>, name: &str) -> Option<&'a str> {
+/// Like `check`, but a refusal GitHub explains keeps its message.
+fn check_write(resp: Response<Body>) -> Result<Response<Body>, GithubError> {
+    let status = resp.status().as_u16();
+    if (200..300).contains(&status)
+        || status == 401
+        || status == 429
+        || header(&resp, "x-github-sso").is_some()
+        || header(&resp, "x-ratelimit-remaining") == Some("0")
+    {
+        return check(resp);
+    }
+    let text = resp.into_body().read_to_string().unwrap_or_default();
+    if let Some(e) = crate::error::oauth_restriction(&text) {
+        return Err(e);
+    }
+    let message = api_message(&text);
+    if matches!(status, 403 | 404 | 405 | 409 | 422) && !message.is_empty() {
+        Err(GithubError::Rejected { status, message })
+    } else {
+        Err(GithubError::Http(status))
+    }
+}
+
+/// GitHub's explanation in an error body: `message`, plus the validation errors' messages.
+pub(crate) fn api_message(body: &str) -> String {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
+        return String::new();
+    };
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(m) = v["message"].as_str() {
+        parts.push(m.to_string());
+    }
+    for e in v["errors"].as_array().into_iter().flatten() {
+        if let Some(m) = e["message"].as_str().or_else(|| e.as_str()) {
+            parts.push(m.to_string());
+        }
+    }
+    parts.join(": ")
+}
+
+pub(crate) fn header<'a>(resp: &'a Response<Body>, name: &str) -> Option<&'a str> {
     resp.headers().get(name).and_then(|v| v.to_str().ok())
 }
 
@@ -201,7 +276,7 @@ fn partial_sso_orgs(value: &str) -> Vec<String> {
 }
 
 /// Map non-2xx statuses to typed errors.
-fn check(resp: Response<Body>) -> Result<Response<Body>, GithubError> {
+pub(crate) fn check(resp: Response<Body>) -> Result<Response<Body>, GithubError> {
     let status = resp.status().as_u16();
     if (200..300).contains(&status) {
         return Ok(resp);
@@ -217,6 +292,12 @@ fn check(resp: Response<Body>) -> Result<Response<Body>, GithubError> {
     }
     if (status == 403 || status == 429) && header(&resp, "x-ratelimit-remaining") == Some("0") {
         return Err(GithubError::RateLimited);
+    }
+    if status == 403 {
+        let text = resp.into_body().read_to_string().unwrap_or_default();
+        if let Some(e) = crate::error::oauth_restriction(&text) {
+            return Err(e);
+        }
     }
     Err(GithubError::Http(status))
 }
