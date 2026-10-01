@@ -82,6 +82,21 @@ impl Worker {
             } => self.pull_action(&slug, number, s::NOTE_COMMENTED, |c, t, o, r| {
                 c.add_line_comment(t, o, r, number, &commit_id, &comment)
             }),
+            Command::ResolveThread {
+                slug,
+                number,
+                thread_id,
+                resolve,
+            } => {
+                let note = if resolve {
+                    s::NOTE_RESOLVED
+                } else {
+                    s::NOTE_UNRESOLVED
+                };
+                self.pull_action(&slug, number, note, |c, t, _, _| {
+                    c.set_thread_resolved(t, &thread_id, resolve)
+                })
+            }
             Command::SetLabels {
                 slug,
                 number,

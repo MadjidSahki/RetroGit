@@ -367,3 +367,26 @@ fn a_single_line_comment_is_posted_at_once() {
         .unwrap();
     m.assert();
 }
+
+#[test]
+fn threads_are_resolved_and_unresolved_with_graphql() {
+    let mut server = mockito::Server::new();
+    let resolve = server
+        .mock("POST", "/graphql")
+        .match_body(Matcher::AllOf(vec![
+            Matcher::Regex("resolveReviewThread\\(input: \\{ threadId: \\$id \\}\\)".into()),
+            Matcher::PartialJson(json!({ "variables": { "id": "PRRT_1" } })),
+        ]))
+        .with_body(r#"{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}"#)
+        .create();
+    let c = client(&server);
+    c.set_thread_resolved("t", "PRRT_1", true).unwrap();
+    resolve.assert();
+    let unresolve = server
+        .mock("POST", "/graphql")
+        .match_body(Matcher::Regex("unresolveReviewThread".into()))
+        .with_body(r#"{"data":{"unresolveReviewThread":{"thread":{"isResolved":false}}}}"#)
+        .create();
+    c.set_thread_resolved("t", "PRRT_1", false).unwrap();
+    unresolve.assert();
+}

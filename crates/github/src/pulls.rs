@@ -164,6 +164,10 @@ pub struct ThreadComment {
 /// Comments attached to one line of the diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewThread {
+    /// GraphQL node id (resolving uses it).
+    pub id: String,
+    pub can_resolve: bool,
+    pub can_unresolve: bool,
     pub path: String,
     /// Line in the current diff; `None` when the thread is outdated.
     pub line: Option<u32>,
@@ -460,6 +464,9 @@ fn review_state(v: &Value) -> Option<ReviewState> {
 fn thread(t: &Value) -> ReviewThread {
     let line = |v: &Value| v.as_u64().map(|n| n as u32);
     ReviewThread {
+        id: text(&t["id"]),
+        can_resolve: t["viewerCanResolve"].as_bool().unwrap_or(false),
+        can_unresolve: t["viewerCanUnresolve"].as_bool().unwrap_or(false),
         path: text(&t["path"]),
         line: line(&t["line"]),
         original_line: line(&t["originalLine"]),

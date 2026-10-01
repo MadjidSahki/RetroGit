@@ -164,7 +164,8 @@ fn detail_json() -> serde_json::Value {
                       "submittedAt": null }
                 ] },
                 "reviewThreads": { "nodes": [
-                    { "isResolved": false, "isOutdated": false, "path": "src/a.rs",
+                    { "id": "PRRT_1", "viewerCanResolve": true, "viewerCanUnresolve": false,
+                      "isResolved": false, "isOutdated": false, "path": "src/a.rs",
                       "line": 12, "originalLine": 12, "diffSide": "RIGHT",
                       "comments": { "nodes": [
                         { "databaseId": 991, "author": { "login": "bob" }, "body": "Why?",
@@ -246,6 +247,9 @@ fn pull_detail_parses_timeline_threads_and_merge_options() {
     assert_eq!(d.threads[0].line, Some(12));
     assert_eq!(d.threads[0].side, DiffSide::Right);
     assert_eq!(d.threads[0].comments[1].id, 992);
+    assert_eq!(d.threads[0].id, "PRRT_1");
+    assert!(d.threads[0].can_resolve && !d.threads[0].can_unresolve);
+    assert!(!d.threads[1].can_resolve, "missing fields: not allowed");
     assert!(d.threads[1].outdated && d.threads[1].resolved);
     assert_eq!(d.threads[1].line, None);
     assert_eq!(d.threads[1].side, DiffSide::Left);

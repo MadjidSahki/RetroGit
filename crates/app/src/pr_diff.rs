@@ -203,6 +203,9 @@ mod tests {
     fn threads_are_found_on_their_line_and_side() {
         let d = parse_patch("a", Some(PATCH));
         let t = |line: Option<u32>, side, outdated| ReviewThread {
+            id: "PRRT_1".into(),
+            can_resolve: true,
+            can_unresolve: false,
             path: "a".into(),
             line,
             original_line: line,

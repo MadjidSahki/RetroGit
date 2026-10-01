@@ -134,6 +134,12 @@ pub enum Command {
         number: u64,
         body: String,
     },
+    ResolveThread {
+        slug: Slug,
+        number: u64,
+        thread_id: String,
+        resolve: bool,
+    },
     /// A line comment posted at once, outside a review.
     AddLineComment {
         slug: Slug,

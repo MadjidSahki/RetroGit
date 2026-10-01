@@ -283,6 +283,30 @@ fn a_single_line_comment_is_sent_then_the_pull_request_reloaded() {
 }
 
 #[test]
+fn a_thread_is_resolved_then_the_pull_request_reloaded() {
+    let mut server = mockito::Server::new();
+    let w = signed_in(&mut server, TokenProvider::without_gh());
+    let resolve = server
+        .mock("POST", "/graphql")
+        .match_body(Matcher::Regex("resolveReviewThread".into()))
+        .with_body(r#"{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}"#)
+        .create();
+    let (_d, _f) = mock_detail(&mut server, 7);
+    w.send(Command::ResolveThread {
+        slug: slug(),
+        number: 7,
+        thread_id: "PRRT_1".into(),
+        resolve: true,
+    });
+    let evs = until(&w, |e| matches!(e, Event::PullFilesLoaded { .. }));
+    resolve.assert();
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, Event::PullActionDone { number: 7, .. }))
+    );
+}
+
+#[test]
 fn a_merge_on_a_moved_head_is_refused_and_reloaded() {
     let mut server = mockito::Server::new();
     let w = signed_in(&mut server, TokenProvider::without_gh());

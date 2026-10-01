@@ -230,6 +230,22 @@ impl Client {
         .map(|_| ())
     }
 
+    /// Mark a line-comment thread resolved (`true`) or not (GraphQL only).
+    pub fn set_thread_resolved(
+        &self,
+        token: &str,
+        thread_id: &str,
+        resolved: bool,
+    ) -> Result<(), GithubError> {
+        let mutation = if resolved {
+            "mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { isResolved } } }"
+        } else {
+            "mutation($id: ID!) { unresolveReviewThread(input: { threadId: $id }) { thread { isResolved } } }"
+        };
+        self.graphql(token, mutation, json!({ "id": thread_id }))
+            .map(|_| ())
+    }
+
     /// Comment in the conversation.
     pub fn add_issue_comment(
         &self,

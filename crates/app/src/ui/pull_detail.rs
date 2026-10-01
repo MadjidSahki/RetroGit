@@ -36,6 +36,33 @@ pub fn review_verb(state: ReviewState) -> &'static str {
     }
 }
 
+/// `Some(true)`: the viewer may resolve the thread, `Some(false)`: unresolve it.
+pub fn resolve_action(t: &github::ReviewThread) -> Option<bool> {
+    match (t.resolved, t.can_resolve, t.can_unresolve) {
+        (false, true, _) => Some(true),
+        (true, _, true) => Some(false),
+        _ => None,
+    }
+}
+
+fn resolve_label(resolve: bool) -> &'static str {
+    if resolve { s::RESOLVE } else { s::UNRESOLVE }
+}
+
+/// Ask the worker to (un)resolve thread `id` of the shown pull request.
+fn send_resolve(cx: &mut Ctx<'_>, number: u64, id: String, resolve: bool) {
+    let Some(slug) = cx.state.github_slug() else {
+        return;
+    };
+    cx.state.pulls.busy = true;
+    cx.worker.send(Command::ResolveThread {
+        slug,
+        number,
+        thread_id: id,
+        resolve,
+    });
+}
+
 /// "2m 05s" from two ISO timestamps.
 pub fn duration_text(start: Option<&str>, end: Option<&str>) -> String {
     let (Some(a), Some(b)) = (
@@ -210,6 +237,8 @@ fn boxed(ui: &mut egui::Ui, title: &str, body: &str) {
 
 fn conversation(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug, d: &PrDetail) {
     let mut send = false;
+    let mut toggle: Option<(String, bool)> = None;
+    let busy = cx.state.pulls.busy;
     ScrollArea::vertical()
         .id_salt(("pull_conversation", d.summary.number))
         .auto_shrink([false, false])
@@ -256,6 +285,13 @@ fn conversation(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug, d: &PrDetail) 
                     .collect::<Vec<_>>()
                     .join("\n\n");
                 boxed(ui, &title, &body);
+                if let Some(resolve) = resolve_action(t)
+                    && ui
+                        .add(Button95::new(resolve_label(resolve)).enabled(!busy))
+                        .clicked()
+                {
+                    toggle = Some((t.id.clone(), resolve));
+                }
             }
             ui.add_space(6.0);
             let width = ui.available_width() - 12.0;
@@ -265,6 +301,9 @@ fn conversation(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug, d: &PrDetail) 
                 send = true;
             }
         });
+    if let Some((id, resolve)) = toggle {
+        send_resolve(cx, d.summary.number, id, resolve);
+    }
     if send && let Some(body) = cx.state.pulls.send_comment() {
         cx.worker.send(Command::AddPullComment {
             slug: slug.clone(),
@@ -446,6 +485,8 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     let rows = file_rows(diff, &d.threads, &p.pending);
     let mut comment_on: Option<(String, u32, DiffSide, String)> = None;
     let mut reply_to: Option<u64> = None;
+    let mut toggle: Option<(String, bool)> = None;
+    let busy = p.busy;
     let mut drop_pending: Option<usize> = None;
     ScrollArea::both()
         .id_salt(("pull_file_diff", d.summary.number, &diff.path))
@@ -526,6 +567,16 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                                 if ui.button(s::REPLY).clicked() {
                                     reply_to = Some(comment.id);
                                 }
+                                if let Some(resolve) = resolve_action(thread)
+                                    && ui
+                                        .add_enabled(
+                                            !busy,
+                                            egui::Button::new(resolve_label(resolve)),
+                                        )
+                                        .clicked()
+                                {
+                                    toggle = Some((thread.id.clone(), resolve));
+                                }
                             });
                         }
                     }
@@ -560,6 +611,10 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
             body: String::new(),
         });
     }
+    if let Some((id, resolve)) = toggle {
+        send_resolve(cx, d.summary.number, id, resolve);
+    }
+    let p = &mut cx.state.pulls;
     if let Some(comment_id) = reply_to {
         p.dialog = Some(PullDialog::Reply {
             comment_id,
@@ -582,6 +637,9 @@ mod tests {
     fn comments_are_listed_under_their_line() {
         let diff = crate::pr_diff::parse_patch("a.rs", Some("@@ -1,2 +1,2 @@\n a\n-b\n+B"));
         let thread = ReviewThread {
+            id: "PRRT_1".into(),
+            can_resolve: true,
+            can_unresolve: false,
             path: "a.rs".into(),
             line: Some(2),
             original_line: Some(2),
@@ -621,6 +679,30 @@ mod tests {
                 FileRow::Comment(0, 1),
             ]
         );
+    }
+
+    #[test]
+    fn threads_offer_resolve_or_unresolve_when_allowed() {
+        let t = |resolved, can_resolve, can_unresolve| ReviewThread {
+            id: "PRRT_1".into(),
+            can_resolve,
+            can_unresolve,
+            path: "a".into(),
+            line: Some(1),
+            original_line: Some(1),
+            side: DiffSide::Right,
+            outdated: false,
+            resolved,
+            comments: vec![],
+        };
+        assert_eq!(resolve_action(&t(false, true, false)), Some(true));
+        assert_eq!(resolve_action(&t(true, false, true)), Some(false));
+        assert_eq!(
+            resolve_action(&t(false, false, false)),
+            None,
+            "no permission"
+        );
+        assert_eq!(resolve_action(&t(true, true, false)), None);
     }
 
     #[test]

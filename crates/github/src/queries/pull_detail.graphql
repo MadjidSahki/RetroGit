@@ -57,6 +57,9 @@ query PullDetail($owner: String!, $name: String!, $number: Int!) {
       reviews(last: 100) { nodes { author { login } state body submittedAt } }
       reviewThreads(first: 100) {
         nodes {
+          id
+          viewerCanResolve
+          viewerCanUnresolve
           isResolved
           isOutdated
           path
