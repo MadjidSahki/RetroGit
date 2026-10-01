@@ -84,8 +84,7 @@ fn main() -> eframe::Result {
                 commit_backend: gitcore::CommitBackend::PreferCli,
             };
             let worker = spawn(deps, move || repaint.request_repaint());
-            let mut state = AppState::new(config);
-            state.ides = retrogit::ide::detect();
+            let state = AppState::new(config);
             let app = RetroGitApp::new(state, worker, config_path, cc.egui_ctx.clone());
             Ok(Box::new(app.with_instance(
                 data_dir.as_deref(),

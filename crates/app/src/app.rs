@@ -20,6 +20,8 @@ pub struct RetroGitApp {
     was_focused: bool,
     highlighter: crate::highlight::Service,
     highlighted: std::sync::mpsc::Receiver<crate::highlight::Highlighted>,
+    /// Result of the IDE detection started at launch.
+    ides: Option<std::sync::mpsc::Receiver<Vec<crate::ide::Ide>>>,
     notices_tx: std::sync::mpsc::Sender<crate::protocol::AppError>,
     notices: std::sync::mpsc::Receiver<crate::protocol::AppError>,
     /// Folders sent by `retrogit` from a terminal (see `instance`).
@@ -36,13 +38,21 @@ impl RetroGitApp {
         ctx: egui::Context,
     ) -> RetroGitApp {
         worker.send(Command::ValidateToken);
+        let ides_ctx = ctx.clone();
         let (tx, highlighted) = std::sync::mpsc::channel();
         let highlighter = crate::highlight::Service::start(move |h| {
             let _ = tx.send(h);
             ctx.request_repaint();
         });
         let (notices_tx, notices) = std::sync::mpsc::channel();
+        let (ides_tx, ides) = std::sync::mpsc::channel();
+        let repaint = ides_ctx;
+        std::thread::spawn(move || {
+            let _ = ides_tx.send(crate::ide::detect());
+            repaint.request_repaint();
+        });
         RetroGitApp {
+            ides: Some(ides),
             notices_tx,
             notices,
             to_open: None,
@@ -131,6 +141,10 @@ impl eframe::App for RetroGitApp {
             self.worker.send(Command::OpenRepo(path));
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+        if let Some(found) = self.ides.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.state.ides = found;
+            self.ides = None;
         }
         while let Ok(notice) = self.notices.try_recv() {
             self.state.messages.push_back(notice);

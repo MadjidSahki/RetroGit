@@ -145,7 +145,35 @@ pub fn detect_windows(
         .collect()
 }
 
-/// Installed IDEs on this machine (file checks only, plus `vswhere` on Windows).
+/// Apps known to macOS (LaunchServices) from `lsregister -dump` output: top-level `.app`
+/// bundles that still exist (`exists`), outside the Trash and Gatekeeper's temporary
+/// translocation copies. Finds apps run from ~/Downloads or elsewhere.
+pub fn registered_apps(dump: &str, exists: &dyn Fn(&Path) -> bool) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for line in dump.lines() {
+        let Some(rest) = line.strip_prefix("path:") else {
+            continue;
+        };
+        let rest = rest.trim();
+        // "path: /Applications/Rider.app (0x154c)"
+        let path = match rest.rfind(" (0x") {
+            Some(i) => &rest[..i],
+            None => rest,
+        };
+        let nested = path.trim_end_matches(".app").contains(".app/");
+        let skipped = path.contains("/.Trash/") || path.contains("/AppTranslocation/");
+        if !path.ends_with(".app") || nested || skipped {
+            continue;
+        }
+        let p = PathBuf::from(path);
+        if !out.contains(&p) && exists(&p) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Installed IDEs on this machine. Slow (a few seconds on macOS): call it off the UI thread.
 pub fn detect() -> Vec<Ide> {
     #[cfg(target_os = "macos")]
     {
@@ -159,6 +187,18 @@ pub fn detect() -> Vec<Ide> {
             if let Ok(entries) = std::fs::read_dir(dir) {
                 apps.extend(entries.flatten().map(|e| e.path()));
             }
+        }
+        // Apps anywhere else (e.g. VS Code run from ~/Downloads): ask LaunchServices.
+        const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+        if let Ok(out) = std::process::Command::new(LSREGISTER)
+            .arg("-dump")
+            .stderr(Stdio::null())
+            .output()
+        {
+            apps.extend(registered_apps(
+                &String::from_utf8_lossy(&out.stdout),
+                &|p| p.exists(),
+            ));
         }
         detect_mac(&apps)
     }
@@ -358,6 +398,70 @@ mod tests {
             Some(PathBuf::from(r"C:\x y\idea64.exe"))
         );
         assert_eq!(toolbox_exe("echo hi"), None);
+    }
+
+    #[test]
+    fn apps_registered_with_macos_are_found_wherever_they_are() {
+        // VS Code run from ~/Downloads is not in /Applications, but macOS knows it.
+        let dump = "\
+path:                       /Applications/Rider.app (0x154c)
+path:                       /Applications/Rider.app/Contents/jbr/Frameworks/cef_server.app (0x1b44)
+path:                       /Users/me/.Trash/Rider.app (0x1bbc)
+path:                       /Users/me/Downloads/Visual Studio Code.app (0x1788)
+path:                       /private/var/folders/m6/T/AppTranslocation/D3/d/Visual Studio Code.app (0x1d78)
+name:                       Something else
+";
+        let apps = registered_apps(dump, &|_| true);
+        assert_eq!(
+            apps,
+            [
+                PathBuf::from("/Applications/Rider.app"),
+                PathBuf::from("/Users/me/Downloads/Visual Studio Code.app")
+            ]
+        );
+        let ids: Vec<String> = detect_mac(&apps).into_iter().map(|i| i.id).collect();
+        assert_eq!(ids, ["vscode", "rider"]);
+        assert!(
+            registered_apps(dump, &|p| !p.starts_with("/Applications"))
+                .iter()
+                .all(|p| !p.starts_with("/Applications")),
+            "deleted apps are skipped"
+        );
+    }
+
+    #[test]
+    fn an_app_found_twice_is_listed_once() {
+        let apps = vec![
+            PathBuf::from("/Users/me/Downloads/Visual Studio Code.app"),
+            PathBuf::from("/Users/me/Downloads/Visual Studio Code.app"),
+            PathBuf::from("/Applications/Rider.app"),
+        ];
+        assert_eq!(detect_mac(&apps).len(), 2);
+    }
+
+    #[test]
+    fn launch_commands() {
+        let app = Ide {
+            id: "rider".into(),
+            name: "Rider".into(),
+            program: PathBuf::from("/Applications/Rider.app"),
+        };
+        let (prog, args) = launch_args(&app, Path::new("/w/my repo"), true);
+        assert_eq!(prog, PathBuf::from("open"));
+        assert_eq!(args, ["-a", "/Applications/Rider.app", "/w/my repo"]);
+        // Windows always starts the exe directly (no cmd: "R&D" or "%x%" in a path stay literal).
+        let r = Ide {
+            id: "rider".into(),
+            name: "Rider".into(),
+            program: PathBuf::from(r"C:\R\rider64.exe"),
+        };
+        assert_eq!(
+            launch_args(&r, Path::new(r"C:\w\R&D"), false),
+            (
+                PathBuf::from(r"C:\R\rider64.exe"),
+                vec![r"C:\w\R&D".to_string()]
+            )
+        );
     }
 
     #[test]
