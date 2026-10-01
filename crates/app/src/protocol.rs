@@ -334,7 +334,7 @@ impl AppError {
             GithubError::Unauthorized => AppError::new(Severity::Warning, s::ERR_UNAUTHORIZED),
             GithubError::SsoRequired { url } => {
                 let mut a = AppError::new(Severity::Warning, s::ERR_SSO);
-                a.link = Some(url.clone());
+                a.link = (!url.is_empty()).then(|| url.clone());
                 a
             }
             GithubError::RateLimited => AppError::new(Severity::Warning, s::ERR_RATE_LIMIT),

@@ -56,7 +56,9 @@ fn list_pulls_parses_checks_reviews_and_labels() {
     let m = server
         .mock("POST", "/graphql")
         .match_body(Matcher::PartialJson(json!({
-            "variables": { "q": "repo:o/r is:pr is:open author:@me sort:updated-desc" }
+            // `owner`/`name` let GitHub report an OAuth restriction (search alone hides it).
+            "variables": { "q": "repo:o/r is:pr is:open author:@me sort:updated-desc",
+                           "owner": "o", "name": "r" }
         })))
         .with_body(
             json!({ "data": { "search": { "nodes": [
@@ -177,6 +179,24 @@ fn detail_json() -> serde_json::Value {
             }
         }
     } })
+}
+
+#[test]
+fn a_restricted_repository_is_reported_by_the_list() {
+    let mut server = mockito::Server::new();
+    server
+        .mock("POST", "/graphql")
+        .match_body(Matcher::Regex("repository\\(owner: \\$owner, name: \\$name\\)".into()))
+        .with_body(r#"{"data":{"repository":null,"search":{"nodes":[]}},"errors":[{"type":"FORBIDDEN","path":["repository"],"message":"the `o` organization has enabled OAuth App access restrictions"}]}"#)
+        .create();
+    assert_eq!(
+        client(&server)
+            .list_pulls("t", "o", "r", PrFilter::Open)
+            .err(),
+        Some(GithubError::OAuthRestricted {
+            org: Some("o".into())
+        })
+    );
 }
 
 #[test]

@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 
 use crate::GithubError;
-use crate::client::{Client, check};
+use crate::client::{Client, check, header};
 use crate::error::oauth_restriction;
 
 /// Data of a GraphQL response, and the errors GitHub returned alongside it.
@@ -44,12 +44,16 @@ impl Client {
             .header("Authorization", format!("Bearer {token}"))
             .send_json(json!({ "query": query, "variables": variables }))?;
         let mut resp = check(resp)?;
+        // GraphQL answers 200 even when SSO is missing; the header carries the link.
+        let sso_url = header(&resp, "x-github-sso")
+            .and_then(|h| h.split("url=").nth(1))
+            .map(|u| u.trim().to_string());
         let body: Value = resp.body_mut().read_json()?;
         let errors: Vec<GithubError> = body["errors"]
             .as_array()
             .into_iter()
             .flatten()
-            .map(typed_error)
+            .map(|e| typed_error(e, sso_url.as_deref()))
             .collect();
         let data = body.get("data").cloned().unwrap_or(Value::Null);
         if data.is_null() {
@@ -62,10 +66,15 @@ impl Client {
     }
 }
 
-fn typed_error(e: &Value) -> GithubError {
+fn typed_error(e: &Value, sso_url: Option<&str>) -> GithubError {
     let message = e["message"].as_str().unwrap_or("unknown error");
     if let Some(r) = oauth_restriction(message) {
         return r;
+    }
+    if message.contains("SAML enforcement") {
+        return GithubError::SsoRequired {
+            url: sso_url.unwrap_or_default().to_string(),
+        };
     }
     if e["type"].as_str() == Some("RATE_LIMITED") {
         return GithubError::RateLimited;

@@ -80,7 +80,14 @@ impl TokenProvider {
         if (primary.is_none() || self.is_restricted(owner))
             && let Some(gh) = self.gh_token()
         {
-            return call(&gh);
+            return call(&gh).map_err(|e| match e {
+                // gh's token was refused: report the restriction, never a refusal of
+                // RetroGit's own token (callers sign the user out on `Unauthorized`).
+                GithubError::Unauthorized if primary.is_some() => GithubError::OAuthRestricted {
+                    org: Some(owner.to_string()),
+                },
+                other => other,
+            });
         }
         let Some(primary) = primary else {
             return Err(GithubError::Unauthorized);
@@ -113,8 +120,8 @@ pub fn parse_gh_token(stdout: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Ask the GitHub CLI for its github.com token: for account `user` if `gh` knows it, else
-/// for its active account. `path` replaces PATH (apps started from the Finder get a
+/// Ask the GitHub CLI for its github.com token: for account `user` only (RetroGit must not
+/// act as another account), or for its active account when no `user` is given. `path` replaces PATH (apps started from the Finder get a
 /// minimal one). The caller's `GH_TOKEN` / `GITHUB_TOKEN` are not passed on, so `gh`
 /// answers from its own login. Blocking (runs a process).
 pub fn gh_auth_token(path: Option<&str>, user: Option<&str>) -> Option<String> {
@@ -144,5 +151,5 @@ pub fn gh_auth_token(path: Option<&str>, user: Option<&str>) -> Option<String> {
         }
         parse_gh_token(&String::from_utf8_lossy(&out.stdout))
     };
-    user.and_then(|u| run(Some(u))).or_else(|| run(None))
+    run(user)
 }

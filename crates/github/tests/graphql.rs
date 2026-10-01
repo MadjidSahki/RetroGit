@@ -202,6 +202,62 @@ fn provider_asks_gh_for_the_signed_in_account() {
 }
 
 #[test]
+fn a_rejected_gh_token_for_a_remembered_owner_reports_the_restriction() {
+    let p = provider(Some("gho_cli"), Arc::new(AtomicUsize::new(0)));
+    let call = |t: &str| {
+        if t == "gho_app" {
+            Err::<(), _>(restricted())
+        } else {
+            Ok(())
+        }
+    };
+    p.with_token(Some("gho_app"), "ExampleOrg", call).unwrap();
+    // Later, gh's token is revoked: never report it as RetroGit's own token being refused
+    // (that would sign the user out).
+    let r: Result<(), _> = p.with_token(Some("gho_app"), "ExampleOrg", |t| {
+        if t == "gho_app" {
+            Err(restricted())
+        } else {
+            Err(GithubError::Unauthorized)
+        }
+    });
+    assert_eq!(
+        r,
+        Err(GithubError::OAuthRestricted {
+            org: Some("ExampleOrg".into())
+        })
+    );
+}
+
+#[test]
+fn graphql_sso_errors_are_typed() {
+    let mut server = mockito::Server::new();
+    server
+        .mock("POST", "/graphql")
+        .with_header(
+            "x-github-sso",
+            "required; url=https://github.com/orgs/ExampleOrg/sso?authorization_request=x",
+        )
+        .with_body(r#"{"data":{"repository":null},"errors":[{"type":"FORBIDDEN","message":"Resource protected by organization SAML enforcement. You must grant your OAuth token access to this organization."}]}"#)
+        .create();
+    assert_eq!(
+        client(&server).graphql("t", "q", json!({})).err(),
+        Some(GithubError::SsoRequired {
+            url: "https://github.com/orgs/ExampleOrg/sso?authorization_request=x".into()
+        })
+    );
+    let mut server = mockito::Server::new();
+    server
+        .mock("POST", "/graphql")
+        .with_body(r#"{"errors":[{"type":"FORBIDDEN","message":"Resource protected by organization SAML enforcement."}]}"#)
+        .create();
+    assert_eq!(
+        client(&server).graphql("t", "q", json!({})).err(),
+        Some(GithubError::SsoRequired { url: String::new() })
+    );
+}
+
+#[test]
 fn gh_token_output_is_parsed() {
     assert_eq!(
         github::parse_gh_token("gho_abc\n").as_deref(),
@@ -234,10 +290,8 @@ fn gh_auth_token_runs_the_cli_without_the_callers_token() {
         github::gh_auth_token(Some(&path), Some("ada")).as_deref(),
         Some("gho_for_ada")
     );
-    assert_eq!(
-        github::gh_auth_token(Some(&path), Some("bob")).as_deref(),
-        Some("gho_active")
-    );
+    // gh does not know RetroGit's account: never act as gh's other (active) account.
+    assert_eq!(github::gh_auth_token(Some(&path), Some("bob")), None);
     assert_eq!(
         github::gh_auth_token(Some(&path), None).as_deref(),
         Some("gho_active")

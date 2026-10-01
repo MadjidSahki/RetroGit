@@ -464,6 +464,37 @@ mod checkout {
     }
 
     #[test]
+    fn an_existing_local_branch_is_brought_up_to_date() {
+        let Some((_tmp, work)) = env() else { return };
+        let server = mockito::Server::new();
+        let w = start(&server, TokenProvider::without_gh());
+        w.send(Command::OpenRepo(work.clone()));
+        until(&w, |e| matches!(e, Event::SyncFinished { .. }));
+        w.send(Command::CheckoutPull {
+            number: 2,
+            head: Some("feat/x".into()),
+        });
+        until(&w, |e| matches!(e, Event::PullActionDone { .. }));
+        // The author pushes again; the reviewer is back on main, then checks out again.
+        let seed = work.parent().unwrap().join("seed");
+        git(&seed, &["switch", "-q", "feat/x"]);
+        std::fs::write(seed.join("y.txt"), "y\n").unwrap();
+        git(&seed, &["add", "y.txt"]);
+        git(&seed, &["commit", "-q", "-m", "y"]);
+        git(&seed, &["push", "-q", "origin", "feat/x"]);
+        git(&work, &["switch", "-q", "main"]);
+        w.send(Command::CheckoutPull {
+            number: 2,
+            head: Some("feat/x".into()),
+        });
+        until(&w, |e| matches!(e, Event::PullActionDone { .. }));
+        assert!(
+            work.join("y.txt").exists(),
+            "fast-forwarded to the pull request"
+        );
+    }
+
+    #[test]
     fn local_changes_in_the_way_ask_to_stash() {
         let Some((_tmp, work)) = env() else { return };
         let server = mockito::Server::new();

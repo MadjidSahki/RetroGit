@@ -383,7 +383,10 @@ impl AppState {
             }
             Op::Commit => self.changes.committing = false,
             Op::Pulls => self.pulls.loading = false,
-            Op::PullAction => self.pulls.busy = false,
+            Op::PullAction => {
+                self.pulls.busy = false;
+                self.pulls.comment_sent = false;
+            }
             Op::Internal => {
                 self.repos_loading = false;
                 self.pulls.loading = false;

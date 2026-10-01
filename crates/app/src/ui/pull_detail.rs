@@ -62,7 +62,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
         };
         header(ui, cx, &d);
         ui.separator();
-        let files = cx.state.pulls.files.as_ref().map(Vec::len).unwrap_or(0);
+        let files = cx.state.pulls.files.as_ref().map(|f| f.len()).unwrap_or(0);
         let labels = [
             s::PULL_CONVERSATION.to_string(),
             format!("{} ({})", s::PULL_COMMITS, d.commit_count),
@@ -234,9 +234,21 @@ fn conversation(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug, d: &PrDetail) 
                     } => boxed(ui, &format!("{author} {}  {at}", review_verb(*state)), body),
                 }
             }
-            for t in d.threads.iter().filter(|t| t.outdated) {
-                let line = t.original_line.map(|l| format!(":{l}")).unwrap_or_default();
-                let title = format!("{}{line} ({})", t.path, s::OUTDATED);
+            // Every line thread, also shown under its line in Files when it can be placed.
+            for t in &d.threads {
+                let line = t
+                    .line
+                    .or(t.original_line)
+                    .map(|l| format!(":{l}"))
+                    .unwrap_or_default();
+                let tag = if t.outdated {
+                    format!(" ({})", s::OUTDATED)
+                } else if t.resolved {
+                    format!(" ({})", s::RESOLVED)
+                } else {
+                    String::new()
+                };
+                let title = format!("{}{line}{tag}", t.path);
                 let body = t
                     .comments
                     .iter()
@@ -253,13 +265,11 @@ fn conversation(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug, d: &PrDetail) 
                 send = true;
             }
         });
-    if send {
-        let p = &mut cx.state.pulls;
-        p.busy = true;
+    if send && let Some(body) = cx.state.pulls.send_comment() {
         cx.worker.send(Command::AddPullComment {
             slug: slug.clone(),
             number: d.summary.number,
-            body: std::mem::take(&mut p.comment),
+            body,
         });
     }
 }
@@ -390,7 +400,7 @@ fn files_tab(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                 .id_salt(("pull_files_list", d.summary.number))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    for f in &files {
+                    for f in files.iter() {
                         let selected = cx.state.pulls.file.as_deref() == Some(f.path.as_str());
                         let letter = match f.status.as_str() {
                             "added" => "A",

@@ -53,6 +53,19 @@ impl Repo {
             .is_ok_and(|o| o.success)
     }
 
+    /// Fast-forward the current branch to `onto` (e.g. `origin/feature`) when it has no
+    /// commits of its own. Returns whether it moved.
+    pub fn fast_forward(&self, onto: &str) -> Result<bool, GitError> {
+        let (Some(head), Some(target)) = (self.rev("HEAD"), self.rev(onto)) else {
+            return Ok(false);
+        };
+        if head == target || !self.is_ancestor(&head, &target) {
+            return Ok(false);
+        }
+        self.git_ok(&["merge", "--ff-only", onto])?;
+        Ok(true)
+    }
+
     /// Fetch the head of pull request `number` (works for forks: `refs/pull/N/head`) into
     /// the local branch `pr/N`, without switching to it. An existing `pr/N` moves forward;
     /// after a force-push it follows the pull request only if it has no commits of its own.

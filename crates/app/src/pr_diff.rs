@@ -105,15 +105,25 @@ pub fn line_target(line: &DiffLine) -> Option<(u32, DiffSide)> {
     }
 }
 
-/// Indexes of the current (not outdated) threads of `path` attached to `line`.
+/// Indexes of the current (not outdated) threads of `path` attached to `line`. Context
+/// lines can carry threads on either side (github.com's split view has both columns).
 pub fn threads_at(threads: &[ReviewThread], path: &str, line: &DiffLine) -> Vec<usize> {
-    let Some((n, side)) = line_target(line) else {
-        return Vec::new();
-    };
+    let mut targets: Vec<(u32, DiffSide)> = line_target(line).into_iter().collect();
+    if line.kind == LineKind::Context
+        && let Some(old) = line.old_no
+    {
+        targets.push((old, DiffSide::Left));
+    }
     threads
         .iter()
         .enumerate()
-        .filter(|(_, t)| !t.outdated && t.path == path && t.line == Some(n) && t.side == side)
+        .filter(|(_, t)| {
+            !t.outdated
+                && t.path == path
+                && targets
+                    .iter()
+                    .any(|(n, side)| t.line == Some(*n) && t.side == *side)
+        })
         .map(|(i, _)| i)
         .collect()
 }
@@ -211,6 +221,9 @@ mod tests {
             },
         ];
         let l = &d.hunks[0].lines;
+        // A context line can be commented on either column (split view on github.com).
+        let left_context = vec![t(Some(1), DiffSide::Left, false)];
+        assert_eq!(threads_at(&left_context, "a", &l[0]), [0]);
         assert_eq!(threads_at(&threads, "a", &l[1]), [0]);
         assert_eq!(threads_at(&threads, "a", &l[2]), [1]);
         assert!(threads_at(&threads, "a", &l[0]).is_empty());

@@ -263,7 +263,7 @@ impl Client {
         let data = self.graphql(
             token,
             LIST_QUERY,
-            json!({ "q": search_query(owner, repo, filter) }),
+            json!({ "q": search_query(owner, repo, filter), "owner": owner, "name": repo }),
         )?;
         Ok(nodes(&data["search"])
             .filter(|n| n["number"].is_u64())

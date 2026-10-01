@@ -252,10 +252,24 @@ impl Worker {
                 // Local changes in the way: the usual "stash and switch" dialog appears.
                 self.switch_branch(&name, false);
                 let branch = name.trim_start_matches("origin/");
-                let switched = self
-                    .open_current(Op::PullAction)
+                let repo = self.open_current(Op::PullAction);
+                let switched = repo
+                    .as_ref()
                     .and_then(|r| r.current_branch())
                     .is_some_and(|b| b.name == branch);
+                // A branch checked out before may be behind the pull request: follow
+                // `origin` when the local branch has no commits of its own.
+                if switched
+                    && !name.starts_with("origin/")
+                    && !branch.starts_with("pr/")
+                    && let Some(r) = &repo
+                {
+                    match r.fast_forward(&format!("origin/{branch}")) {
+                        Ok(true) => self.after_ref_change(r),
+                        Ok(false) => {}
+                        Err(e) => self.fail(Op::PullAction, AppError::from_git(&e)),
+                    }
+                }
                 if switched {
                     self.emit(Event::PullActionDone {
                         number,

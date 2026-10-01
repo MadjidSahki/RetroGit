@@ -6,6 +6,8 @@ use github::{
     ReviewEvent,
 };
 
+use std::sync::Arc;
+
 use super::AppState;
 use crate::protocol::{Event, Slug};
 use crate::strings as s;
@@ -68,8 +70,9 @@ pub struct PullsView {
     /// The list must be (re)loaded when the tab is shown.
     pub stale: bool,
     pub selected: Option<u64>,
-    pub detail: Option<PrDetail>,
-    pub files: Option<Vec<PrFile>>,
+    /// Shared: the UI takes a cheap handle every frame instead of copying it.
+    pub detail: Option<Arc<PrDetail>>,
+    pub files: Option<Arc<Vec<PrFile>>>,
     pub sub_tab: PullTab,
     /// File shown in the Files tab, its diff and syntax colors.
     pub file: Option<String>,
@@ -79,6 +82,8 @@ pub struct PullsView {
     pub pending: Vec<LineComment>,
     /// Conversation comment being typed.
     pub comment: String,
+    /// `comment` was sent: cleared once GitHub accepted it, kept after an error.
+    pub comment_sent: bool,
     /// A change is being sent.
     pub busy: bool,
     pub dialog: Option<PullDialog>,
@@ -111,8 +116,19 @@ impl PullsView {
             self.file_colors = crate::highlight::Colors::NotRequested;
             self.pending.clear();
             self.comment.clear();
+            self.comment_sent = false;
             self.sub_tab = PullTab::Conversation;
         }
+    }
+
+    /// The comment to send, if any; it stays in the box until GitHub accepted it.
+    pub fn send_comment(&mut self) -> Option<String> {
+        if self.comment.trim().is_empty() {
+            return None;
+        }
+        self.busy = true;
+        self.comment_sent = true;
+        Some(self.comment.clone())
     }
 
     /// Show `path` of the selected pull request in the Files tab.
@@ -254,7 +270,7 @@ impl AppState {
                     {
                         *row = detail.summary.clone();
                     }
-                    p.detail = Some(*detail);
+                    p.detail = Some(Arc::new(*detail));
                 }
             }
             Event::PullFilesLoaded {
@@ -263,10 +279,15 @@ impl AppState {
                 files,
             } => {
                 if p.slug.as_ref() == Some(&slug) && p.selected == Some(number) {
-                    p.files = Some(files);
+                    p.files = Some(Arc::new(files));
                     // Same file still there: refresh its diff (new commits), else clear.
                     match p.file.clone() {
-                        Some(path) if p.files.iter().flatten().any(|f| f.path == path) => {
+                        Some(path)
+                            if p.files
+                                .iter()
+                                .flat_map(|f| f.iter())
+                                .any(|f| f.path == path) =>
+                        {
                             p.open_file(&path)
                         }
                         _ => {
@@ -303,6 +324,10 @@ impl AppState {
                     // The review went through with its line comments.
                     if matches!(p.dialog, Some(PullDialog::Review { .. })) {
                         p.pending.clear();
+                    }
+                    if p.comment_sent {
+                        p.comment.clear();
+                        p.comment_sent = false;
                     }
                     p.dialog = None;
                 }

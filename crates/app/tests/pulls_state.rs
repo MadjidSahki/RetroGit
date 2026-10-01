@@ -277,6 +277,50 @@ fn pending_comments_are_cleared_only_when_the_review_went_through() {
 }
 
 #[test]
+fn a_conversation_comment_is_kept_until_github_accepts_it() {
+    let mut st = opened(Some("https://github.com/o/r"));
+    st.pulls.select(4);
+    st.pulls.comment = "Looks good".into();
+    assert_eq!(st.pulls.send_comment().as_deref(), Some("Looks good"));
+    assert!(st.pulls.busy);
+    st.apply(Event::Error {
+        during: Op::PullAction,
+        error: AppError::new(Severity::Warning, "no network"),
+    });
+    assert_eq!(st.pulls.comment, "Looks good", "not lost on failure");
+    st.pulls.send_comment();
+    st.apply(Event::PullActionDone {
+        number: 4,
+        note: s::NOTE_COMMENTED.into(),
+    });
+    assert!(st.pulls.comment.is_empty());
+    st.pulls.comment = "  ".into();
+    assert_eq!(st.pulls.send_comment(), None, "nothing to send");
+}
+
+#[test]
+fn large_details_are_shared_not_copied() {
+    let mut st = opened(Some("https://github.com/o/r"));
+    st.pulls.select(3);
+    st.apply(Event::PullLoaded {
+        slug: slug(),
+        detail: Box::new(detail(3)),
+    });
+    st.apply(Event::PullFilesLoaded {
+        slug: slug(),
+        number: 3,
+        files: vec![file("a.rs", "@@ -1 +1 @@\n-a\n+b")],
+    });
+    let d = st.pulls.detail.clone().unwrap();
+    let f = st.pulls.files.clone().unwrap();
+    assert!(std::sync::Arc::ptr_eq(
+        &d,
+        st.pulls.detail.as_ref().unwrap()
+    ));
+    assert!(std::sync::Arc::ptr_eq(&f, st.pulls.files.as_ref().unwrap()));
+}
+
+#[test]
 fn a_created_pull_request_is_selected() {
     let mut st = opened(Some("https://github.com/o/r"));
     st.pulls.busy = true;
