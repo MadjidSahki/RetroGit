@@ -9,6 +9,7 @@ mod pulls;
 mod pulls_write;
 mod token;
 mod token_store;
+mod watch;
 
 pub use client::{Client, RepoInfo, RepoListing, User};
 pub use device_flow::{DeviceCode, DeviceFlow, DeviceFlowFailure, PollResponse, Step};
@@ -23,6 +24,7 @@ pub use pulls::{
 pub use pulls_write::{LineComment, Merge, NewPull, RepoMeta, Review, ReviewEvent, encode_segment};
 pub use token::{GhTokenSource, TokenProvider, gh_auth_token, parse_gh_token};
 pub use token_store::{KeyringStore, MemoryStore, TokenStore, TokenStoreError};
+pub use watch::{PrEvent, PrEventKind, PrSnapshot, date_days_before, diff_snapshots};
 
 /// OAuth scopes requested by RetroGit.
 pub const SCOPES: &[&str] = &["repo", "read:org"];

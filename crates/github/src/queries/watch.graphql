@@ -1,0 +1,34 @@
+query WatchPulls($q: String!) {
+  search(query: $q, type: ISSUE, first: 50) {
+    nodes {
+      ... on PullRequest {
+        number
+        title
+        url
+        state
+        repository { nameWithOwner }
+        author { login }
+        mergedBy { login }
+        comments(last: 1) { totalCount nodes { author { login } } }
+        reviews(last: 1) { totalCount nodes { author { login } state } }
+        commits(last: 1) {
+          nodes {
+            commit {
+              oid
+              statusCheckRollup {
+                state
+                contexts(first: 100) {
+                  nodes {
+                    __typename
+                    ... on CheckRun { status conclusion }
+                    ... on StatusContext { state }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
