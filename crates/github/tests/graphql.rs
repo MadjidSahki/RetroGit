@@ -106,12 +106,10 @@ fn rest_403_oauth_restriction_is_typed() {
 
 /// Provider for the signed-in user "ada".
 fn provider(gh: Option<&'static str>, calls: Arc<AtomicUsize>) -> TokenProvider {
-    let p = TokenProvider::new(Arc::new(move |_login: Option<&str>| {
+    TokenProvider::new(Arc::new(move |_login: &str| {
         calls.fetch_add(1, Ordering::SeqCst);
         gh.map(str::to_string)
-    }));
-    p.set_login(Some("ada"));
-    p
+    }))
 }
 
 fn restricted() -> GithubError {
@@ -133,15 +131,15 @@ fn provider_falls_back_to_gh_and_remembers_the_org() {
             Ok(t.len())
         }
     };
-    assert_eq!(p.with_token(Some("gho_app"), "ExampleOrg", call), Ok(7));
+    assert_eq!(p.with_token("ada", "gho_app", "ExampleOrg", call), Ok(7));
     assert_eq!(*used.lock().unwrap(), vec!["gho_app", "gho_cli"]);
     // Remembered (case-insensitive): gh straight away for that owner.
     used.lock().unwrap().clear();
-    assert_eq!(p.with_token(Some("gho_app"), "exampleorg", call), Ok(7));
+    assert_eq!(p.with_token("ada", "gho_app", "exampleorg", call), Ok(7));
     assert_eq!(*used.lock().unwrap(), vec!["gho_cli"]);
     // Other owners still use RetroGit's token first.
     used.lock().unwrap().clear();
-    let _ = p.with_token(Some("gho_app"), "ada", |t: &str| {
+    let _ = p.with_token("ada", "gho_app", "ada", |t: &str| {
         used.lock().unwrap().push(t.to_string());
         Ok::<_, GithubError>(())
     });
@@ -151,11 +149,11 @@ fn provider_falls_back_to_gh_and_remembers_the_org() {
 #[test]
 fn provider_keeps_the_first_error_without_gh() {
     let p = provider(None, Arc::new(AtomicUsize::new(0)));
-    let r: Result<(), _> = p.with_token(Some("gho_app"), "ExampleOrg", |_| Err(restricted()));
+    let r: Result<(), _> = p.with_token("ada", "gho_app", "ExampleOrg", |_| Err(restricted()));
     assert_eq!(r, Err(restricted()));
     // gh refused too: the restriction (the actionable message) is reported.
     let p = provider(Some("gho_cli"), Arc::new(AtomicUsize::new(0)));
-    let r: Result<(), _> = p.with_token(Some("gho_app"), "ExampleOrg", |t| {
+    let r: Result<(), _> = p.with_token("ada", "gho_app", "ExampleOrg", |t| {
         if t == "gho_app" {
             Err(restricted())
         } else {
@@ -169,55 +167,43 @@ fn provider_keeps_the_first_error_without_gh() {
 fn provider_does_not_use_gh_for_other_errors() {
     let gh_calls = Arc::new(AtomicUsize::new(0));
     let p = provider(Some("gho_cli"), gh_calls.clone());
-    let r: Result<(), _> = p.with_token(Some("gho_app"), "o", |_| Err(GithubError::Http(500)));
+    let r: Result<(), _> = p.with_token("ada", "gho_app", "o", |_| Err(GithubError::Http(500)));
     assert_eq!(r, Err(GithubError::Http(500)));
-    let r: Result<(), _> = p.with_token(Some("gho_app"), "o", |_| Err(GithubError::Unauthorized));
+    let r: Result<(), _> = p.with_token("ada", "gho_app", "o", |_| Err(GithubError::Unauthorized));
     assert_eq!(r, Err(GithubError::Unauthorized));
     assert_eq!(gh_calls.load(Ordering::SeqCst), 0);
 }
 
 #[test]
-fn provider_without_a_signed_in_account_never_uses_gh() {
-    // Signed out, or started offline (token kept, account unknown): gh's account could be
-    // anyone's, so nothing is done with it.
-    let calls = Arc::new(AtomicUsize::new(0));
-    let c = calls.clone();
-    let p = TokenProvider::new(Arc::new(move |_: Option<&str>| {
-        c.fetch_add(1, Ordering::SeqCst);
-        Some("gho_cli".to_string())
-    }));
-    assert_eq!(
-        p.with_token(None, "o", |t| Ok(t.to_string())),
-        Err(GithubError::Unauthorized)
-    );
-    assert_eq!(
-        p.with_token(
-            Some("gho_app"),
-            "ExampleOrg",
-            |_| Err::<(), _>(restricted())
-        ),
-        Err(restricted())
-    );
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
-    let p = TokenProvider::without_gh();
-    assert_eq!(
-        p.with_token(None, "o", |t| Ok(t.to_string())),
-        Err(GithubError::Unauthorized)
-    );
-}
-
-#[test]
-fn provider_asks_gh_for_the_signed_in_account() {
+fn gh_is_asked_for_the_account_of_the_call_and_restrictions_are_per_account() {
     let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen = asked.clone();
-    let p = TokenProvider::new(Arc::new(move |login: Option<&str>| {
-        seen.lock().unwrap().push(login.map(str::to_string));
-        Some("gho_cli".to_string())
+    let p = TokenProvider::new(Arc::new(move |login: &str| {
+        seen.lock().unwrap().push(login.to_string());
+        Some(format!("gho_cli_{login}"))
     }));
-    assert_eq!(p.gh_token(), None, "nobody signed in");
-    p.set_login(Some("ada"));
-    let _ = p.gh_token();
-    assert_eq!(*asked.lock().unwrap(), vec![Some("ada".to_string())]);
+    let call = |t: &str| {
+        if t.starts_with("gho_app") {
+            Err(restricted())
+        } else {
+            Ok(t.to_string())
+        }
+    };
+    assert_eq!(
+        p.with_token("ada", "gho_app_ada", "ExampleOrg", call),
+        Ok("gho_cli_ada".into())
+    );
+    assert!(p.is_restricted("Ada", "exampleorg"));
+    assert!(
+        !p.is_restricted("bob", "ExampleOrg"),
+        "remembered for ada only"
+    );
+    assert_eq!(
+        p.with_token("bob", "gho_app_bob", "ExampleOrg", call),
+        Ok("gho_cli_bob".into())
+    );
+    assert_eq!(*asked.lock().unwrap(), vec!["ada", "bob"]);
+    assert_eq!(p.gh_token_for("ada").as_deref(), Some("gho_cli_ada"));
 }
 
 #[test]
@@ -230,10 +216,10 @@ fn a_rejected_gh_token_for_a_remembered_owner_reports_the_restriction() {
             Ok(())
         }
     };
-    p.with_token(Some("gho_app"), "ExampleOrg", call).unwrap();
+    p.with_token("ada", "gho_app", "ExampleOrg", call).unwrap();
     // Later, gh's token is revoked: never report it as RetroGit's own token being refused
     // (that would sign the user out).
-    let r: Result<(), _> = p.with_token(Some("gho_app"), "ExampleOrg", |t| {
+    let r: Result<(), _> = p.with_token("ada", "gho_app", "ExampleOrg", |t| {
         if t == "gho_app" {
             Err(restricted())
         } else {
@@ -305,8 +291,8 @@ fn a_repository_hidden_from_retrogit_is_read_with_gh() {
             Ok(())
         }
     };
-    assert_eq!(p.with_token(Some("gho_app"), "ExampleOrg", call), Ok(()));
-    assert_eq!(p.with_token(Some("gho_app"), "ExampleOrg", call), Ok(()));
+    assert_eq!(p.with_token("ada", "gho_app", "ExampleOrg", call), Ok(()));
+    assert_eq!(p.with_token("ada", "gho_app", "ExampleOrg", call), Ok(()));
     assert_eq!(
         *used.lock().unwrap(),
         vec!["gho_app", "gho_cli", "gho_cli"],
@@ -315,7 +301,7 @@ fn a_repository_hidden_from_retrogit_is_read_with_gh() {
     // Really missing (gh cannot see it either): the first answer stands.
     let p = provider(Some("gho_cli"), Arc::new(AtomicUsize::new(0)));
     assert_eq!(
-        p.with_token(Some("gho_app"), "o", |_| Err::<(), _>(hidden())),
+        p.with_token("ada", "gho_app", "o", |_| Err::<(), _>(hidden())),
         Err(hidden())
     );
 }

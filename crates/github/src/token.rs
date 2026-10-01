@@ -7,18 +7,18 @@ use std::sync::{Arc, Mutex};
 
 use crate::GithubError;
 
-/// Gives the `gh` token on demand, preferably for the given login (`None`: `gh` missing
-/// or not signed in).
-pub type GhTokenSource = Arc<dyn Fn(Option<&str>) -> Option<String> + Send + Sync>;
+/// Gives the `gh` token of a GitHub login on demand (`None`: `gh` missing, or it does not
+/// know that account).
+pub type GhTokenSource = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-/// Picks the token per repository owner and remembers, for the session, the owners for
-/// which RetroGit's token was refused because of OAuth App restrictions.
+/// Picks the token of a call: the account's RetroGit token, or the GitHub CLI's token of
+/// the same account for organizations that restrict OAuth Apps. Restricted owners are
+/// remembered per account for the session.
 #[derive(Clone)]
 pub struct TokenProvider {
     gh: GhTokenSource,
-    restricted: Arc<Mutex<HashSet<String>>>,
-    /// Signed-in GitHub login: `gh` is asked for that account first.
-    login: Arc<Mutex<Option<String>>>,
+    /// `(login, owner)`, lowercase.
+    restricted: Arc<Mutex<HashSet<(String, String)>>>,
 }
 
 impl std::fmt::Debug for TokenProvider {
@@ -32,7 +32,6 @@ impl TokenProvider {
         TokenProvider {
             gh,
             restricted: Arc::new(Mutex::new(HashSet::new())),
-            login: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -41,64 +40,66 @@ impl TokenProvider {
         TokenProvider::new(Arc::new(|_| None))
     }
 
-    /// Remember who is signed in (`None` after signing out).
-    pub fn set_login(&self, login: Option<&str>) {
-        if let Ok(mut l) = self.login.lock() {
-            *l = login.map(str::to_string);
-        }
+    /// The `gh` token of account `login`, if `gh` has it.
+    pub fn gh_token_for(&self, login: &str) -> Option<String> {
+        (self.gh)(login)
     }
 
-    /// The `gh` token of the signed-in account, if `gh` has it. Nobody signed in (or the
-    /// account is unknown, e.g. started offline): none, as `gh`'s account could be anyone's.
-    pub fn gh_token(&self) -> Option<String> {
-        let login = self.login.lock().ok().and_then(|l| l.clone())?;
-        (self.gh)(Some(&login))
+    fn key(login: &str, owner: &str) -> (String, String) {
+        (login.to_lowercase(), owner.to_lowercase())
     }
 
-    fn is_restricted(&self, owner: &str) -> bool {
+    /// `owner` refused `login`'s RetroGit token (OAuth App restriction) this session.
+    pub fn is_restricted(&self, login: &str, owner: &str) -> bool {
         self.restricted
             .lock()
-            .map(|s| s.contains(&owner.to_lowercase()))
+            .map(|s| s.contains(&Self::key(login, owner)))
             .unwrap_or(false)
     }
 
-    fn remember(&self, owner: &str) {
+    fn remember(&self, login: &str, owner: &str) {
         if let Ok(mut s) = self.restricted.lock() {
-            s.insert(owner.to_lowercase());
+            s.insert(Self::key(login, owner));
         }
     }
 
-    /// Run `call` for a repository of `owner`: with `primary` (RetroGit's token) first; if
-    /// the organization restricts OAuth Apps, once more with the `gh` token, and use `gh`
-    /// directly for that owner from then on. Without a usable `gh` token, the first error
-    /// is returned. Other errors are never retried.
+    /// Forget what was learned about `login` (account removed or replaced).
+    pub fn forget_account(&self, login: &str) {
+        let login = login.to_lowercase();
+        if let Ok(mut s) = self.restricted.lock() {
+            s.retain(|(l, _)| *l != login);
+        }
+    }
+
+    /// Run `call` for a repository of `owner` as account `login`: with its RetroGit
+    /// `token` first; if the organization restricts OAuth Apps (or hides the repository),
+    /// once more with `gh`'s token of the same account, and use it directly for that
+    /// owner from then on. Without a usable `gh` token, the first error is returned. A
+    /// refused `gh` token is reported as the restriction, never as `Unauthorized` (callers
+    /// sign the account out on `Unauthorized`).
     pub fn with_token<T>(
         &self,
-        primary: Option<&str>,
+        login: &str,
+        token: &str,
         owner: &str,
         call: impl Fn(&str) -> Result<T, GithubError>,
     ) -> Result<T, GithubError> {
-        if (primary.is_none() || self.is_restricted(owner))
-            && let Some(gh) = self.gh_token()
+        if self.is_restricted(login, owner)
+            && let Some(gh) = self.gh_token_for(login)
         {
             return call(&gh).map_err(|e| match e {
-                // gh's token was refused: report the restriction, never a refusal of
-                // RetroGit's own token (callers sign the user out on `Unauthorized`).
-                GithubError::Unauthorized if primary.is_some() => GithubError::OAuthRestricted {
+                GithubError::Unauthorized => GithubError::OAuthRestricted {
                     org: Some(owner.to_string()),
                 },
                 other => other,
             });
         }
-        let Some(primary) = primary else {
-            return Err(GithubError::Unauthorized);
-        };
-        match call(primary) {
-            Err(first) if hidden_by_restriction(&first) => match self.gh_token() {
+        match call(token) {
+            Err(first) if hidden_by_restriction(&first) => match self.gh_token_for(login) {
                 Some(gh) => {
                     let r = call(&gh);
                     if r.is_ok() {
-                        self.remember(owner);
+                        self.remember(login, owner);
                     }
                     // gh cannot see it either: RetroGit's answer is the one to explain.
                     r.map_err(|e| match e {
@@ -135,8 +136,8 @@ pub fn parse_gh_token(stdout: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Ask the GitHub CLI for its github.com token: for account `user` only (RetroGit must not
-/// act as another account), or for its active account when no `user` is given. `path` replaces PATH (apps started from the Finder get a
+/// Ask the GitHub CLI for its github.com token of account `user` (RetroGit never acts as
+/// another account), or of its active account when no `user` is given. `path` replaces PATH (apps started from the Finder get a
 /// minimal one). The caller's `GH_TOKEN` / `GITHUB_TOKEN` are not passed on, so `gh`
 /// answers from its own login. Blocking (runs a process).
 pub fn gh_auth_token(path: Option<&str>, user: Option<&str>) -> Option<String> {

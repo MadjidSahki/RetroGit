@@ -1,5 +1,6 @@
 //! GitHub access for RetroGit: OAuth Device Flow, REST API, token storage.
 
+mod accounts;
 mod client;
 mod device_flow;
 mod error;
@@ -11,6 +12,10 @@ mod token;
 mod token_store;
 mod watch;
 
+pub use accounts::{
+    Account, AccountStatus, AccountStore, Accounts, KeyringAccounts, MemoryAccounts, RepoAccount,
+    choose_account,
+};
 pub use client::{Client, RepoInfo, RepoListing, User};
 pub use device_flow::{DeviceCode, DeviceFlow, DeviceFlowFailure, PollResponse, Step};
 pub use error::{GithubError, repository_missing};

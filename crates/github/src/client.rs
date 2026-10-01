@@ -25,6 +25,8 @@ pub struct RepoInfo {
     pub clone_url: String,
     /// ISO-8601 timestamp, e.g. `2026-09-30T10:00:00Z`.
     pub updated_at: String,
+    /// Signed-in accounts that can see it (filled by the app when merging lists).
+    pub accounts: Vec<String>,
 }
 
 /// Result of listing repositories.
@@ -60,6 +62,7 @@ impl From<RawRepo> for RepoInfo {
             private: r.private,
             clone_url: r.clone_url,
             updated_at: r.updated_at,
+            accounts: Vec::new(),
         }
     }
 }
@@ -165,6 +168,28 @@ impl Client {
                 None => return Ok(out),
             }
         }
+    }
+
+    /// Logins of the organizations the token's user belongs to (first 100).
+    pub fn user_orgs(&self, token: &str) -> Result<Vec<String>, GithubError> {
+        let mut resp = self.api_get(&format!("{}/user/orgs?per_page=100", self.api_base), token)?;
+        let orgs: Vec<RawOwner> = resp.body_mut().read_json()?;
+        Ok(orgs.into_iter().map(|o| o.login).collect())
+    }
+
+    /// `Ok` if the token can see `owner/repo` (`NotFound` otherwise, as GitHub says).
+    pub fn check_repo(&self, token: &str, owner: &str, repo: &str) -> Result<(), GithubError> {
+        let data = self.graphql(
+            token,
+            "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { id } }",
+            serde_json::json!({ "owner": owner, "name": repo }),
+        )?;
+        if data["repository"].is_null() {
+            return Err(GithubError::NotFound(format!(
+                "Could not resolve to a Repository with the name '{owner}/{repo}'."
+            )));
+        }
+        Ok(())
     }
 
     pub(crate) fn api_get(&self, url: &str, token: &str) -> Result<Response<Body>, GithubError> {

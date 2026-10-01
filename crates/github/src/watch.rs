@@ -60,6 +60,8 @@ pub enum PrEventKind {
 /// Something that happened to a watched pull request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrEvent {
+    /// Account whose pull requests these are (the `me` of `diff_snapshots`).
+    pub account: String,
     pub key: String,
     pub repo: String,
     pub number: u64,
@@ -80,6 +82,7 @@ pub fn diff_snapshots(prev: &[PrSnapshot], next: &[PrSnapshot], me: &str) -> Vec
         };
         let mut push = |kind| {
             out.push(PrEvent {
+                account: me.to_string(),
                 key: n.key.clone(),
                 repo: n.repo.clone(),
                 number: n.number,
@@ -379,6 +382,7 @@ mod tests {
             ("o/r#5", "o/r", 5, "PR 5")
         );
         assert_eq!(e.url, "https://github.com/o/r/pull/5");
+        assert_eq!(e.account, "me");
     }
 
     #[test]
