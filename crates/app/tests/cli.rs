@@ -4,24 +4,13 @@ use std::process::Command;
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
-/// Run the binary with its data directory pointed at `data` (HOME on macOS, LOCALAPPDATA
-/// on Windows), so it talks to the test's instance, not a real one.
-fn cli(data_home: &std::path::Path, args: &[&std::ffi::OsStr]) -> std::process::Output {
+/// Run the binary with its data folder set to `data` (so it talks to the test's instance).
+fn cli(data: &std::path::Path, args: &[&std::ffi::OsStr]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_retrogit"))
         .args(args)
-        .env("HOME", data_home)
-        .env("LOCALAPPDATA", data_home)
-        .env("XDG_DATA_HOME", data_home)
+        .env("RETROGIT_DATA_DIR", data)
         .output()
         .unwrap_or_else(|e| panic!("{e}"))
-}
-
-fn data_dir(home: &std::path::Path) -> std::path::PathBuf {
-    if cfg!(target_os = "macos") {
-        home.join("Library/Application Support/RetroGit")
-    } else {
-        home.join("RetroGit")
-    }
 }
 
 #[test]
@@ -33,7 +22,7 @@ fn the_command_hands_the_repository_root_to_the_running_window() {
     std::fs::create_dir_all(&sub).unwrap_or_else(|e| panic!("{e}"));
 
     let (tx, rx) = channel();
-    let _server = retrogit::instance::Server::start(&data_dir(home.path()), move |p| {
+    let _server = retrogit::instance::Server::start(home.path(), move |p| {
         let _ = tx.send(p);
     })
     .unwrap_or_else(|e| panic!("{e}"));

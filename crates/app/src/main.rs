@@ -17,7 +17,10 @@ fn main() -> eframe::Result {
         println!("{}", gitcore::askpass_answer(&prompt, &token));
         return Ok(());
     }
-    let data_dir = dirs::data_local_dir().map(|d| d.join("RetroGit"));
+    // RETROGIT_DATA_DIR overrides the data folder (separate profile, tests).
+    let data_dir = std::env::var_os("RETROGIT_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::data_local_dir().map(|d| d.join("RetroGit")));
     let initial = match retrogit::cli::parse(&std::env::args().collect::<Vec<_>>()) {
         retrogit::cli::Launch::Cli { target } => return run_cli(&target, data_dir.as_deref()),
         retrogit::cli::Launch::Gui { open } => open,
