@@ -366,3 +366,7 @@ pub const SWITCH_ACCOUNT_HINT: &str = "Repository > Account... to use another ac
 pub const ERR_SSH_CLONE: &str = "Cloning over SSH is only supported for github.com (cloned over HTTPS). Use the HTTPS URL of this repository.";
 pub const ERR_CLONE_URL: &str = "Enter an HTTPS URL, or a github.com SSH URL.";
 pub const ERR_ACCOUNT_MUST_SIGN_IN: &str = "@{login} is the account chosen for this repository and must sign in again (File > Accounts...), or choose another one with Repository > Account...";
+pub const ALL_RESOLVED: &str = "All conflicts are resolved.";
+pub const ALL_RESOLVED_MERGE: &str = "All conflicts are resolved. Commit the merge to finish it.";
+pub const ALL_RESOLVED_REBASE: &str =
+    "All conflicts are resolved. Click Continue rebase to finish it.";

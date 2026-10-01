@@ -2,6 +2,7 @@
 
 mod accounts;
 mod changes;
+mod conflicts;
 mod pulls;
 mod sync;
 
@@ -152,6 +153,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
         deps,
         repo: None,
         shown: None,
+        shown_conflict: None,
         lease: None,
         refresh_pending: refresh_pending.clone(),
         cancel_flow: cancel_flow.clone(),
@@ -212,6 +214,8 @@ struct Worker {
     repo: Option<std::path::PathBuf>,
     /// File whose diff the UI displays; its diff is re-sent after every change.
     shown: Option<(String, Side)>,
+    /// File open in the conflict editor; re-sent after every refresh (changes on disk).
+    shown_conflict: Option<String>,
     refresh_pending: Arc<AtomicBool>,
     cancel_net: Arc<AtomicBool>,
     /// `(branch, remote commit)` recorded when a pushed commit of `branch` was amended:
@@ -271,6 +275,14 @@ impl Worker {
             Command::Commit { message, amend } => self.commit(&message, amend),
             Command::AddToGitignore(pattern) => self.add_to_gitignore(&pattern),
             Command::LoadAmendInfo => self.amend_info(),
+            Command::LoadConflict(path) => self.load_conflict(&path),
+            Command::ResolveConflict { path, content } => {
+                self.resolve(&path, |r| r.resolve_with_content(&path, &content))
+            }
+            Command::ResolveConflictWith { path, pick } => {
+                self.resolve(&path, |r| r.resolve_with(&path, pick))
+            }
+            Command::ResolveDelete(path) => self.resolve(&path, |r| r.resolve_delete(&path)),
             Command::LoadLog { skip } => self.load_log(skip),
             Command::LoadCommit(id) => self.load_commit(&id),
             Command::LoadCommitFileDiff { id, path } => self.load_commit_file_diff(&id, &path),

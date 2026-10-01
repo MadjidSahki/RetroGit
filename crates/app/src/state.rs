@@ -1,9 +1,11 @@
 //! All UI state, updated by the pure `apply` function.
 
+mod conflicts;
 mod notifications;
 mod pulls;
 mod sync;
 
+pub use conflicts::{ConflictConfirm, ConflictEditor};
 pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};
 pub use pulls::{
     PullDialog, PullTab, PullsView, default_merge_method, merge_defaults, merge_disabled_reason,
@@ -49,6 +51,12 @@ pub struct ChangesView {
     pub focus_summary: bool,
     /// Discard waiting for the user's confirmation.
     pub pending_discard: Option<PendingDiscard>,
+    // --- Sub-project 6a ---
+    /// Conflicted file shown in the conflict editor (requested or loaded).
+    pub conflict_path: Option<String>,
+    pub conflict: Option<ConflictEditor>,
+    /// `conflict_path` must be loaded (set when moving to the next conflicted file).
+    pub load_conflict: bool,
 }
 
 /// A destructive command and the question shown before running it.
@@ -315,7 +323,10 @@ impl AppState {
                     c.diff = None;
                     c.selected_lines.clear();
                 }
+                self.sync_conflict_editor();
             }
+            Event::ConflictLoaded(file) => self.conflict_loaded(*file),
+            Event::ConflictResolved(path) => self.conflict_resolved(&path),
             Event::DiffLoaded(diff) => {
                 let c = &mut self.changes;
                 if c.shown
