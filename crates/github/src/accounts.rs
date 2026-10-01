@@ -170,20 +170,26 @@ pub struct RepoAccount {
     pub manual: bool,
 }
 
-/// Steps 1 to 3 of choosing the account of a repository of `owner`: the remembered one
-/// (chosen or learned), then one `seen` with the repository in its lists, then the owner or
-/// a member of it. `None`: try the accounts one by one (step 4). Only usable accounts are
-/// returned.
+/// Steps 1 to 3 of choosing the account of a repository of `owner`: the user's choice,
+/// then the owner's own account (a learned one may only see it, e.g. a public repository
+/// seen with a work account), then the learned one, then one `seen` with the repository in
+/// its lists, then a member of the organization. `None`: try the accounts one by one
+/// (step 4). Only usable accounts are returned.
 pub fn choose_account(
     owner: &str,
     accounts: &Accounts,
     remembered: Option<&RepoAccount>,
     seen: &[String],
 ) -> Option<String> {
-    if let Some(r) = remembered
-        && let Some(a) = accounts.get(&r.login)
-    {
-        return Some(a.login);
+    let usable = |r: &RepoAccount| accounts.get(&r.login).map(|a| a.login);
+    if let Some(login) = remembered.filter(|r| r.manual).and_then(usable) {
+        return Some(login);
+    }
+    if let Some(own) = accounts.get(owner) {
+        return Some(own.login);
+    }
+    if let Some(login) = remembered.and_then(usable) {
+        return Some(login);
     }
     if let Some(a) = seen.iter().find_map(|l| accounts.get(l)) {
         return Some(a.login);
@@ -397,6 +403,44 @@ mod tests {
         assert_eq!(
             choose_account("corp", &a, None, &[]).as_deref(),
             Some("pro2")
+        );
+    }
+
+    #[test]
+    fn the_owners_own_account_comes_before_an_account_that_merely_sees_it() {
+        let a = Accounts::default();
+        a.upsert(acc("pro"), None);
+        a.upsert(acc("perso"), None);
+        a.upsert(acc("pro2"), None);
+        a.set_orgs("pro2", vec!["corp".into()]);
+        // Learned while only "pro" was signed in (a public repository is visible to all).
+        let learned = |login: &str| RepoAccount {
+            login: login.into(),
+            manual: false,
+        };
+        assert_eq!(
+            choose_account("Perso", &a, Some(&learned("pro")), &["pro".to_string()]).as_deref(),
+            Some("perso"),
+            "the owner's own account"
+        );
+        // A member may not have access: what was learned (seen working) wins.
+        assert_eq!(
+            choose_account("corp", &a, Some(&learned("pro")), &[]).as_deref(),
+            Some("pro")
+        );
+        assert_eq!(
+            choose_account("other", &a, Some(&learned("pro")), &[]).as_deref(),
+            Some("pro"),
+            "otherwise what was learned"
+        );
+        let chosen = RepoAccount {
+            login: "pro".into(),
+            manual: true,
+        };
+        assert_eq!(
+            choose_account("perso", &a, Some(&chosen), &[]).as_deref(),
+            Some("pro"),
+            "the user's choice always wins"
         );
     }
 
