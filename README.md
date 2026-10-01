@@ -45,7 +45,12 @@ and a pixel font.
 - Branches: create, switch (with stash-and-reapply when local changes are in the way), rename, delete, check out remote branches, publish new ones
 - Fetch (also automatically when a repository is opened), pull (fast-forward, or Merge / Rebase when branches diverged) and push, with progress and cancel
 - Conflicts are shown with Abort / Continue; force push is only offered after amending a pushed commit, and is protected by a lease
-- Resolve conflicts in RetroGit: a three-pane editor (Mine | Result | Theirs) with syntax colors, Use mine / theirs / both per block, the whole file at once, free editing of the result, and Mark resolved; binary and deleted files offer the simple choices; labels follow merge or rebase (where "ours" and "theirs" are swapped)
+- Resolve conflicts in RetroGit (merge, pull, rebase, stash and switch): conflicted files are listed apart in the Changes tab and open in a three-pane editor (Mine | Result | Theirs) with syntax colors
+  - per block: Use mine / theirs / both, Previous / Next, conflicts left; or keep one side for the whole file
+  - the result stays freely editable; Mark resolved stages it and opens the next conflicted file, then tells you to commit the merge or continue the rebase
+  - the sides are named after what they are: upstream / my commit during a rebase, current / my stash after a stash
+  - binary files and files deleted on one side offer the simple choices
+  - your edits are never lost silently: changes on disk are offered with Reload, and leaving the file, switching repository or aborting asks first
 
 **Pull requests** (github.com repositories)
 - List open, mine, review-requested or closed pull requests, with checks, review status, labels, author, target branch and age
@@ -206,7 +211,7 @@ Licenses of embedded third-party data: [THIRD_PARTY.md](THIRD_PARTY.md).
 - Cloning works over HTTPS only (github.com SSH URLs are converted); fetch, pull and push
   use your remotes as they are, SSH included.
 - Binaries are not code-signed or notarized. No Linux build.
-- The conflict editor has no word-level merge (blocks are Git's), and no syntax colors above 5,000 lines.
+- The conflict editor has no word-level merge (blocks are Git's), no syntax colors above 5,000 lines, and inserts LF line endings when you type in a CRLF file.
 - Syntax highlighting is skipped for very large diffs (over 5,000 lines or 256 KB) and diffs
   over 20,000 lines are only shown on request.
 - History pages are recomputed on each reload; very large repositories (100k+ commits) may feel slow.
