@@ -16,15 +16,17 @@ and a pixel font.
 
 ## Features
 
-**GitHub**
+**GitHub account**
 - Sign in with GitHub in your browser (OAuth Device Flow), or paste a personal access token
-- The token is stored in the macOS Keychain / Windows Credential Manager, never on disk
+- The token is stored in the macOS Keychain / Windows Credential Manager, never on disk, never in logs
 - List your personal and organization repositories, filter, and clone with progress and cancel
-- SSO-aware: tells you when an organization needs you to authorize the app
+- SSO-aware: tells you when an organization needs you to authorize the app, with the link
+- Organizations that restrict third-party OAuth apps: fetch, pull and push retry with your own git
+  credentials; pull requests use the [GitHub CLI](https://cli.github.com/) token of the same account
 
 **Local work**
 - Status with staged / unstaged / untracked files, refreshed automatically when files change
-- Unified diff with per-line check boxes: stage or unstage a whole file, a hunk or single lines
+- Unified diff with syntax highlighting (200+ languages) and per-line check boxes: stage or unstage a whole file, a hunk or single lines
 - Discard changes (file, hunk or lines), with confirmation; untracked files go to the trash
 - Commit through your installed `git`: hooks (`pre-commit`, husky, …) and GPG/SSH signing just work
 - Amend the last commit, add files or extensions to `.gitignore`
@@ -32,19 +34,29 @@ and a pixel font.
 
 **History and sync**
 - Commit graph of all branches with colored lanes and ref labels, paged for large histories
-- Commit details: full message, signature status, changed files and their diffs
+- Commit details: full message, signature status, changed files next to the colored diff of the selected file
 - Branches: create, switch (with stash-and-reapply when local changes are in the way), rename, delete, check out remote branches, publish new ones
-- Fetch, pull (fast-forward, or Merge / Rebase when branches diverged) and push, with progress and cancel
+- Fetch (also automatically when a repository is opened), pull (fast-forward, or Merge / Rebase when branches diverged) and push, with progress and cancel
 - Conflicts are shown with Abort / Continue; force push is only offered after amending a pushed commit, and is protected by a lease
 
 **Pull requests** (github.com repositories)
-- List open, mine, review-requested or closed pull requests, with checks, review status and labels
-- Read the description and conversation, commits, changed files with colored diffs and line comments, and checks
-- Create a pull request from the current branch (draft, labels, publish the branch first)
-- Review: comment, approve or request changes, with comments on diff lines (right-click a line); reply to threads
-- Add and remove labels; merge, squash or rebase (as the repository allows), with the reason when GitHub would refuse
-- Check out a pull request, including from a fork (`pr/<number>`)
-- Notifications while RetroGit is open, for all your pull requests: checks finished, review received, new comment, merged or closed — as system notifications and in the **Notifications** list
+- List open, mine, review-requested or closed pull requests, with checks, review status, labels, author, target branch and age
+- Read the description (Markdown) and the conversation, the commits, the changed files with colored diffs and their line comments, and the checks with links to their runs
+- Create a pull request from the current branch: title, description, target branch, draft, labels, and publish the branch first if needed (an existing pull request for the branch is opened instead)
+- Comment on diff lines (right-click a line): post the comment at once, or add it to a review
+- Review: comment, approve or request changes (approving your own pull request is disabled, as on GitHub); reply to threads; resolve or unresolve conversations
+- Comment in the conversation; add and remove labels
+- Merge, squash or rebase (as the repository allows), with editable commit title and message and optional branch deletion; the button is disabled with the reason when GitHub would refuse (draft, conflicts, required reviews or checks, out of date, no permission)
+- Check out a pull request: as its branch when it lives in the repository (brought up to date), or as `pr/<number>` for forks
+
+**Notifications**
+- While RetroGit is open, your pull requests in all repositories are checked every 2 minutes: checks passed or failed, review received, new comment, merged or closed
+- Shown as system notifications and in the **Notifications** list (toolbar), which opens the pull request in its local clone, or on github.com
+
+**Everyday comfort**
+- **Open in IDE**: VS Code, Cursor, Visual Studio, Rider, IntelliJ IDEA, WebStorm, PyCharm, GoLand, RustRover, Zed, Sublime Text, Xcode — detected automatically, choice remembered per repository
+- **`retrogit` command**: open the repository of the current folder from a terminal, in the window already open
+- Recent repositories list; window size and position remembered
 
 ## Install
 
@@ -158,8 +170,34 @@ Licenses of embedded third-party data: [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## Known limitations
 
-- Pull requests: no editing of the title or description, no reviewers or assignees, no resolving of threads; github.com only.
-- Notifications only while RetroGit is open; on macOS they appear under "Script Editor" and clicking them does not open RetroGit (use the Notifications list).
-- Binaries are not code-signed or notarized.
+**Accounts and hosting**
+- One GitHub account at a time. With a work account signed in, you can at best read your personal
+  repositories' pull requests but not merge or review as their owner (and the other way round):
+  sign out and sign in with the other account. Multiple accounts are planned.
+- github.com only: no GitHub Enterprise Server, GitLab or Bitbucket for sign-in, repository
+  lists and pull requests (plain Git operations work with any remote).
+- When signed out, the Pull Requests tab is unavailable (the GitHub CLI is only used for the
+  signed-in account). The GitHub CLI fallback needs `gh` 2.40 or newer, signed in with the
+  same account (`gh auth login`).
+
+**Pull requests**
+- Not supported: editing the title or description, reviewers, assignees, milestones, marking a
+  draft as ready, reactions, multi-line comments, suggested changes.
+- Lists are limited to the 50 most recently updated pull requests, and a pull request to its
+  first 100 comments, reviews, review threads, commits and checks (repository labels: 100).
+- Markdown is simplified: no HTML, tables or inline images (images are shown as links).
+- Line comments waiting for a review are dropped when you select another pull request.
+- Commits of a fork's pull request open in History only after it has been checked out.
+- Checking out a pull request shows no progress and cannot be cancelled.
+
+**Notifications**
+- Only while RetroGit is open (no catch-up of what happened while it was closed).
+- macOS: they appear under "Script Editor", and clicking them does not open RetroGit (use the
+  Notifications list). Windows: they appear under "Windows PowerShell".
+
+**General**
+- Binaries are not code-signed or notarized. No Linux build.
 - Conflicts are resolved in your editor (RetroGit shows them and lets you abort or continue).
+- Syntax highlighting is skipped for very large diffs (over 5,000 lines or 256 KB) and diffs
+  over 20,000 lines are only shown on request.
 - History pages are recomputed on each reload; very large repositories (100k+ commits) may feel slow.
