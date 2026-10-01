@@ -4,12 +4,13 @@
 
 RetroGit is a native desktop Git client written in Rust. It is built for daily use:
 browse and clone your GitHub repositories, stage exactly the lines you want, commit with
-your hooks and signature, explore history on a commit graph, and sync with GitHub —
-all in grey bevelled windows, a blue gradient title bar and a pixel font.
+your hooks and signature, explore history on a commit graph, sync with GitHub, and
+review and merge pull requests — all in grey bevelled windows, a blue gradient title bar
+and a pixel font.
 
 > Screenshot: _coming soon_
 
-- Single native binary (~13 MB), no webview, no runtime
+- Single native binary (~16 MB), no webview, no runtime
 - Idle CPU ≈ 0 % (redraws only when something changes)
 - macOS (Apple Silicon) and Windows (x86-64)
 
@@ -35,6 +36,15 @@ all in grey bevelled windows, a blue gradient title bar and a pixel font.
 - Branches: create, switch (with stash-and-reapply when local changes are in the way), rename, delete, check out remote branches, publish new ones
 - Fetch, pull (fast-forward, or Merge / Rebase when branches diverged) and push, with progress and cancel
 - Conflicts are shown with Abort / Continue; force push is only offered after amending a pushed commit, and is protected by a lease
+
+**Pull requests** (github.com repositories)
+- List open, mine, review-requested or closed pull requests, with checks, review status and labels
+- Read the description and conversation, commits, changed files with colored diffs and line comments, and checks
+- Create a pull request from the current branch (draft, labels, publish the branch first)
+- Review: comment, approve or request changes, with comments on diff lines (right-click a line); reply to threads
+- Add and remove labels; merge, squash or rebase (as the repository allows), with the reason when GitHub would refuse
+- Check out a pull request, including from a fork (`pr/<number>`)
+- Notifications while RetroGit is open, for all your pull requests: checks finished, review received, new comment, merged or closed — as system notifications and in the **Notifications** list
 
 ## Install
 
@@ -85,8 +95,11 @@ GoLand, RustRover, Zed, Sublime Text, Xcode) and remembers your choice for each 
 until an owner approves them. RetroGit then cannot list or clone that organization's
 repositories with its sign-in. For fetch, pull and push on repositories you already have,
 RetroGit automatically retries with your own git credentials (Keychain, credential manager),
-like `git` in a terminal. To use everything, ask an organization owner to approve RetroGit,
-or sign in with a personal access token.
+like `git` in a terminal. For pull requests, RetroGit uses the token of the
+[GitHub CLI](https://cli.github.com/) when it is installed and signed in (`gh auth login`),
+since organizations usually approve it; the token is read from `gh` when needed and never
+stored. Otherwise, ask an organization owner to approve RetroGit, or sign in with a personal
+access token.
 
 ## Build from source
 
@@ -113,7 +126,7 @@ A Cargo workspace with four crates:
 |---|---|
 | `crates/win95` | Windows 95 widget kit for [egui](https://github.com/emilk/egui): bevels, buttons, title bar, list view, dialogs, tabs, combo box, splitter… |
 | `crates/gitcore` | RetroGit's Git API: status, diff, line-level staging, commit, history and graph layout, branches, fetch/pull/push. Reads with libgit2 ([git2](https://github.com/rust-lang/git2-rs)), writes with the `git` command line |
-| `crates/github` | GitHub REST client, OAuth Device Flow, token storage |
+| `crates/github` | GitHub client: REST (writes) and GraphQL (pull request reads), OAuth Device Flow, token storage, pull request watch |
 | `crates/app` | The application: state (a pure reducer), one background worker thread, and the screens |
 
 The UI thread never blocks: it sends commands to a single worker thread and applies the
@@ -145,7 +158,8 @@ Licenses of embedded third-party data: [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## Known limitations
 
-- Pull requests are not supported yet (planned).
+- Pull requests: no editing of the title or description, no reviewers or assignees, no resolving of threads; github.com only.
+- Notifications only while RetroGit is open; on macOS they appear under "Script Editor" and clicking them does not open RetroGit (use the Notifications list).
 - Binaries are not code-signed or notarized.
 - Conflicts are resolved in your editor (RetroGit shows them and lets you abort or continue).
 - History pages are recomputed on each reload; very large repositories (100k+ commits) may feel slow.
