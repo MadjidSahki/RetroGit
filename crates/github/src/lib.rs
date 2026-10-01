@@ -6,6 +6,7 @@ mod error;
 mod graphql;
 mod link;
 mod pulls;
+mod pulls_write;
 mod token;
 mod token_store;
 
@@ -19,6 +20,7 @@ pub use pulls::{
     PrDetail, PrFile, PrFilter, PrState, PrSummary, ReviewDecision, ReviewState, ReviewThread,
     ThreadComment, TimelineItem, parse_color, search_query,
 };
+pub use pulls_write::{LineComment, Merge, NewPull, RepoMeta, Review, ReviewEvent, encode_segment};
 pub use token::{GhTokenSource, TokenProvider, gh_auth_token, parse_gh_token};
 pub use token_store::{KeyringStore, MemoryStore, TokenStore, TokenStoreError};
 

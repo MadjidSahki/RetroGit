@@ -360,6 +360,11 @@ pub(crate) fn labels(connection: &Value) -> Vec<Label> {
         .collect()
 }
 
+/// Labels of a REST response (array of `{ name, color, description }`).
+pub(crate) fn labels_from_rest(array: &Value) -> Vec<Label> {
+    labels(&json!({ "nodes": array }))
+}
+
 pub(crate) fn pr_state(v: &Value) -> PrState {
     match v.as_str() {
         Some("MERGED") => PrState::Merged,
