@@ -18,6 +18,10 @@ pub enum GithubError {
     Rejected { status: u16, message: String },
     #[error("GitHub GraphQL error: {0}")]
     Graphql(String),
+    /// GitHub says the object does not exist. Organizations that restrict OAuth Apps make
+    /// their repositories look missing to the restricted token.
+    #[error("not found: {0}")]
+    NotFound(String),
     #[error("could not decode GitHub response: {0}")]
     Decode(String),
 }

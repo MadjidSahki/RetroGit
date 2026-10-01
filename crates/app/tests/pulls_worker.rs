@@ -164,6 +164,36 @@ fn an_organization_restricting_retrogit_is_read_with_the_gh_token() {
 }
 
 #[test]
+fn a_repository_looking_missing_is_read_with_the_gh_token() {
+    // What github.com really answers for an organization restricting the OAuth App.
+    let mut server = mockito::Server::new();
+    let tokens = TokenProvider::new(Arc::new(|_: Option<&str>| Some("gho_cli".to_string())));
+    let w = signed_in(&mut server, tokens);
+    server
+        .mock("POST", "/graphql")
+        .match_header("authorization", "Bearer ghp_pat")
+        .with_body(r#"{"data":{"repository":null,"search":{"nodes":[]}},"errors":[{"type":"NOT_FOUND","path":["repository"],"message":"Could not resolve to a Repository with the name 'o/r'."}]}"#)
+        .create();
+    server
+        .mock("POST", "/graphql")
+        .match_header("authorization", "Bearer gho_cli")
+        .with_body(r#"{"data":{"repository":{"id":"R_1"},"search":{"nodes":[{"number":3,"title":"Fix"}]}}}"#)
+        .create();
+    w.send(Command::LoadPulls {
+        slug: slug(),
+        filter: PrFilter::Open,
+    });
+    let evs = until(&w, |e| {
+        matches!(e, Event::PullsLoaded { .. } | Event::Error { .. })
+    });
+    assert!(
+        matches!(evs.last(), Some(Event::PullsLoaded { list, .. }) if list[0].number == 3),
+        "{:?}",
+        evs.last()
+    );
+}
+
+#[test]
 fn without_gh_the_restriction_is_explained_with_a_link() {
     let mut server = mockito::Server::new();
     let w = signed_in(&mut server, TokenProvider::without_gh());

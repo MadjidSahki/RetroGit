@@ -76,6 +76,9 @@ fn typed_error(e: &Value, sso_url: Option<&str>) -> GithubError {
             url: sso_url.unwrap_or_default().to_string(),
         };
     }
+    if e["type"].as_str() == Some("NOT_FOUND") {
+        return GithubError::NotFound(message.to_string());
+    }
     if e["type"].as_str() == Some("RATE_LIMITED") {
         return GithubError::RateLimited;
     }

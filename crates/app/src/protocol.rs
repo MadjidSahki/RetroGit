@@ -350,6 +350,9 @@ impl AppError {
                 ),
             ),
             GithubError::Rejected { message, .. } => AppError::new(Severity::Warning, message),
+            GithubError::NotFound(_) | GithubError::Http(404) => {
+                AppError::new(Severity::Warning, s::ERR_PULLS_NOT_FOUND).with_detail(e)
+            }
             other => AppError::new(Severity::Error, &other.to_string()),
         }
     }

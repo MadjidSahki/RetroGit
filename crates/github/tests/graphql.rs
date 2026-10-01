@@ -258,6 +258,50 @@ fn graphql_sso_errors_are_typed() {
 }
 
 #[test]
+fn graphql_not_found_is_typed() {
+    let mut server = mockito::Server::new();
+    server
+        .mock("POST", "/graphql")
+        .with_body(r#"{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","path":["repository"],"message":"Could not resolve to a Repository with the name 'ExampleOrg/app'."}]}"#)
+        .create();
+    assert_eq!(
+        client(&server).graphql("t", "q", json!({})).err(),
+        Some(GithubError::NotFound(
+            "Could not resolve to a Repository with the name 'ExampleOrg/app'.".into()
+        ))
+    );
+}
+
+#[test]
+fn a_repository_hidden_from_retrogit_is_read_with_gh() {
+    // Organizations restricting OAuth Apps make their repositories look missing.
+    let p = provider(Some("gho_cli"), Arc::new(AtomicUsize::new(0)));
+    let hidden = || GithubError::NotFound("Could not resolve to a Repository".into());
+    let used = std::sync::Mutex::new(Vec::new());
+    let call = |t: &str| {
+        used.lock().unwrap().push(t.to_string());
+        if t == "gho_app" {
+            Err(hidden())
+        } else {
+            Ok(())
+        }
+    };
+    assert_eq!(p.with_token(Some("gho_app"), "ExampleOrg", call), Ok(()));
+    assert_eq!(p.with_token(Some("gho_app"), "ExampleOrg", call), Ok(()));
+    assert_eq!(
+        *used.lock().unwrap(),
+        vec!["gho_app", "gho_cli", "gho_cli"],
+        "remembered"
+    );
+    // Really missing (gh cannot see it either): the first answer stands.
+    let p = provider(Some("gho_cli"), Arc::new(AtomicUsize::new(0)));
+    assert_eq!(
+        p.with_token(Some("gho_app"), "o", |_| Err::<(), _>(hidden())),
+        Err(hidden())
+    );
+}
+
+#[test]
 fn gh_token_output_is_parsed() {
     assert_eq!(
         github::parse_gh_token("gho_abc\n").as_deref(),

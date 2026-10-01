@@ -30,7 +30,10 @@ impl Worker {
             return self.drop_token(during);
         }
         let mut error = AppError::from_github(e);
-        if matches!(e, GithubError::OAuthRestricted { .. }) {
+        if matches!(
+            e,
+            GithubError::OAuthRestricted { .. } | GithubError::NotFound(_) | GithubError::Http(404)
+        ) {
             error.link = Some(self.sso_settings_link());
         }
         self.fail(during, error);

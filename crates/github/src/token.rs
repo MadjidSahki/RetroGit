@@ -93,14 +93,16 @@ impl TokenProvider {
             return Err(GithubError::Unauthorized);
         };
         match call(primary) {
-            Err(first @ GithubError::OAuthRestricted { .. }) => match self.gh_token() {
+            Err(first) if hidden_by_restriction(&first) => match self.gh_token() {
                 Some(gh) => {
                     let r = call(&gh);
                     if r.is_ok() {
                         self.remember(owner);
                     }
+                    // gh cannot see it either: RetroGit's answer is the one to explain.
                     r.map_err(|e| match e {
-                        GithubError::Unauthorized | GithubError::OAuthRestricted { .. } => first,
+                        GithubError::Unauthorized => first,
+                        e if hidden_by_restriction(&e) => first,
                         other => other,
                     })
                 }
@@ -109,6 +111,18 @@ impl TokenProvider {
             other => other,
         }
     }
+}
+
+/// Errors an organization restricting OAuth Apps produces: the explicit restriction, or
+/// the repository looking missing (GraphQL `NOT_FOUND`, REST 404).
+fn hidden_by_restriction(e: &GithubError) -> bool {
+    matches!(
+        e,
+        GithubError::OAuthRestricted { .. }
+            | GithubError::NotFound(_)
+            | GithubError::Http(404)
+            | GithubError::Rejected { status: 404, .. }
+    )
 }
 
 /// First non-empty line of `gh auth token`'s output.

@@ -334,3 +334,4 @@ pub const NOTIFY_CHANGES: &str = "changes requested by {who}";
 pub const NOTIFY_COMMENT: &str = "new comment from {who}";
 pub const NOTIFY_MERGED: &str = "merged";
 pub const NOTIFY_CLOSED: &str = "closed";
+pub const ERR_PULLS_NOT_FOUND: &str = "GitHub does not show this repository to RetroGit. If its organization restricts third-party applications, install the GitHub CLI and run 'gh auth login' with the same account: RetroGit then uses it. Or ask an owner to approve RetroGit (link below).";
