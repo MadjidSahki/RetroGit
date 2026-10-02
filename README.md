@@ -59,6 +59,8 @@ and a pixel font.
 - Comment on diff lines (right-click a line): post the comment at once, or add it to a review
 - Review: comment, approve or request changes (approving your own pull request is disabled, as on GitHub); reply to threads; resolve or unresolve conversations
 - Comment in the conversation; add and remove labels
+- Edit the title and description; see and change reviewers (with their review state) and assignees; mark a draft ready for review, or convert it back to a draft
+- Comment on several lines (click, then Shift+click, then right-click), and suggest changes: suggestions you receive show as a small diff and can be applied as a local commit on the checked-out pull request, ready to push
 - Merge, squash or rebase (as the repository allows), with editable commit title and message and optional branch deletion; the button is disabled with the reason when GitHub would refuse (draft, conflicts, required reviews or checks, out of date, no permission)
 - Check out a pull request: as its branch when it lives in the repository (brought up to date), or as `pr/<number>` for forks
 
@@ -193,8 +195,8 @@ Licenses of embedded third-party data: [THIRD_PARTY.md](THIRD_PARTY.md).
   with the same account (`gh auth login`).
 
 **Pull requests**
-- Not supported: editing the title or description, reviewers, assignees, milestones, marking a
-  draft as ready, reactions, multi-line comments, suggested changes.
+- Not supported: team reviewers, milestones, reactions; suggestions are applied one at a time
+  as local commits (not directly on GitHub).
 - Lists are limited to the 50 most recently updated pull requests, and a pull request to its
   first 100 comments, reviews, review threads, commits and checks (repository labels: 100).
 - Markdown is simplified: no HTML, tables or inline images (images are shown as links).
