@@ -122,3 +122,23 @@ fn both_fonts_are_installed_and_named() {
     }
     assert_eq!(Font::from_name("Comic Sans"), None);
 }
+
+#[test]
+fn the_title_bar_draws_its_icon() {
+    let ctx = egui::Context::default();
+    theme::install(&ctx);
+    let tex = ctx.load_texture(
+        "icon",
+        egui::ColorImage::filled([2, 2], Color32::RED),
+        egui::TextureOptions::LINEAR,
+    );
+    let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+        win95::TitleBar::new("RetroGit").icon(tex.id()).show(ui);
+    });
+    out.textures_delta.clear();
+    let drawn = out.shapes.iter().any(|s| match &s.shape {
+        Shape::Mesh(m) => m.texture_id == tex.id(),
+        _ => false,
+    });
+    assert!(drawn, "the icon is painted in the title bar");
+}

@@ -174,7 +174,7 @@ pub const ERR_PLATFORM: &str = "Not supported on this platform.";
 pub const ERR_CLI_START: &str = "retrogit: cannot start the window:";
 pub const ABOUT_TITLE: &str = "About RetroGit";
 pub const ABOUT_TAGLINE: &str = "A Git client with a Windows 95 look.";
-pub const ABOUT_FONT: &str = "Font: W95FA by Alina Sava (SIL Open Font License 1.1)";
+pub const ABOUT_FONT: &str = "Fonts: W95FA by Alina Sava, Atkinson Hyperlegible by the Braille Institute (SIL Open Font License 1.1). Git logo by Jason Long (CC BY 3.0).";
 
 pub const ERR_TITLE: &str = "RetroGit";
 pub const ERR_NO_NETWORK: &str = "Could not reach GitHub. Check your network connection.";

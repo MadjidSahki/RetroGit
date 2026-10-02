@@ -21,9 +21,12 @@ use win95::theme::{self, Appearance, Font};
 fn collect(shape: &Shape, fills: &mut Vec<Color32>, texts: &mut Vec<Color32>) {
     match shape {
         Shape::Vec(v) => v.iter().for_each(|s| collect(s, fills, texts)),
+        // Images (the logo) are tinted white: not a fill color.
+        Shape::Rect(r) if r.brush.is_some() => {}
         Shape::Rect(r) => fills.push(r.fill),
         Shape::Circle(c) => fills.extend([c.fill, c.stroke.color]),
         Shape::LineSegment { stroke, .. } => fills.push(stroke.color),
+        Shape::Mesh(m) if m.texture_id != egui::TextureId::default() => {}
         Shape::Mesh(m) => fills.extend(m.vertices.iter().map(|v| v.color)),
         Shape::Text(t) => {
             texts.extend(t.galley.job.sections.iter().map(|s| s.format.color));

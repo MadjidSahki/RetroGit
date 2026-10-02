@@ -62,6 +62,7 @@ fn main() -> eframe::Result {
         .with_title(strings::APP_NAME)
         .with_decorations(false)
         .with_resizable(true)
+        .with_icon(std::sync::Arc::new(retrogit::ui::logo::window_icon()))
         .with_min_inner_size([520.0, 360.0])
         .with_inner_size([900.0, 600.0]);
     if let Some(g) = config.window {

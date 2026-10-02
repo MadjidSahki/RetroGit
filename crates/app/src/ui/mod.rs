@@ -10,6 +10,7 @@ pub mod diff_view;
 pub mod discard;
 pub mod git_dialogs;
 pub mod history;
+pub mod logo;
 pub mod main_window;
 pub mod message;
 pub mod notifications;

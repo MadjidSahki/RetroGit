@@ -1,4 +1,4 @@
-use win95::{Button95, Dialog, Icon};
+use win95::{Button95, Dialog};
 
 use super::Ctx;
 use crate::strings as s;
@@ -8,14 +8,15 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
         return;
     }
     let r = Dialog::new("about", s::ABOUT_TITLE)
-        .width(320.0)
+        .width(440.0)
         .show(egui_ctx, |ui| {
             ui.horizontal(|ui| {
-                win95::icon::icon(ui, Icon::Info);
+                let logo = super::logo::logo_texture(ui.ctx());
+                ui.add(egui::Image::new(&logo).fit_to_exact_size(egui::vec2(96.0, 96.0)));
                 ui.vertical(|ui| {
                     ui.label(format!("{} {}", s::APP_NAME, env!("CARGO_PKG_VERSION")));
                     ui.label(s::ABOUT_TAGLINE);
-                    ui.label(s::ABOUT_FONT);
+                    ui.add(egui::Label::new(s::ABOUT_FONT).wrap());
                 });
             });
             ui.add_space(8.0);

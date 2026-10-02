@@ -18,6 +18,7 @@ pub struct TitleBar<'a> {
     title: &'a str,
     active: bool,
     close_only: bool,
+    icon: Option<egui::TextureId>,
 }
 
 pub const HEIGHT: f32 = 18.0;
@@ -28,11 +29,18 @@ impl<'a> TitleBar<'a> {
             title,
             active: true,
             close_only: false,
+            icon: None,
         }
     }
 
     pub fn active(mut self, active: bool) -> Self {
         self.active = active;
+        self
+    }
+
+    /// Small icon left of the title (drawn 16x16), like Win95 application windows.
+    pub fn icon(mut self, texture: egui::TextureId) -> Self {
+        self.icon = Some(texture);
         self
     }
 
@@ -52,8 +60,19 @@ impl<'a> TitleBar<'a> {
             (pal.inactive_title, pal.inactive_title_end)
         };
         ui.painter().add(gradient(rect, start, end));
+        let mut text_left = 4.0;
+        if let Some(tex) = self.icon {
+            let r = Rect::from_center_size(rect.left_center() + vec2(10.0, 0.0), vec2(16.0, 16.0));
+            ui.painter().image(
+                tex,
+                r,
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+            text_left = 22.0;
+        }
         ui.painter().text(
-            rect.left_center() + vec2(4.0, 0.0),
+            rect.left_center() + vec2(text_left, 0.0),
             Align2::LEFT_CENTER,
             self.title,
             theme::font(theme::FONT_SIZE),
