@@ -1,0 +1,2 @@
+# Raw RGBA images: never convert line endings.
+*.rgba binary

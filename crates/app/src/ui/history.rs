@@ -15,20 +15,9 @@ pub const LANE_WIDTH: f32 = 14.0;
 /// Load the next page when this close to the end of the list.
 const PREFETCH_ROWS: usize = 50;
 
-/// Lane colors (Win95-ish palette, readable on white).
-pub const PALETTE: [Color32; 8] = [
-    Color32::from_rgb(0x00, 0x00, 0x80),
-    Color32::from_rgb(0x80, 0x00, 0x00),
-    Color32::from_rgb(0x00, 0x80, 0x00),
-    Color32::from_rgb(0x80, 0x00, 0x80),
-    Color32::from_rgb(0x00, 0x80, 0x80),
-    Color32::from_rgb(0x80, 0x80, 0x00),
-    Color32::from_rgb(0xC0, 0x40, 0x00),
-    Color32::from_rgb(0x40, 0x40, 0x40),
-];
-
-pub fn lane_color(i: usize) -> Color32 {
-    PALETTE[i % PALETTE.len()]
+/// Color of graph lane `i` in `palette`.
+pub fn lane_color(palette: &win95::Palette, i: usize) -> Color32 {
+    palette.lanes[i % palette.lanes.len()]
 }
 
 /// Center x of lane `col` in a graph area starting at `left`.
@@ -49,9 +38,11 @@ pub fn relative_time(now: i64, t: i64) -> String {
 }
 
 fn paint_graph(painter: &egui::Painter, row: &GraphRow, left: f32, rect: Rect) {
+    let pal = win95::theme::palette(painter.ctx());
     let (top, mid, bottom) = (rect.top(), rect.center().y, rect.bottom());
-    let line =
-        |a: Pos2, b: Pos2, c: usize| painter.line_segment([a, b], Stroke::new(2.0, lane_color(c)));
+    let line = |a: Pos2, b: Pos2, c: usize| {
+        painter.line_segment([a, b], Stroke::new(2.0, lane_color(&pal, c)))
+    };
     for e in &row.up {
         line(
             pos2(lane_x(left, e.from), top),
@@ -67,8 +58,8 @@ fn paint_graph(painter: &egui::Painter, row: &GraphRow, left: f32, rect: Rect) {
         );
     }
     let c = pos2(lane_x(left, row.column), mid);
-    painter.circle_filled(c, 4.5, lane_color(row.color));
-    painter.circle_stroke(c, 4.5, Stroke::new(1.0, Color32::WHITE));
+    painter.circle_filled(c, 4.5, lane_color(&pal, row.color));
+    painter.circle_stroke(c, 4.5, Stroke::new(1.0, pal.window));
 }
 
 pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
@@ -85,168 +76,167 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
 }
 
 fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
-    bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 1, |ui| {
-        ui.set_min_size(ui.available_size());
-        let h = &cx.state.history;
-        if h.entries.is_empty() {
-            ui.label(if h.loading {
-                s::LOADING_HISTORY
-            } else {
-                s::NO_HISTORY
-            });
-            return;
-        }
-        let lanes = h
-            .graph
-            .iter()
-            .map(GraphRow::width)
-            .max()
-            .unwrap_or(1)
-            .min(12);
-        let graph_w = lanes as f32 * LANE_WIDTH + 6.0;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        let font = win95::theme::font(win95::theme::FONT_SIZE);
-        let mut clicked: Option<String> = None;
-        let mut menu: Option<(HistoryAction, gitcore::LogEntry)> = None;
-        let mut last_visible = 0;
-        ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show_rows(ui, ROW_HEIGHT, h.entries.len(), |ui, range| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                for i in range {
-                    last_visible = i;
-                    let e = &h.entries[i];
-                    let (rect, resp) = ui.allocate_exact_size(
-                        vec2(ui.available_width(), ROW_HEIGHT),
-                        Sense::click(),
-                    );
-                    let selected = h.selected.as_deref() == Some(e.id.as_str());
-                    let p = ui.painter();
-                    if selected {
-                        p.rect_filled(rect, 0.0, win95::theme::NAVY);
-                    }
-                    if let Some(row) = h.graph.get(i) {
-                        paint_graph(&p.with_clip_rect(rect), row, rect.left(), rect);
-                    }
-                    let text_color = if selected {
-                        win95::theme::WHITE
-                    } else {
-                        win95::theme::BLACK
-                    };
-                    let mut x = rect.left() + graph_w;
-                    let y = rect.center().y;
-                    let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
-                    let id_rect = p.text(
-                        pos2(x, y),
-                        Align2::LEFT_CENTER,
-                        &e.short_id,
-                        mono,
-                        text_color,
-                    );
-                    x = id_rect.right() + 8.0;
-                    for r in &e.refs {
-                        let (bg, fg) = match r.kind {
-                            RefKind::Head => {
-                                (Color32::from_rgb(0xFF, 0xFF, 0x80), win95::theme::BLACK)
-                            }
-                            RefKind::LocalBranch => {
-                                (Color32::from_rgb(0xC0, 0xFF, 0xC0), win95::theme::BLACK)
-                            }
-                            RefKind::RemoteBranch => {
-                                (Color32::from_rgb(0xC0, 0xD8, 0xFF), win95::theme::BLACK)
-                            }
-                            RefKind::Tag => {
-                                (Color32::from_rgb(0xFF, 0xD8, 0xA0), win95::theme::BLACK)
-                            }
-                        };
-                        let g = p.layout_no_wrap(r.name.clone(), font.clone(), fg);
-                        let tag =
-                            Rect::from_min_size(pos2(x, y - 8.0), vec2(g.size().x + 8.0, 16.0));
-                        p.rect_filled(tag, 0.0, bg);
-                        p.rect_stroke(
-                            tag,
-                            0.0,
-                            Stroke::new(1.0, win95::theme::GRAY),
-                            egui::StrokeKind::Inside,
+    bevel_frame(
+        ui,
+        Bevel::Field,
+        win95::theme::palette(ui.ctx()).window,
+        1,
+        |ui| {
+            ui.set_min_size(ui.available_size());
+            let h = &cx.state.history;
+            if h.entries.is_empty() {
+                ui.label(if h.loading {
+                    s::LOADING_HISTORY
+                } else {
+                    s::NO_HISTORY
+                });
+                return;
+            }
+            let lanes = h
+                .graph
+                .iter()
+                .map(GraphRow::width)
+                .max()
+                .unwrap_or(1)
+                .min(12);
+            let graph_w = lanes as f32 * LANE_WIDTH + 6.0;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let font = win95::theme::font(win95::theme::FONT_SIZE);
+            let mut clicked: Option<String> = None;
+            let mut menu: Option<(HistoryAction, gitcore::LogEntry)> = None;
+            let mut last_visible = 0;
+            ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show_rows(ui, ROW_HEIGHT, h.entries.len(), |ui, range| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    for i in range {
+                        last_visible = i;
+                        let e = &h.entries[i];
+                        let (rect, resp) = ui.allocate_exact_size(
+                            vec2(ui.available_width(), ROW_HEIGHT),
+                            Sense::click(),
                         );
-                        p.galley(pos2(x + 4.0, y - g.size().y / 2.0), g, fg);
-                        x = tag.right() + 4.0;
-                    }
-                    let right = format!("{}  {}", e.author, relative_time(now, e.time));
-                    let right_rect = p.text(
-                        rect.right_center() - vec2(6.0, 0.0),
-                        Align2::RIGHT_CENTER,
-                        &right,
-                        font.clone(),
-                        text_color,
-                    );
-                    p.with_clip_rect(Rect::from_min_max(
-                        pos2(x, rect.top()),
-                        pos2(right_rect.left() - 8.0, rect.bottom()),
-                    ))
-                    .text(
-                        pos2(x + 2.0, y),
-                        Align2::LEFT_CENTER,
-                        &e.summary,
-                        font.clone(),
-                        text_color,
-                    );
-                    if resp.clicked() {
-                        clicked = Some(e.id.clone());
-                    }
-                    resp.context_menu(|ui| {
-                        for (action, label) in [
-                            (HistoryAction::CherryPick, s::MENU_CHERRY_PICK),
-                            (HistoryAction::Revert, s::MENU_REVERT),
-                            (HistoryAction::Reset, s::MENU_RESET),
-                            (HistoryAction::RebaseFrom, s::MENU_REBASE_FROM),
-                            (HistoryAction::CreateTag, s::MENU_CREATE_TAG),
-                        ] {
-                            if ui.button(label).clicked() {
-                                menu = Some((action, e.clone()));
-                                ui.close();
-                            }
+                        let selected = h.selected.as_deref() == Some(e.id.as_str());
+                        let p = ui.painter();
+                        let pal = win95::theme::palette(ui.ctx());
+                        if selected {
+                            p.rect_filled(rect, 0.0, pal.selection);
                         }
-                    });
+                        if let Some(row) = h.graph.get(i) {
+                            paint_graph(&p.with_clip_rect(rect), row, rect.left(), rect);
+                        }
+                        let text_color = if selected {
+                            pal.selection_text
+                        } else {
+                            pal.window_text
+                        };
+                        let mut x = rect.left() + graph_w;
+                        let y = rect.center().y;
+                        let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
+                        let id_rect = p.text(
+                            pos2(x, y),
+                            Align2::LEFT_CENTER,
+                            &e.short_id,
+                            mono,
+                            text_color,
+                        );
+                        x = id_rect.right() + 8.0;
+                        for r in &e.refs {
+                            let bg = match r.kind {
+                                RefKind::Head => pal.ref_head,
+                                RefKind::LocalBranch => pal.ref_branch,
+                                RefKind::RemoteBranch => pal.ref_remote,
+                                RefKind::Tag => pal.ref_tag,
+                            };
+                            let fg = pal.window_text;
+                            let g = p.layout_no_wrap(r.name.clone(), font.clone(), fg);
+                            let tag =
+                                Rect::from_min_size(pos2(x, y - 8.0), vec2(g.size().x + 8.0, 16.0));
+                            p.rect_filled(tag, 0.0, bg);
+                            p.rect_stroke(
+                                tag,
+                                0.0,
+                                Stroke::new(1.0, pal.shadow),
+                                egui::StrokeKind::Inside,
+                            );
+                            p.galley(pos2(x + 4.0, y - g.size().y / 2.0), g, fg);
+                            x = tag.right() + 4.0;
+                        }
+                        let right = format!("{}  {}", e.author, relative_time(now, e.time));
+                        let right_rect = p.text(
+                            rect.right_center() - vec2(6.0, 0.0),
+                            Align2::RIGHT_CENTER,
+                            &right,
+                            font.clone(),
+                            text_color,
+                        );
+                        p.with_clip_rect(Rect::from_min_max(
+                            pos2(x, rect.top()),
+                            pos2(right_rect.left() - 8.0, rect.bottom()),
+                        ))
+                        .text(
+                            pos2(x + 2.0, y),
+                            Align2::LEFT_CENTER,
+                            &e.summary,
+                            font.clone(),
+                            text_color,
+                        );
+                        if resp.clicked() {
+                            clicked = Some(e.id.clone());
+                        }
+                        resp.context_menu(|ui| {
+                            for (action, label) in [
+                                (HistoryAction::CherryPick, s::MENU_CHERRY_PICK),
+                                (HistoryAction::Revert, s::MENU_REVERT),
+                                (HistoryAction::Reset, s::MENU_RESET),
+                                (HistoryAction::RebaseFrom, s::MENU_REBASE_FROM),
+                                (HistoryAction::CreateTag, s::MENU_CREATE_TAG),
+                            ] {
+                                if ui.button(label).clicked() {
+                                    menu = Some((action, e.clone()));
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
+                });
+            let need_more = last_visible + PREFETCH_ROWS >= cx.state.history.entries.len()
+                && cx.state.wants_more_history();
+            if need_more {
+                cx.state.history.loading = true;
+                cx.worker.send(Command::LoadLog {
+                    skip: cx.state.history.entries.len(),
+                });
+            }
+            if let Some((action, e)) = menu {
+                if let Some(cmd) = cx.state.history_action(action, &e) {
+                    cx.worker.send(cmd);
                 }
-            });
-        let need_more = last_visible + PREFETCH_ROWS >= cx.state.history.entries.len()
-            && cx.state.wants_more_history();
-        if need_more {
-            cx.state.history.loading = true;
-            cx.worker.send(Command::LoadLog {
-                skip: cx.state.history.entries.len(),
-            });
-        }
-        if let Some((action, e)) = menu {
-            if let Some(cmd) = cx.state.history_action(action, &e) {
-                cx.worker.send(cmd);
+                if action == HistoryAction::CreateTag {
+                    // The dialog flags names already taken.
+                    cx.worker.send(Command::LoadTags);
+                }
             }
-            if action == HistoryAction::CreateTag {
-                // The dialog flags names already taken.
-                cx.worker.send(Command::LoadTags);
+            if let Some(id) = clicked {
+                cx.state.select_commit(&id);
+                cx.worker.send(Command::LoadCommit(id));
             }
-        }
-        if let Some(id) = clicked {
-            cx.state.select_commit(&id);
-            cx.worker.send(Command::LoadCommit(id));
-        }
-    });
+        },
+    );
 }
 
-fn signature_text(s: Option<&SignatureStatus>) -> (String, Color32) {
+fn signature_text(pal: &win95::Palette, s: Option<&SignatureStatus>) -> (String, Color32) {
     match s {
-        None => (s::SIG_CHECKING.into(), win95::theme::GRAY),
-        Some(SignatureStatus::Good { signer }) => (
-            format!("{} ({signer})", s::SIG_GOOD),
-            Color32::from_rgb(0, 0x80, 0),
-        ),
-        Some(SignatureStatus::Bad) => (s::SIG_BAD.into(), Color32::from_rgb(0xC0, 0, 0)),
-        Some(SignatureStatus::Unknown) => (s::SIG_UNKNOWN.into(), Color32::from_rgb(0x80, 0x60, 0)),
-        Some(SignatureStatus::Unsigned) => (s::SIG_UNSIGNED.into(), win95::theme::GRAY),
+        None => (s::SIG_CHECKING.into(), pal.gray_text),
+        Some(SignatureStatus::Good { signer }) => {
+            (format!("{} ({signer})", s::SIG_GOOD), pal.success)
+        }
+        Some(SignatureStatus::Bad) => (s::SIG_BAD.into(), pal.error),
+        Some(SignatureStatus::Unknown) => (s::SIG_UNKNOWN.into(), pal.warning),
+        Some(SignatureStatus::Unsigned) => (s::SIG_UNSIGNED.into(), pal.gray_text),
     }
 }
 
@@ -262,62 +252,73 @@ fn detail(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             h.detail_colors = crate::highlight::Colors::Pending;
         }
     }
-    bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 4, |ui| {
-        ui.set_min_size(ui.available_size());
-        let h = &cx.state.history;
-        let Some(d) = &h.detail else {
-            ui.label(s::SELECT_A_COMMIT);
-            return;
-        };
-        let (sig, sig_color) = signature_text(h.signature.as_ref());
-        ui.horizontal_wrapped(|ui| {
-            ui.label(
-                RichText::new(&d.short_id).font(egui::FontId::monospace(win95::theme::FONT_SIZE)),
-            );
-            ui.label(format!(
-                "· {} <{}> · {}",
-                d.author,
-                d.email,
-                format_epoch(d.time)
-            ));
-            ui.label(RichText::new(sig).color(sig_color));
-        });
-        ui.separator();
-        // Left: message and changed files (own scroll). Right: diff of the selected file
-        // (own scroll, both directions, only visible rows are laid out).
-        egui::Panel::left("commit_files")
-            .frame(egui::Frame::NONE)
-            .resizable(true)
-            .default_size(260.0)
-            .min_size(140.0)
-            .max_size((ui.available_width() - 200.0).max(140.0))
-            .show(ui, |ui| {
-                ScrollArea::vertical()
-                    .id_salt("commit_files_scroll")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::Label::new(RichText::new(&d.message).color(win95::theme::BLACK))
-                                .wrap(),
-                        );
-                        ui.add_space(6.0);
-                        ui.label(s::FILES);
-                        for f in &d.files {
-                            let label = super::changes::describe(&f.path, &f.change);
-                            let selected = h.detail_file.as_deref() == Some(f.path.as_str());
-                            if ui.selectable_label(selected, label).clicked() {
-                                open_file = Some(f.path.clone());
-                            }
-                        }
-                    });
+    bevel_frame(
+        ui,
+        Bevel::Field,
+        win95::theme::palette(ui.ctx()).window,
+        4,
+        |ui| {
+            ui.set_min_size(ui.available_size());
+            let h = &cx.state.history;
+            let Some(d) = &h.detail else {
+                ui.label(s::SELECT_A_COMMIT);
+                return;
+            };
+            let (sig, sig_color) =
+                signature_text(&win95::theme::palette(ui.ctx()), h.signature.as_ref());
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(&d.short_id)
+                        .font(egui::FontId::monospace(win95::theme::FONT_SIZE)),
+                );
+                ui.label(format!(
+                    "- {} <{}> - {}",
+                    d.author,
+                    d.email,
+                    format_epoch(d.time)
+                ));
+                ui.label(RichText::new(sig).color(sig_color));
             });
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.inner_margin(egui::Margin {
-                left: 6,
-                ..Default::default()
-            }))
-            .show(ui, |ui| commit_file_diff(ui, h));
-    });
+            ui.separator();
+            // Left: message and changed files (own scroll). Right: diff of the selected file
+            // (own scroll, both directions, only visible rows are laid out).
+            egui::Panel::left("commit_files")
+                .frame(egui::Frame::NONE)
+                .resizable(true)
+                .default_size(260.0)
+                .min_size(140.0)
+                .max_size((ui.available_width() - 200.0).max(140.0))
+                .show(ui, |ui| {
+                    ScrollArea::vertical()
+                        .id_salt("commit_files_scroll")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&d.message)
+                                        .color(win95::theme::palette(ui.ctx()).text),
+                                )
+                                .wrap(),
+                            );
+                            ui.add_space(6.0);
+                            ui.label(s::FILES);
+                            for f in &d.files {
+                                let label = super::changes::describe(&f.path, &f.change);
+                                let selected = h.detail_file.as_deref() == Some(f.path.as_str());
+                                if ui.selectable_label(selected, label).clicked() {
+                                    open_file = Some(f.path.clone());
+                                }
+                            }
+                        });
+                });
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.inner_margin(egui::Margin {
+                    left: 6,
+                    ..Default::default()
+                }))
+                .show(ui, |ui| commit_file_diff(ui, h));
+        },
+    );
     if let Some(path) = open_file {
         let h = &mut cx.state.history;
         if let Some(id) = h.selected.clone() {
@@ -370,6 +371,7 @@ pub fn diff_rows(
                 match *row {
                     super::diff_view::Row::Hunk(hi) => {
                         let header = crate::highlight::colored_line(
+                            &win95::theme::palette(ui.ctx()),
                             "",
                             &diff.hunks[hi].header,
                             None,
@@ -377,23 +379,25 @@ pub fn diff_rows(
                             mono.clone(),
                             Color32::TRANSPARENT,
                         );
+                        let pal = win95::theme::palette(ui.ctx());
                         let mut header = header;
                         for section in &mut header.sections {
-                            section.format.color = win95::theme::NAVY;
+                            section.format.color = pal.link;
                         }
                         crate::highlight::diff_row(
                             ui,
                             header,
                             super::diff_view::ROW_HEIGHT,
-                            Color32::from_rgb(0xE0, 0xE0, 0xF0),
+                            pal.hunk,
                         );
                     }
                     super::diff_view::Row::Line(hi, li) => {
                         let l = &diff.hunks[hi].lines[li];
+                        let pal = win95::theme::palette(ui.ctx());
                         let (sign, bg) = match l.kind {
-                            LineKind::Added => ("+", Color32::from_rgb(0xE6, 0xFF, 0xE6)),
-                            LineKind::Removed => ("-", Color32::from_rgb(0xFF, 0xE6, 0xE6)),
-                            LineKind::Context => (" ", win95::theme::WHITE),
+                            LineKind::Added => ("+", pal.added),
+                            LineKind::Removed => ("-", pal.removed),
+                            LineKind::Context => (" ", pal.window),
                         };
                         let num = |n: Option<u32>| {
                             n.map(|v| format!("{v:>5}"))
@@ -402,6 +406,7 @@ pub fn diff_rows(
                         let prefix = format!("{} {} {sign} ", num(l.old_no), num(l.new_no));
                         let text = l.text.trim_end_matches(['\n', '\r']);
                         let job = crate::highlight::colored_line(
+                            &win95::theme::palette(ui.ctx()),
                             &prefix,
                             text,
                             colors.line(hi, li),
@@ -433,6 +438,7 @@ mod tests {
     fn lanes_are_evenly_spaced_and_colors_cycle() {
         assert_eq!(lane_x(0.0, 0), 7.0);
         assert_eq!(lane_x(0.0, 2), 35.0);
-        assert_eq!(lane_color(0), lane_color(8));
+        let p = win95::palette::STANDARD;
+        assert_eq!(lane_color(&p, 0), lane_color(&p, 8));
     }
 }

@@ -182,7 +182,11 @@ impl AppState {
                 target,
                 diff,
                 colors,
+                dark,
             } => {
+                if dark != self.colors_dark {
+                    return;
+                }
                 use crate::highlight::{Colors, Target};
                 let value = match colors {
                     Some(c) => Colors::Ready(c),

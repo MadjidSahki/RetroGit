@@ -10,7 +10,8 @@ use crate::strings as s;
 
 pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let full = ui.max_rect();
-    ui.painter().rect_filled(full, 0.0, win95::theme::SILVER);
+    ui.painter()
+        .rect_filled(full, 0.0, win95::theme::palette(ui.ctx()).face);
     win95::bevel::paint(ui.painter(), full, Bevel::Window);
     let inner = full.shrink(3.0);
     ui.scope_builder(UiBuilder::new().max_rect(inner), |ui| {
@@ -51,10 +52,16 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                         Tab::Stashes => super::stashes::show(ui, cx),
                     }
                 } else {
-                    bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 8, |ui| {
-                        ui.set_min_size(ui.available_size());
-                        ui.label(s::NO_REPO);
-                    });
+                    bevel_frame(
+                        ui,
+                        Bevel::Field,
+                        win95::theme::palette(ui.ctx()).window,
+                        8,
+                        |ui| {
+                            ui.set_min_size(ui.available_size());
+                            ui.label(s::NO_REPO);
+                        },
+                    );
                 }
             });
     });
@@ -73,7 +80,10 @@ fn title(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
     // Drawn above dialogs so the window can still be moved/minimized/closed while one is open.
     let action = win95::above_dialogs(ui, "main_title", win95::title_bar::HEIGHT, |ui| {
-        TitleBar::new(&text).active(focused).show(ui)
+        TitleBar::new(&text)
+            .icon(super::logo::icon_texture(ui.ctx()).id())
+            .active(focused)
+            .show(ui)
     });
     match action {
         TitleAction::StartDrag => ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag),
@@ -205,6 +215,10 @@ fn menu(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                 && let Some(path) = current
             {
                 cx.worker.send(Command::OpenRepo(path));
+            }
+            ui.separator();
+            if ui.button(s::APPEARANCE_MENU).clicked() {
+                cx.state.open_appearance();
             }
         });
         ui.menu_button(s::MENU_HELP, |ui| {

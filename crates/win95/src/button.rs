@@ -1,7 +1,7 @@
 use egui::{Align2, Response, Sense, Ui, Vec2, Widget, WidgetInfo, WidgetType, vec2};
 
 use crate::bevel::{self, Bevel};
-use crate::theme::{self, BLACK, GRAY, SILVER, WHITE};
+use crate::theme;
 
 /// Classic push button: 75×23 minimum, pressed look while held, embossed text when disabled.
 pub struct Button95 {
@@ -32,10 +32,11 @@ impl Button95 {
 
 impl Widget for Button95 {
     fn ui(self, ui: &mut Ui) -> Response {
+        let pal = theme::palette(ui.ctx());
         let font = theme::font(theme::FONT_SIZE);
         let galley = ui
             .painter()
-            .layout_no_wrap(self.text.clone(), font.clone(), BLACK);
+            .layout_no_wrap(self.text.clone(), font.clone(), pal.text);
         let size = (galley.size() + vec2(16.0, 8.0)).max(self.min_size);
         let sense = if self.enabled {
             Sense::click()
@@ -49,7 +50,7 @@ impl Widget for Button95 {
         if ui.is_rect_visible(rect) {
             let pressed = self.enabled && response.is_pointer_button_down_on();
             let p = ui.painter();
-            p.rect_filled(rect, 0.0, SILVER);
+            p.rect_filled(rect, 0.0, pal.face);
             bevel::paint(
                 p,
                 rect,
@@ -61,16 +62,26 @@ impl Widget for Button95 {
             );
             let center = rect.center() + if pressed { vec2(1.0, 1.0) } else { Vec2::ZERO };
             if self.enabled {
-                p.text(center, Align2::CENTER_CENTER, &self.text, font, BLACK);
+                p.text(center, Align2::CENTER_CENTER, &self.text, font, pal.text);
             } else {
+                // Win95 embosses disabled text with the highlight color, when it is lighter
+                // than the face (not in High Contrast White, where it is black).
+                if crate::palette::luminance(pal.highlight) > crate::palette::luminance(pal.face) {
+                    p.text(
+                        center + vec2(1.0, 1.0),
+                        Align2::CENTER_CENTER,
+                        &self.text,
+                        font.clone(),
+                        pal.highlight,
+                    );
+                }
                 p.text(
-                    center + vec2(1.0, 1.0),
+                    center,
                     Align2::CENTER_CENTER,
                     &self.text,
-                    font.clone(),
-                    WHITE,
+                    font,
+                    pal.gray_text,
                 );
-                p.text(center, Align2::CENTER_CENTER, &self.text, font, GRAY);
             }
         }
         response

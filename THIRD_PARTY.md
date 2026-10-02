@@ -1,6 +1,6 @@
 # Third-party notices
 
-RetroGit embeds syntax definitions and a color theme from the [bat](https://github.com/sharkdp/bat) project (via the [two-face](https://codeberg.org/CosmicHarper/two-face) and [syntect](https://github.com/trishume/syntect) crates), and the W95FA font (SIL Open Font License 1.1, see `crates/win95/assets/OFL.txt`). Their licenses follow.
+RetroGit embeds syntax definitions and a color theme from the [bat](https://github.com/sharkdp/bat) project (via the [two-face](https://codeberg.org/CosmicHarper/two-face) and [syntect](https://github.com/trishume/syntect) crates), the W95FA font (SIL Open Font License 1.1, see `crates/win95/assets/OFL.txt`), the Atkinson Hyperlegible font (SIL Open Font License 1.1, see `crates/win95/assets/OFL-AtkinsonHyperlegible.txt`), and the Git logo by Jason Long in its icon (Creative Commons Attribution 3.0). Their licenses follow.
 
 Most of the code for generating both theme and syntax dumps along with the
 curation of said themes and syntaxes is taken from the

@@ -7,9 +7,9 @@ pub fn text_color_on(bg: [u8; 3]) -> Color32 {
     let [r, g, b] = bg.map(f32::from);
     let luminance = 0.299 * r + 0.587 * g + 0.114 * b;
     if luminance > 150.0 {
-        theme::BLACK
+        Color32::BLACK
     } else {
-        theme::WHITE
+        Color32::WHITE
     }
 }
 
@@ -46,7 +46,7 @@ pub fn label_chip(ui: &mut Ui, text: &str, color: [u8; 3]) -> Response {
         .layout_no_wrap(
             text.to_string(),
             theme::font(theme::FONT_SIZE),
-            theme::BLACK,
+            Color32::BLACK,
         )
         .size()
         .x;
@@ -68,14 +68,18 @@ mod tests {
     fn text_is_readable_on_light_and_dark_labels() {
         assert_eq!(
             text_color_on([0xa2, 0xee, 0xef]),
-            theme::BLACK,
+            Color32::BLACK,
             "enhancement"
         );
-        assert_eq!(text_color_on([0xcf, 0xd3, 0xd7]), theme::BLACK, "duplicate");
-        assert_eq!(text_color_on([0xd7, 0x3a, 0x4a]), theme::WHITE, "bug");
+        assert_eq!(
+            text_color_on([0xcf, 0xd3, 0xd7]),
+            Color32::BLACK,
+            "duplicate"
+        );
+        assert_eq!(text_color_on([0xd7, 0x3a, 0x4a]), Color32::WHITE, "bug");
         assert_eq!(
             text_color_on([0x00, 0x75, 0xca]),
-            theme::WHITE,
+            Color32::WHITE,
             "documentation"
         );
     }

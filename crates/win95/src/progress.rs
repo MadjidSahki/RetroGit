@@ -1,7 +1,6 @@
 use egui::{Rect, Response, Sense, Ui, Widget, pos2, vec2};
 
 use crate::bevel::{self, Bevel};
-use crate::theme::{NAVY, SILVER};
 
 const BLOCK: f32 = 8.0;
 const GAP: f32 = 2.0;
@@ -34,9 +33,10 @@ pub fn block_count(fraction: f32, inner_width: f32) -> usize {
 
 impl Widget for ProgressBar95 {
     fn ui(self, ui: &mut Ui) -> Response {
+        let pal = crate::theme::palette(ui.ctx());
         let (rect, resp) = ui.allocate_exact_size(vec2(self.width, 20.0), Sense::hover());
         let p = ui.painter();
-        p.rect_filled(rect, 0.0, SILVER);
+        p.rect_filled(rect, 0.0, pal.face);
         bevel::paint(p, rect, Bevel::Shallow);
         let inner = rect.shrink(3.0);
         let total = block_count(1.0, inner.width());
@@ -50,7 +50,7 @@ impl Widget for ProgressBar95 {
         match self.fraction {
             Some(f) => {
                 for i in 0..block_count(f, inner.width()) {
-                    p.rect_filled(block_at(i), 0.0, NAVY);
+                    p.rect_filled(block_at(i), 0.0, pal.selection);
                 }
             }
             None => {
@@ -60,7 +60,7 @@ impl Widget for ProgressBar95 {
                 for k in 0..5 {
                     let i = (step + k) % span.max(1);
                     if i >= 5 && i - 5 < total {
-                        p.rect_filled(block_at(i - 5), 0.0, NAVY);
+                        p.rect_filled(block_at(i - 5), 0.0, pal.selection);
                     }
                 }
                 ui.ctx()

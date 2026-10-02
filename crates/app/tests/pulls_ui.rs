@@ -191,3 +191,60 @@ fn a_repository_outside_github_explains_it() {
     h.run();
     assert!(h.query_by_label(s::NOT_GITHUB).is_some());
 }
+
+#[test]
+fn a_hovered_commit_stays_readable_in_high_contrast_white() {
+    let mut w = world(false);
+    {
+        let pulls = &mut w.state.pulls;
+        let mut d = (**pulls.detail.as_ref().unwrap()).clone();
+        d.commits = vec![github::PrCommit {
+            oid: "a".repeat(40),
+            short_oid: "aaaaaaa".into(),
+            headline: "Fix the login".into(),
+            author: "bob".into(),
+            date: "2026-10-01T08:00:00Z".into(),
+        }];
+        pulls.detail = Some(Arc::new(d));
+        pulls.sub_tab = retrogit::state::PullTab::Commits;
+    }
+    let mut h = harness(w);
+    win95::theme::install(&h.ctx);
+    let scheme = win95::Scheme::HighContrastWhite;
+    win95::theme::apply(
+        &h.ctx,
+        win95::theme::Appearance {
+            scheme,
+            font: win95::theme::Font::W95fa,
+        },
+    );
+    h.run();
+    h.get_by_label_contains("Fix the login").hover();
+    h.run();
+    let p = scheme.palette();
+    let colors: Vec<egui::Color32> = h
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.job.text.contains("Fix the login") => Some(
+                t.galley
+                    .job
+                    .sections
+                    .first()
+                    .map(|s| s.format.color)
+                    .filter(|c| *c != egui::Color32::PLACEHOLDER)
+                    .unwrap_or(t.fallback_color),
+            ),
+            _ => None,
+        })
+        .collect();
+    assert!(!colors.is_empty());
+    for c in colors {
+        assert!(
+            win95::palette::contrast(c, p.selection) >= 4.5,
+            "hovered row text {c:?} on {:?}",
+            p.selection
+        );
+    }
+}

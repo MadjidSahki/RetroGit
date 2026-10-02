@@ -2,7 +2,7 @@ use egui::{Context, Id, Key, Modal};
 
 use crate::bevel::Bevel;
 use crate::panel::bevel_frame;
-use crate::theme::SILVER;
+use crate::theme;
 use crate::title_bar::{TitleAction, TitleBar};
 
 /// A modal Win95 dialog drawn inside the main window.
@@ -38,7 +38,7 @@ impl<'a> Dialog<'a> {
             .backdrop_color(egui::Color32::TRANSPARENT)
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
-                bevel_frame(ui, Bevel::Window, SILVER, 1, |ui| {
+                bevel_frame(ui, Bevel::Window, theme::palette(ctx).face, 1, |ui| {
                     ui.set_width(self.width);
                     if TitleBar::new(self.title).close_only().show(ui) == TitleAction::Close {
                         close = true;

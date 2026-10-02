@@ -1,10 +1,11 @@
 use egui::{Align2, Rect, Ui, pos2, vec2};
 
 use crate::bevel::{self, Bevel};
-use crate::theme::{self, BLACK};
+use crate::theme;
 
 /// Status bar made of sunken cells. `None` width = take the remaining space.
 pub fn status_bar(ui: &mut Ui, cells: &[(&str, Option<f32>)]) {
+    let pal = theme::palette(ui.ctx());
     let height = 20.0;
     let (rect, _) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), egui::Sense::hover());
@@ -23,7 +24,7 @@ pub fn status_bar(ui: &mut Ui, cells: &[(&str, Option<f32>)]) {
             Align2::LEFT_CENTER,
             *text,
             theme::font(theme::FONT_SIZE),
-            BLACK,
+            pal.text,
         );
         x += w + gap;
     }

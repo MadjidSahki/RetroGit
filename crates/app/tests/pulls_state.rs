@@ -201,6 +201,7 @@ fn files_open_as_diffs_and_follow_new_commits() {
         target: Target::Pull,
         diff: d.clone(),
         colors: None,
+        dark: false,
     });
     assert_eq!(st.pulls.file_colors, Colors::Plain);
     // New commit: same file, new patch.

@@ -1,17 +1,18 @@
 use egui::{Align2, Rect, Response, Sense, Stroke, Ui, WidgetInfo, WidgetType, pos2, vec2};
 
 use crate::bevel::{self, Bevel};
-use crate::theme::{self, BLACK, GRAY, WHITE};
+use crate::theme;
 
 /// Win95 check box: 13×13 white well with a black tick, label on the right.
 /// An empty `label` draws the box alone (used on diff lines).
 pub fn checkbox(ui: &mut Ui, checked: &mut bool, label: &str) -> Response {
     let font = theme::font(theme::FONT_SIZE);
+    let pal = theme::palette(ui.ctx());
     let text_w = if label.is_empty() {
         0.0
     } else {
         ui.painter()
-            .layout_no_wrap(label.to_string(), font.clone(), BLACK)
+            .layout_no_wrap(label.to_string(), font.clone(), pal.window_text)
             .size()
             .x
             + 6.0
@@ -26,10 +27,10 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, label: &str) -> Response {
     resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, value, &owned));
     let bx = Rect::from_min_size(pos2(rect.left(), rect.center().y - 6.5), vec2(13.0, 13.0));
     let p = ui.painter();
-    p.rect_filled(bx, 0.0, WHITE);
+    p.rect_filled(bx, 0.0, pal.window);
     bevel::paint(p, bx, Bevel::Field);
     if value {
-        let s = Stroke::new(2.0, BLACK);
+        let s = Stroke::new(2.0, pal.window_text);
         let (a, b, c) = (
             bx.left_top() + vec2(3.0, 6.0),
             bx.left_top() + vec2(5.5, 9.0),
@@ -44,14 +45,14 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, label: &str) -> Response {
             Align2::LEFT_CENTER,
             label,
             font,
-            BLACK,
+            pal.window_text,
         );
     }
     if resp.has_focus() {
         p.rect_stroke(
             rect.expand(1.0),
             0.0,
-            Stroke::new(1.0, GRAY),
+            Stroke::new(1.0, pal.shadow),
             egui::StrokeKind::Outside,
         );
     }

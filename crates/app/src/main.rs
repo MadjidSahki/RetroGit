@@ -62,10 +62,14 @@ fn main() -> eframe::Result {
         .with_title(strings::APP_NAME)
         .with_decorations(false)
         .with_resizable(true)
-        .with_min_inner_size([520.0, 360.0])
+        .with_icon(std::sync::Arc::new(retrogit::ui::logo::window_icon()))
+        .with_min_inner_size(retrogit::config::MIN_WINDOW)
         .with_inner_size([900.0, 600.0]);
     if let Some(g) = config.window {
-        viewport = viewport.with_inner_size([g.width.max(520.0), g.height.max(360.0)]);
+        viewport = viewport.with_inner_size([
+            g.width.max(retrogit::config::MIN_WINDOW[0]),
+            g.height.max(retrogit::config::MIN_WINDOW[1]),
+        ]);
         if let (Some(x), Some(y)) = (g.x, g.y) {
             viewport = viewport.with_position([x, y]);
         }
