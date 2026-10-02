@@ -19,7 +19,7 @@ fn a_selection_stays_in_its_hunk_and_on_its_side() {
     };
     // Shift+click further down in the same hunk.
     assert_eq!(
-        extend_selection(&d, one, 0, 4),
+        extend_selection(one, 0, 4),
         LineSelection {
             hunk: 0,
             from: 2,
@@ -28,7 +28,7 @@ fn a_selection_stays_in_its_hunk_and_on_its_side() {
     );
     // Upwards too.
     assert_eq!(
-        extend_selection(&d, one, 0, 0),
+        extend_selection(one, 0, 0),
         LineSelection {
             hunk: 0,
             from: 0,
@@ -36,7 +36,7 @@ fn a_selection_stays_in_its_hunk_and_on_its_side() {
         }
     );
     // Another hunk: unchanged.
-    assert_eq!(extend_selection(&d, one, 1, 1), one);
+    assert_eq!(extend_selection(one, 1, 1), one);
     // New side: B (2), C (3), c (4) -> lines 2..4, removed "b" ignored.
     let t = selection_target(
         &d,

@@ -31,12 +31,7 @@ pub struct LineSelection {
 }
 
 /// Shift+click on line `line` of hunk `hunk`: the selection grows to it, within its hunk.
-pub fn extend_selection(
-    _diff: &FileDiff,
-    sel: LineSelection,
-    hunk: usize,
-    line: usize,
-) -> LineSelection {
+pub fn extend_selection(sel: LineSelection, hunk: usize, line: usize) -> LineSelection {
     if hunk != sel.hunk {
         return sel;
     }
