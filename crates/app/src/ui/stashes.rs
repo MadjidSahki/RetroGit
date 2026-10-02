@@ -88,27 +88,33 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
 
 fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let mut clicked = None;
-    bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 2, |ui| {
-        ui.set_min_size(ui.available_size());
-        if cx.state.stashes.list.is_empty() {
-            ui.label(s::NO_STASHES);
-        }
-        ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for e in &cx.state.stashes.list {
-                    let date = format_epoch(e.time);
-                    let text =
-                        format!("stash@{{{}}}  {}\n{}  {date}", e.index, e.message, e.branch);
-                    if ui
-                        .selectable_label(cx.state.stashes.selected == Some(e.index), text)
-                        .clicked()
-                    {
-                        clicked = Some(e.index);
+    bevel_frame(
+        ui,
+        Bevel::Field,
+        win95::theme::palette(ui.ctx()).window,
+        2,
+        |ui| {
+            ui.set_min_size(ui.available_size());
+            if cx.state.stashes.list.is_empty() {
+                ui.label(s::NO_STASHES);
+            }
+            ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    for e in &cx.state.stashes.list {
+                        let date = format_epoch(e.time);
+                        let text =
+                            format!("stash@{{{}}}  {}\n{}  {date}", e.index, e.message, e.branch);
+                        if ui
+                            .selectable_label(cx.state.stashes.selected == Some(e.index), text)
+                            .clicked()
+                        {
+                            clicked = Some(e.index);
+                        }
                     }
-                }
-            });
-    });
+                });
+        },
+    );
     if let Some(i) = clicked {
         cx.state.stashes.select(i);
         cx.worker.send(Command::LoadStashFiles(i));
@@ -127,46 +133,60 @@ fn detail(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             v.colors = crate::highlight::Colors::Pending;
         }
     }
-    bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 4, |ui| {
-        ui.set_min_size(ui.available_size());
-        let v = &cx.state.stashes;
-        let Some(index) = v.selected else {
-            ui.label(s::SELECT_A_STASH);
-            return;
-        };
-        egui::Panel::left("stash_files")
-            .frame(egui::Frame::NONE)
-            .resizable(true)
-            .default_size(220.0)
-            .show(ui, |ui| {
-                ScrollArea::vertical()
-                    .id_salt("stash_files_scroll")
-                    .show(ui, |ui| {
-                        for f in &v.files {
-                            let label = super::changes::describe(&f.path, &f.change);
-                            if ui
-                                .selectable_label(v.file.as_deref() == Some(f.path.as_str()), label)
-                                .clicked()
-                            {
-                                open = Some(f.path.clone());
+    bevel_frame(
+        ui,
+        Bevel::Field,
+        win95::theme::palette(ui.ctx()).window,
+        4,
+        |ui| {
+            ui.set_min_size(ui.available_size());
+            let v = &cx.state.stashes;
+            let Some(index) = v.selected else {
+                ui.label(s::SELECT_A_STASH);
+                return;
+            };
+            egui::Panel::left("stash_files")
+                .frame(egui::Frame::NONE)
+                .resizable(true)
+                .default_size(220.0)
+                .show(ui, |ui| {
+                    ScrollArea::vertical()
+                        .id_salt("stash_files_scroll")
+                        .show(ui, |ui| {
+                            for f in &v.files {
+                                let label = super::changes::describe(&f.path, &f.change);
+                                if ui
+                                    .selectable_label(
+                                        v.file.as_deref() == Some(f.path.as_str()),
+                                        label,
+                                    )
+                                    .clicked()
+                                {
+                                    open = Some(f.path.clone());
+                                }
                             }
-                        }
-                    });
-            });
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.inner_margin(egui::Margin {
-                left: 6,
-                ..Default::default()
-            }))
-            .show(ui, |ui| match &v.diff {
-                Some(d) => super::history::diff_rows(ui, d, &v.colors, ("stash", index, &d.path)),
-                None if v.file.is_some() => {
-                    ui.label(RichText::new(s::LOADING_DIFF).color(win95::theme::GRAY));
-                }
-                None => {}
-            });
-        let _ = index;
-    });
+                        });
+                });
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.inner_margin(egui::Margin {
+                    left: 6,
+                    ..Default::default()
+                }))
+                .show(ui, |ui| match &v.diff {
+                    Some(d) => {
+                        super::history::diff_rows(ui, d, &v.colors, ("stash", index, &d.path))
+                    }
+                    None if v.file.is_some() => {
+                        ui.label(
+                            RichText::new(s::LOADING_DIFF)
+                                .color(win95::theme::palette(ui.ctx()).gray_text),
+                        );
+                    }
+                    None => {}
+                });
+            let _ = index;
+        },
+    );
     if let (Some(path), Some(index)) = (open, cx.state.stashes.selected) {
         let v = &mut cx.state.stashes;
         v.file = Some(path.clone());

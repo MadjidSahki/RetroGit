@@ -342,9 +342,10 @@ pub fn diff_row(
     resp
 }
 
-/// A monospace label: `prefix` in black, then the line either in its syntax colors or in
-/// black (`spans` = `None`), and an optional gray suffix.
+/// A monospace label: `prefix` in the text color, then the line either in its syntax colors
+/// or in the text color (`spans` = `None`), and an optional gray suffix.
 pub fn colored_line(
+    palette: &win95::Palette,
     prefix: &str,
     text: &str,
     spans: Option<&[Span]>,
@@ -359,7 +360,7 @@ pub fn colored_line(
         background,
         ..Default::default()
     };
-    job.append(prefix, 0.0, fmt(win95::theme::BLACK));
+    job.append(prefix, 0.0, fmt(palette.window_text));
     match spans {
         Some(spans) => {
             // Tab stops are counted from the start of the code, after the prefix.
@@ -370,10 +371,10 @@ pub fn colored_line(
                 job.append(&t, 0.0, fmt(span.color));
             }
         }
-        None => job.append(&expand_tabs(text), 0.0, fmt(win95::theme::BLACK)),
+        None => job.append(&expand_tabs(text), 0.0, fmt(palette.window_text)),
     }
     if !suffix.is_empty() {
-        job.append(suffix, 0.0, fmt(win95::theme::GRAY));
+        job.append(suffix, 0.0, fmt(palette.gray_text));
     }
     job
 }
@@ -441,6 +442,7 @@ mod tests {
             },
         ];
         let job = colored_line(
+            &win95::palette::STANDARD,
             "  1 + ",
             "let x",
             Some(&spans),
@@ -449,7 +451,15 @@ mod tests {
             Color32::WHITE,
         );
         assert_eq!(job.text, "  1 + let x !");
-        let plain = colored_line("> ", "raw", None, "", font, Color32::WHITE);
+        let plain = colored_line(
+            &win95::palette::STANDARD,
+            "> ",
+            "raw",
+            None,
+            "",
+            font,
+            Color32::WHITE,
+        );
         assert_eq!(plain.text, "> raw");
         assert_eq!(Colors::Plain.line(0, 0), None);
         assert_eq!(Colors::Ready(vec![None]).line(0, 0), None);
@@ -471,6 +481,7 @@ mod tests {
             },
         ];
         let job = colored_line(
+            &win95::palette::STANDARD,
             "",
             "",
             Some(&spans),
@@ -487,7 +498,15 @@ mod tests {
         let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
             let font = egui::FontId::monospace(13.0);
             for text in ["x", "        indented"] {
-                let job = colored_line("", text, None, "", font.clone(), Color32::WHITE);
+                let job = colored_line(
+                    &win95::palette::STANDARD,
+                    "",
+                    text,
+                    None,
+                    "",
+                    font.clone(),
+                    Color32::WHITE,
+                );
                 diff_row(ui, job, 17.0, Color32::WHITE);
             }
         });
@@ -740,6 +759,7 @@ mod tests {
         let mut sense = None;
         let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
             let job = colored_line(
+                &win95::palette::STANDARD,
                 "",
                 "copy me",
                 None,

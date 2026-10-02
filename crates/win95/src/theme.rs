@@ -3,20 +3,11 @@
 use std::sync::Arc;
 
 use egui::{
-    Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Id, Margin, Shadow,
-    Stroke, TextStyle, Vec2,
+    CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Id, Margin, Shadow, Stroke,
+    TextStyle, Vec2,
 };
 
 use crate::palette::{Palette, Scheme};
-
-// Windows Standard colors. Kept for code not yet reading the palette; prefer
-// `palette(ctx)`, which follows the user's color scheme.
-pub const SILVER: Color32 = Color32::from_rgb(0xC0, 0xC0, 0xC0);
-pub const LIGHT: Color32 = Color32::from_rgb(0xDF, 0xDF, 0xDF);
-pub const WHITE: Color32 = Color32::WHITE;
-pub const GRAY: Color32 = Color32::from_rgb(0x80, 0x80, 0x80);
-pub const BLACK: Color32 = Color32::BLACK;
-pub const NAVY: Color32 = Color32::from_rgb(0x00, 0x00, 0x80);
 
 /// Base font size in points. W95FA is a pixel font: keep this a whole number.
 pub const FONT_SIZE: f32 = 13.0;

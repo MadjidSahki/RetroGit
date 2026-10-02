@@ -186,7 +186,10 @@ fn picker(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                     Ok(clone_url) => super::accounts::folder_from_url(&clone_url)
                         .map(|name| (clone_url, name, None)),
                     Err(why) => {
-                        ui.label(egui::RichText::new(why).color(win95::theme::GRAY));
+                        ui.label(
+                            egui::RichText::new(why)
+                                .color(win95::theme::palette(ui.ctx()).gray_text),
+                        );
                         None
                     }
                 }

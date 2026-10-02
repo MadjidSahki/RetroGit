@@ -291,14 +291,20 @@ fn review(
                 });
             }
             if d.viewer_is_author {
-                ui.label(egui::RichText::new(s::OWN_PULL_REVIEW).color(win95::theme::GRAY));
+                ui.label(
+                    egui::RichText::new(s::OWN_PULL_REVIEW)
+                        .color(win95::theme::palette(ui.ctx()).gray_text),
+                );
             }
             if pending > 0 {
                 ui.label(format!("{pending} {}", s::PENDING_IN_REVIEW));
             }
             let ready = review_ready(event, &body, pending);
             if !ready {
-                ui.label(egui::RichText::new(s::REVIEW_NEEDS_TEXT).color(win95::theme::GRAY));
+                ui.label(
+                    egui::RichText::new(s::REVIEW_NEEDS_TEXT)
+                        .color(win95::theme::palette(ui.ctx()).gray_text),
+                );
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -496,7 +502,10 @@ fn create(egui_ctx: &egui::Context, cx: &mut Ctx<'_>, slug: &Slug, f: CreateFiel
             }
             let same = base.trim().is_empty() || base == head.name;
             if same && !base.is_empty() {
-                ui.label(egui::RichText::new(s::SAME_BRANCH).color(win95::theme::GRAY));
+                ui.label(
+                    egui::RichText::new(s::SAME_BRANCH)
+                        .color(win95::theme::palette(ui.ctx()).gray_text),
+                );
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -731,7 +740,10 @@ fn labels(
                             }
                             win95::label_chip(ui, &l.name, l.color);
                             if let Some(desc) = &l.description {
-                                ui.label(egui::RichText::new(desc).color(win95::theme::GRAY));
+                                ui.label(
+                                    egui::RichText::new(desc)
+                                        .color(win95::theme::palette(ui.ctx()).gray_text),
+                                );
                             }
                         });
                     }

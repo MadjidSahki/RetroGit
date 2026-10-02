@@ -218,18 +218,21 @@ fn reset(
             if mode == ResetMode::Hard {
                 if overwrites.is_empty() {
                     ui.label(
-                        egui::RichText::new(s::RESET_HARD_UNTRACKED).color(win95::theme::GRAY),
+                        egui::RichText::new(s::RESET_HARD_UNTRACKED)
+                            .color(win95::theme::palette(ui.ctx()).gray_text),
                     );
                 } else {
                     let list = format!("{}\n{}", s::RESET_HARD_REPLACES, overwrites.join("\n"));
-                    ui.label(egui::RichText::new(list).color(egui::Color32::from_rgb(0xA0, 0, 0)));
+                    ui.label(
+                        egui::RichText::new(list).color(win95::theme::palette(ui.ctx()).error),
+                    );
                 }
                 checkbox(ui, &mut hard_confirmed, s::RESET_HARD_CONFIRM);
             }
             if drops_pushed {
                 ui.label(
                     egui::RichText::new(s::RESET_DROPS_PUSHED)
-                        .color(egui::Color32::from_rgb(0xA0, 0, 0)),
+                        .color(win95::theme::palette(ui.ctx()).error),
                 );
             }
             ui.add_space(6.0);
@@ -336,12 +339,12 @@ fn rebase(
             if pushed > 0 {
                 ui.label(
                     egui::RichText::new(s::REBASE_PUSHED.replace("{n}", &pushed.to_string()))
-                        .color(egui::Color32::from_rgb(0xA0, 0, 0)),
+                        .color(win95::theme::palette(ui.ctx()).error),
                 );
             }
             let check = validate_todo(&items);
             if let Err(why) = check {
-                ui.label(egui::RichText::new(why).color(win95::theme::GRAY));
+                ui.label(egui::RichText::new(why).color(win95::theme::palette(ui.ctx()).gray_text));
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -399,7 +402,7 @@ fn create_tag(
             if let Some(e) = &error
                 && !name.trim().is_empty()
             {
-                ui.label(egui::RichText::new(e).color(win95::theme::GRAY));
+                ui.label(egui::RichText::new(e).color(win95::theme::palette(ui.ctx()).gray_text));
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -489,39 +492,45 @@ fn tags(
                 text_field(ui, &mut filter, 300.0, false);
             });
             let f = filter.trim().to_lowercase();
-            win95::bevel_frame(ui, win95::Bevel::Field, win95::theme::WHITE, 2, |ui| {
-                ui.set_min_size(egui::vec2(ui.available_width(), 160.0));
-                egui::ScrollArea::vertical()
-                    .max_height(300.0)
-                    .show(ui, |ui| {
-                        if cx.state.tags.is_empty() {
-                            ui.label(s::NO_TAGS);
-                        }
-                        for t in cx
-                            .state
-                            .tags
-                            .iter()
-                            .filter(|t| f.is_empty() || t.name.to_lowercase().contains(&f))
-                        {
-                            let short: String = t.commit.chars().take(7).collect();
-                            let kind = if t.annotated {
-                                s::TAG_ANNOTATED_SHORT
-                            } else {
-                                s::TAG_LIGHT_SHORT
-                            };
-                            let text = format!("{}  {short}  {kind}  {}", t.name, t.message);
-                            if ui
-                                .selectable_label(
-                                    selected.as_deref() == Some(t.name.as_str()),
-                                    text,
-                                )
-                                .clicked()
-                            {
-                                selected = Some(t.name.clone());
+            win95::bevel_frame(
+                ui,
+                win95::Bevel::Field,
+                win95::theme::palette(ui.ctx()).window,
+                2,
+                |ui| {
+                    ui.set_min_size(egui::vec2(ui.available_width(), 160.0));
+                    egui::ScrollArea::vertical()
+                        .max_height(300.0)
+                        .show(ui, |ui| {
+                            if cx.state.tags.is_empty() {
+                                ui.label(s::NO_TAGS);
                             }
-                        }
-                    });
-            });
+                            for t in cx
+                                .state
+                                .tags
+                                .iter()
+                                .filter(|t| f.is_empty() || t.name.to_lowercase().contains(&f))
+                            {
+                                let short: String = t.commit.chars().take(7).collect();
+                                let kind = if t.annotated {
+                                    s::TAG_ANNOTATED_SHORT
+                                } else {
+                                    s::TAG_LIGHT_SHORT
+                                };
+                                let text = format!("{}  {short}  {kind}  {}", t.name, t.message);
+                                if ui
+                                    .selectable_label(
+                                        selected.as_deref() == Some(t.name.as_str()),
+                                        text,
+                                    )
+                                    .clicked()
+                                {
+                                    selected = Some(t.name.clone());
+                                }
+                            }
+                        });
+                },
+            );
             if let Some(text) = &status {
                 ui.label(text);
             }

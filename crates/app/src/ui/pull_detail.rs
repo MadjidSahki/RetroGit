@@ -7,7 +7,6 @@ use win95::{Bevel, Button95, bevel_frame, label_chip, markdown_view, text_area};
 
 use super::Ctx;
 use super::diff_view::ROW_HEIGHT;
-use super::pulls::{AMBER, GREEN, RED};
 use crate::protocol::{Command, Slug};
 use crate::state::{
     PullDialog, PullTab, default_merge_method, merge_defaults, merge_disabled_reason,
@@ -15,18 +14,12 @@ use crate::state::{
 };
 use crate::strings as s;
 
-const COMMENT_BG: Color32 = Color32::from_rgb(0xFF, 0xFF, 0xE8);
-const PENDING_BG: Color32 = Color32::from_rgb(0xFF, 0xF0, 0xC0);
-const SELECTED_BG: Color32 = Color32::from_rgb(0xD0, 0xE0, 0xFF);
-const SUGGEST_OLD_BG: Color32 = Color32::from_rgb(0xFF, 0xE6, 0xE6);
-const SUGGEST_NEW_BG: Color32 = Color32::from_rgb(0xE6, 0xFF, 0xE6);
-
-pub fn state_text(d: &PrDetail) -> (&'static str, Color32) {
+pub fn state_text(pal: &win95::Palette, d: &PrDetail) -> (&'static str, Color32) {
     match d.summary.state {
-        PrState::Merged => (s::STATE_MERGED, Color32::from_rgb(0x60, 0x20, 0x90)),
-        PrState::Closed => (s::STATE_CLOSED, RED),
-        PrState::Open if d.summary.draft => (s::DRAFT, win95::theme::GRAY),
-        PrState::Open => (s::STATE_OPEN, GREEN),
+        PrState::Merged => (s::STATE_MERGED, pal.merged),
+        PrState::Closed => (s::STATE_CLOSED, pal.error),
+        PrState::Open if d.summary.draft => (s::DRAFT, pal.gray_text),
+        PrState::Open => (s::STATE_OPEN, pal.success),
     }
 }
 
@@ -79,65 +72,71 @@ pub fn duration_text(start: Option<&str>, end: Option<&str>) -> String {
 }
 
 pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
-    bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 4, |ui| {
-        ui.set_min_size(ui.available_size());
-        let p = &cx.state.pulls;
-        if p.selected.is_none() {
-            ui.label(s::SELECT_A_PULL);
-            return;
-        }
-        let Some(d) = p.detail.clone() else {
-            ui.label(s::LOADING_PULL);
-            return;
-        };
-        // Checks running: reload now and then, so Merge follows them.
-        if let Some(at) = cx.state.pulls.loaded_at {
-            let now = std::time::Instant::now();
-            if crate::state::needs_auto_refresh(&d, at, now)
-                && let Some(slug) = cx.state.github_slug()
-            {
-                cx.state.pulls.loaded_at = Some(now);
-                cx.worker.send(Command::RefreshPull {
-                    slug,
-                    number: d.summary.number,
-                });
-            } else if d.summary.checks == github::ChecksState::Pending {
-                ui.ctx().request_repaint_after(crate::state::CHECKS_REFRESH);
+    bevel_frame(
+        ui,
+        Bevel::Field,
+        win95::theme::palette(ui.ctx()).window,
+        4,
+        |ui| {
+            ui.set_min_size(ui.available_size());
+            let p = &cx.state.pulls;
+            if p.selected.is_none() {
+                ui.label(s::SELECT_A_PULL);
+                return;
             }
-        }
-        header(ui, cx, &d);
-        ui.separator();
-        let files = cx.state.pulls.files.as_ref().map(|f| f.len()).unwrap_or(0);
-        let labels = [
-            s::PULL_CONVERSATION.to_string(),
-            format!("{} ({})", s::PULL_COMMITS, d.commit_count),
-            format!("{} ({files})", s::PULL_FILES),
-            s::PULL_CHECKS.to_string(),
-        ];
-        let tabs = [
-            PullTab::Conversation,
-            PullTab::Commits,
-            PullTab::Files,
-            PullTab::Checks,
-        ];
-        let mut i = tabs
-            .iter()
-            .position(|t| *t == cx.state.pulls.sub_tab)
-            .unwrap_or(0);
-        let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-        win95::tabs(ui, &mut i, &refs);
-        cx.state.pulls.sub_tab = tabs[i];
-        match cx.state.pulls.sub_tab {
-            PullTab::Conversation => conversation(ui, cx, slug, &d),
-            PullTab::Commits => commits(ui, cx, &d),
-            PullTab::Files => files_tab(ui, cx, &d),
-            PullTab::Checks => checks(ui, &d),
-        }
-    });
+            let Some(d) = p.detail.clone() else {
+                ui.label(s::LOADING_PULL);
+                return;
+            };
+            // Checks running: reload now and then, so Merge follows them.
+            if let Some(at) = cx.state.pulls.loaded_at {
+                let now = std::time::Instant::now();
+                if crate::state::needs_auto_refresh(&d, at, now)
+                    && let Some(slug) = cx.state.github_slug()
+                {
+                    cx.state.pulls.loaded_at = Some(now);
+                    cx.worker.send(Command::RefreshPull {
+                        slug,
+                        number: d.summary.number,
+                    });
+                } else if d.summary.checks == github::ChecksState::Pending {
+                    ui.ctx().request_repaint_after(crate::state::CHECKS_REFRESH);
+                }
+            }
+            header(ui, cx, &d);
+            ui.separator();
+            let files = cx.state.pulls.files.as_ref().map(|f| f.len()).unwrap_or(0);
+            let labels = [
+                s::PULL_CONVERSATION.to_string(),
+                format!("{} ({})", s::PULL_COMMITS, d.commit_count),
+                format!("{} ({files})", s::PULL_FILES),
+                s::PULL_CHECKS.to_string(),
+            ];
+            let tabs = [
+                PullTab::Conversation,
+                PullTab::Commits,
+                PullTab::Files,
+                PullTab::Checks,
+            ];
+            let mut i = tabs
+                .iter()
+                .position(|t| *t == cx.state.pulls.sub_tab)
+                .unwrap_or(0);
+            let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+            win95::tabs(ui, &mut i, &refs);
+            cx.state.pulls.sub_tab = tabs[i];
+            match cx.state.pulls.sub_tab {
+                PullTab::Conversation => conversation(ui, cx, slug, &d),
+                PullTab::Commits => commits(ui, cx, &d),
+                PullTab::Files => files_tab(ui, cx, &d),
+                PullTab::Checks => checks(ui, &d),
+            }
+        },
+    );
 }
 
 fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
-    let navy = win95::theme::NAVY;
+    let navy = win95::theme::palette(ui.ctx()).link;
     let busy = cx.state.pulls.busy;
     ui.horizontal(|ui| {
         ui.label(
@@ -152,7 +151,7 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
             });
         }
     });
-    let (state, color) = state_text(d);
+    let (state, color) = state_text(&win95::theme::palette(ui.ctx()), d);
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(state).color(color));
         let what = s::WANTS_TO_MERGE
@@ -160,7 +159,8 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
             .replace("{base}", &d.summary.base);
         ui.label(format!("{} {what}", d.summary.author));
         ui.label(
-            RichText::new(format!("({} @{})", s::AS_ACCOUNT, d.viewer)).color(win95::theme::GRAY),
+            RichText::new(format!("({} @{})", s::AS_ACCOUNT, d.viewer))
+                .color(win95::theme::palette(ui.ctx()).gray_text),
         );
     });
     ui.horizontal_wrapped(|ui| {
@@ -225,7 +225,7 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                 why.to_string()
             };
             merge.on_disabled_hover_text(&why);
-            ui.label(RichText::new(why).color(win95::theme::GRAY));
+            ui.label(RichText::new(why).color(win95::theme::palette(ui.ctx()).gray_text));
         } else if merge.clicked()
             && let Some(method) = default_merge_method(d)
         {
@@ -276,7 +276,7 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                 cx.state.pulls.pending.len(),
                 s::PENDING_COMMENTS
             ))
-            .color(AMBER),
+            .color(win95::theme::palette(ui.ctx()).warning),
         );
     }
 }
@@ -295,7 +295,7 @@ fn people_row(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     ui.horizontal_wrapped(|ui| {
         ui.label(s::REVIEWERS);
         if d.reviewers.is_empty() {
-            ui.label(RichText::new(s::NOBODY).color(win95::theme::GRAY));
+            ui.label(RichText::new(s::NOBODY).color(win95::theme::palette(ui.ctx()).gray_text));
         }
         for r in &d.reviewers {
             ui.label(reviewer_text(r));
@@ -310,7 +310,7 @@ fn people_row(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
         ui.separator();
         ui.label(s::ASSIGNEES);
         if d.assignees.is_empty() {
-            ui.label(RichText::new(s::NOBODY).color(win95::theme::GRAY));
+            ui.label(RichText::new(s::NOBODY).color(win95::theme::palette(ui.ctx()).gray_text));
         }
         for a in &d.assignees {
             ui.label(format!("@{a}"));
@@ -350,12 +350,15 @@ fn people_row(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
 
 fn boxed(ui: &mut egui::Ui, title: &str, body: &str) {
     egui::Frame::NONE
-        .fill(COMMENT_BG)
-        .stroke(egui::Stroke::new(1.0, win95::theme::LIGHT))
+        .fill(win95::theme::palette(ui.ctx()).comment_bg)
+        .stroke(egui::Stroke::new(
+            1.0,
+            win95::theme::palette(ui.ctx()).light,
+        ))
         .inner_margin(egui::Margin::same(6))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(title).color(win95::theme::NAVY));
+            ui.label(RichText::new(title).color(win95::theme::palette(ui.ctx()).link));
             if !body.trim().is_empty() {
                 markdown_view(ui, body);
             }
@@ -372,7 +375,10 @@ fn conversation(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug, d: &PrDetail) 
         .auto_shrink([false, false])
         .show(ui, |ui| {
             if d.body.trim().is_empty() {
-                ui.label(RichText::new(s::NO_DESCRIPTION).color(win95::theme::GRAY));
+                ui.label(
+                    RichText::new(s::NO_DESCRIPTION)
+                        .color(win95::theme::palette(ui.ctx()).gray_text),
+                );
             } else {
                 markdown_view(ui, &d.body);
             }
@@ -451,7 +457,10 @@ fn commits(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                 let date = c.date.get(..10).unwrap_or("");
                 let text = format!("{}  {}  {}  {date}", c.short_oid, c.headline, c.author);
                 if ui
-                    .selectable_label(false, RichText::new(text).color(win95::theme::BLACK))
+                    .selectable_label(
+                        false,
+                        RichText::new(text).color(win95::theme::palette(ui.ctx()).text),
+                    )
                     .clicked()
                 {
                     open = Some(c.oid.clone());
@@ -480,10 +489,18 @@ fn checks(ui: &mut egui::Ui, d: &PrDetail) {
                 .show(ui, |ui| {
                     for c in &d.check_runs {
                         let (text, color) = match c.status {
-                            CheckStatus::Success => (s::CHECK_PASSED, GREEN),
-                            CheckStatus::Failure => (s::CHECK_FAILED, RED),
-                            CheckStatus::Pending => (s::CHECK_RUNNING, AMBER),
-                            CheckStatus::Neutral => (s::CHECK_SKIPPED, win95::theme::GRAY),
+                            CheckStatus::Success => {
+                                (s::CHECK_PASSED, win95::theme::palette(ui.ctx()).success)
+                            }
+                            CheckStatus::Failure => {
+                                (s::CHECK_FAILED, win95::theme::palette(ui.ctx()).error)
+                            }
+                            CheckStatus::Pending => {
+                                (s::CHECK_RUNNING, win95::theme::palette(ui.ctx()).warning)
+                            }
+                            CheckStatus::Neutral => {
+                                (s::CHECK_SKIPPED, win95::theme::palette(ui.ctx()).gray_text)
+                            }
                         };
                         ui.label(RichText::new(text).color(color));
                         ui.label(&c.name);
@@ -674,6 +691,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                 match *row {
                     FileRow::Hunk(hi) => {
                         let mut job = crate::highlight::colored_line(
+                            &win95::theme::palette(ui.ctx()),
                             "",
                             &diff.hunks[hi].header,
                             None,
@@ -682,21 +700,21 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             Color32::TRANSPARENT,
                         );
                         for section in &mut job.sections {
-                            section.format.color = win95::theme::NAVY;
+                            section.format.color = win95::theme::palette(ui.ctx()).link;
                         }
                         crate::highlight::diff_row(
                             ui,
                             job,
                             ROW_HEIGHT,
-                            Color32::from_rgb(0xE0, 0xE0, 0xF0),
+                            win95::theme::palette(ui.ctx()).hunk,
                         );
                     }
                     FileRow::Line(hi, li) => {
                         let l = &diff.hunks[hi].lines[li];
                         let (sign, bg) = match l.kind {
-                            LineKind::Added => ("+", Color32::from_rgb(0xE6, 0xFF, 0xE6)),
-                            LineKind::Removed => ("-", Color32::from_rgb(0xFF, 0xE6, 0xE6)),
-                            LineKind::Context => (" ", win95::theme::WHITE),
+                            LineKind::Added => ("+", win95::theme::palette(ui.ctx()).added),
+                            LineKind::Removed => ("-", win95::theme::palette(ui.ctx()).removed),
+                            LineKind::Context => (" ", win95::theme::palette(ui.ctx()).window),
                         };
                         let num = |n: Option<u32>| {
                             n.map(|v| format!("{v:>5}"))
@@ -705,6 +723,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                         let prefix = format!("{} {} {sign} ", num(l.old_no), num(l.new_no));
                         let text = l.text.trim_end_matches(['\n', '\r']);
                         let job = crate::highlight::colored_line(
+                            &win95::theme::palette(ui.ctx()),
                             &prefix,
                             text,
                             p.file_colors.line(hi, li),
@@ -714,7 +733,11 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                         );
                         let in_selection = selection
                             .is_some_and(|sel| sel.hunk == hi && (sel.from..=sel.to).contains(&li));
-                        let bg = if in_selection { SELECTED_BG } else { bg };
+                        let bg = if in_selection {
+                            win95::theme::palette(ui.ctx()).line_selected
+                        } else {
+                            bg
+                        };
                         let resp = crate::highlight::diff_row(ui, job, ROW_HEIGHT, bg);
                         let row_resp = resp.interact(egui::Sense::click());
                         if row_resp.clicked() || row_resp.secondary_clicked() && !in_selection {
@@ -786,6 +809,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             suffix.push_str(&format!("  ({})", s::RESOLVED));
                         }
                         let job = crate::highlight::colored_line(
+                            &win95::theme::palette(ui.ctx()),
                             &format!("              > {}: ", comment.author),
                             first,
                             None,
@@ -793,7 +817,12 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             mono.clone(),
                             Color32::TRANSPARENT,
                         );
-                        let resp = crate::highlight::diff_row(ui, job, ROW_HEIGHT, COMMENT_BG);
+                        let resp = crate::highlight::diff_row(
+                            ui,
+                            job,
+                            ROW_HEIGHT,
+                            win95::theme::palette(ui.ctx()).comment_bg,
+                        );
                         if can_comment {
                             resp.context_menu(|ui| {
                                 if ui.button(s::REPLY).clicked() {
@@ -818,6 +847,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             .and_then(|l| l.get(k).cloned())
                             .unwrap_or_default();
                         let job = crate::highlight::colored_line(
+                            &win95::theme::palette(ui.ctx()),
                             "              - ",
                             &line,
                             None,
@@ -825,7 +855,12 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             mono.clone(),
                             Color32::TRANSPARENT,
                         );
-                        crate::highlight::diff_row(ui, job, ROW_HEIGHT, SUGGEST_OLD_BG);
+                        crate::highlight::diff_row(
+                            ui,
+                            job,
+                            ROW_HEIGHT,
+                            win95::theme::palette(ui.ctx()).removed,
+                        );
                     }
                     FileRow::SuggestionNew(t, c, k) => {
                         let code = github::suggestions(&d.threads[t].comments[c].body)
@@ -834,6 +869,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             .unwrap_or_default();
                         let line = code.lines().nth(k).unwrap_or_default().to_string();
                         let job = crate::highlight::colored_line(
+                            &win95::theme::palette(ui.ctx()),
                             "              + ",
                             &line,
                             None,
@@ -841,7 +877,12 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             mono.clone(),
                             Color32::TRANSPARENT,
                         );
-                        crate::highlight::diff_row(ui, job, ROW_HEIGHT, SUGGEST_NEW_BG);
+                        crate::highlight::diff_row(
+                            ui,
+                            job,
+                            ROW_HEIGHT,
+                            win95::theme::palette(ui.ctx()).added,
+                        );
                     }
                     FileRow::SuggestionApply(t, c) => {
                         let thread = &d.threads[t];
@@ -862,7 +903,10 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                                 Button95::new(s::APPLY_SUGGESTION).enabled(why.is_none() && !busy),
                             );
                             if let Some(why) = why {
-                                ui.label(RichText::new(why).color(win95::theme::GRAY));
+                                ui.label(
+                                    RichText::new(why)
+                                        .color(win95::theme::palette(ui.ctx()).gray_text),
+                                );
                             } else if b.clicked()
                                 && let (Some((a, b)), Some(expected)) = (range, current)
                             {
@@ -887,6 +931,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                         let c = &p.pending[i];
                         let first = c.body.lines().next().unwrap_or("");
                         let job = crate::highlight::colored_line(
+                            &win95::theme::palette(ui.ctx()),
                             &format!("              > {}: ", s::PENDING_TAG),
                             first,
                             None,
@@ -894,7 +939,12 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             mono.clone(),
                             Color32::TRANSPARENT,
                         );
-                        let resp = crate::highlight::diff_row(ui, job, ROW_HEIGHT, PENDING_BG);
+                        let resp = crate::highlight::diff_row(
+                            ui,
+                            job,
+                            ROW_HEIGHT,
+                            win95::theme::palette(ui.ctx()).pending_bg,
+                        );
                         resp.context_menu(|ui| {
                             if ui.button(s::DISCARD_PENDING).clicked() {
                                 drop_pending = Some(i);

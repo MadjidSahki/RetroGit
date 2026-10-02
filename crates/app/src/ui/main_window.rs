@@ -10,7 +10,8 @@ use crate::strings as s;
 
 pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let full = ui.max_rect();
-    ui.painter().rect_filled(full, 0.0, win95::theme::SILVER);
+    ui.painter()
+        .rect_filled(full, 0.0, win95::theme::palette(ui.ctx()).face);
     win95::bevel::paint(ui.painter(), full, Bevel::Window);
     let inner = full.shrink(3.0);
     ui.scope_builder(UiBuilder::new().max_rect(inner), |ui| {
@@ -51,10 +52,16 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                         Tab::Stashes => super::stashes::show(ui, cx),
                     }
                 } else {
-                    bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 8, |ui| {
-                        ui.set_min_size(ui.available_size());
-                        ui.label(s::NO_REPO);
-                    });
+                    bevel_frame(
+                        ui,
+                        Bevel::Field,
+                        win95::theme::palette(ui.ctx()).window,
+                        8,
+                        |ui| {
+                            ui.set_min_size(ui.available_size());
+                            ui.label(s::NO_REPO);
+                        },
+                    );
                 }
             });
     });
