@@ -84,12 +84,24 @@ fn operation_banner(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                 {
                     cx.worker.send(Command::AbortOperation);
                 }
-                if op == gitcore::Operation::Rebase
-                    && ui
-                        .add(Button95::new(s::CONTINUE_REBASE).min_size(egui::vec2(110.0, 20.0)))
+                if op != gitcore::Operation::Merge {
+                    let label = if op == gitcore::Operation::Rebase {
+                        s::CONTINUE_REBASE
+                    } else {
+                        s::CONTINUE
+                    };
+                    if ui
+                        .add(Button95::new(label).min_size(egui::vec2(110.0, 20.0)))
                         .clicked()
-                {
-                    cx.worker.send(Command::ContinueRebase);
+                    {
+                        cx.worker.send(Command::ContinueOperation);
+                    }
+                    if ui
+                        .add(Button95::new(s::SKIP).min_size(egui::vec2(70.0, 20.0)))
+                        .clicked()
+                    {
+                        cx.worker.send(Command::SkipOperation);
+                    }
                 }
             });
         });

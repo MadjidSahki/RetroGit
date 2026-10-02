@@ -139,3 +139,68 @@ fn stashes_and_tags_are_kept_and_the_selection_follows() {
     }]));
     assert_eq!(st.tags.len(), 1);
 }
+
+fn log_entry(parents: usize) -> gitcore::LogEntry {
+    gitcore::LogEntry {
+        id: "c0ffee".into(),
+        short_id: "c0ffee".into(),
+        parents: (0..parents).map(|i| format!("p{i}")).collect(),
+        author: "a".into(),
+        email: "a@b".into(),
+        time: 0,
+        summary: "s".into(),
+        refs: Vec::new(),
+    }
+}
+
+#[test]
+fn history_menu_actions_open_dialogs_or_send_commands() {
+    use retrogit::protocol::Command;
+    use retrogit::state::{GitDialog, HistoryAction};
+    let mut st = retrogit::state::AppState::new(retrogit::config::Config::default());
+    let plain = log_entry(1);
+    assert!(matches!(
+        st.history_action(HistoryAction::CherryPick, &plain),
+        Some(Command::CherryPick(id)) if id == "c0ffee"
+    ));
+    assert!(matches!(
+        st.history_action(HistoryAction::Revert, &plain),
+        Some(Command::Revert { mainline: None, .. })
+    ));
+    assert!(st.git_dialog.is_none());
+    assert!(
+        st.history_action(HistoryAction::Revert, &log_entry(2))
+            .is_none()
+    );
+    assert!(matches!(
+        st.git_dialog,
+        Some(GitDialog::RevertMerge { parent: 1, .. })
+    ));
+    assert!(matches!(
+        st.history_action(HistoryAction::Reset, &plain),
+        Some(Command::LoadResetInfo(_))
+    ));
+    assert!(matches!(
+        st.git_dialog,
+        Some(GitDialog::Reset {
+            mode: gitcore::ResetMode::Mixed,
+            hard_confirmed: false,
+            ..
+        })
+    ));
+    assert!(matches!(
+        st.history_action(HistoryAction::RebaseFrom, &plain),
+        Some(Command::LoadRebaseList(Some(id))) if id == "c0ffee"
+    ));
+    assert!(
+        st.history_action(HistoryAction::CreateTag, &plain)
+            .is_none()
+    );
+    assert!(matches!(
+        st.git_dialog,
+        Some(GitDialog::CreateTag {
+            annotated: true,
+            ..
+        })
+    ));
+}

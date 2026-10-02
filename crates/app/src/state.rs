@@ -8,7 +8,7 @@ mod pulls_more;
 mod sync;
 
 pub use conflicts::{ConflictConfirm, ConflictEditor, text_as_diff};
-pub use git_ops::{GitDialog, StashesView, move_item};
+pub use git_ops::{GitDialog, HistoryAction, StashesView, move_item};
 pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};
 pub use pulls::{
     CHECKS_REFRESH, PullDialog, PullTab, PullsView, default_merge_method, merge_defaults,
@@ -203,6 +203,8 @@ pub struct AppState {
     pub git_dialog: Option<GitDialog>,
     pub stashes: StashesView,
     pub tags: Vec<gitcore::Tag>,
+    /// The Stashes tab asked for the list once (since the repository was opened).
+    pub stashes_loaded: bool,
 }
 
 impl AppState {
@@ -239,6 +241,7 @@ impl AppState {
             git_dialog: None,
             stashes: StashesView::default(),
             tags: Vec::new(),
+            stashes_loaded: false,
             accounts: Vec::new(),
             accounts_dialog: false,
             repo_account_dialog: false,
@@ -487,6 +490,7 @@ impl AppState {
             self.git_dialog = None;
             self.stashes = StashesView::default();
             self.tags.clear();
+            self.stashes_loaded = false;
             let slug = summary
                 .origin_url
                 .as_deref()

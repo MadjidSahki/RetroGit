@@ -3,7 +3,7 @@
 use gitcore::{ChangedFile, FileDiff, OpOutcome, ResetMode, StashEntry, TodoItem};
 
 use super::{AppState, Tab};
-use crate::protocol::{AppError, Event, Severity};
+use crate::protocol::{AppError, Command, Event, Severity};
 use crate::strings as s;
 
 /// Dialogs of history operations, stashes and tags (at most one at a time).
@@ -81,7 +81,53 @@ impl StashesView {
     }
 }
 
+/// Entries of the History right-click menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryAction {
+    CherryPick,
+    Revert,
+    Reset,
+    RebaseFrom,
+    CreateTag,
+}
+
 impl AppState {
+    /// Runs a History menu entry on `e`: opens its dialog and/or returns the command to send.
+    pub fn history_action(
+        &mut self,
+        action: HistoryAction,
+        e: &gitcore::LogEntry,
+    ) -> Option<Command> {
+        let id = e.id.clone();
+        match action {
+            HistoryAction::CherryPick => Some(Command::CherryPick(id)),
+            HistoryAction::Revert if e.parents.len() > 1 => {
+                self.git_dialog = Some(GitDialog::RevertMerge { id, parent: 1 });
+                None
+            }
+            HistoryAction::Revert => Some(Command::Revert { id, mainline: None }),
+            HistoryAction::Reset => {
+                self.git_dialog = Some(GitDialog::Reset {
+                    id: id.clone(),
+                    mode: ResetMode::Mixed,
+                    hard_confirmed: false,
+                    drops_pushed: false,
+                });
+                Some(Command::LoadResetInfo(id))
+            }
+            HistoryAction::RebaseFrom => Some(Command::LoadRebaseList(Some(id))),
+            HistoryAction::CreateTag => {
+                self.git_dialog = Some(GitDialog::CreateTag {
+                    id,
+                    name: String::new(),
+                    message: String::new(),
+                    annotated: true,
+                });
+                None
+            }
+        }
+    }
+
     pub(super) fn apply_git_ops(&mut self, event: Event) {
         match event {
             Event::OpFinished { outcome, note } => match outcome {
