@@ -1,18 +1,19 @@
 use egui::{Align2, Rect, Sense, Ui, WidgetInfo, WidgetType, pos2, vec2};
 
-use crate::theme::{self, BLACK, GRAY, LIGHT, SILVER, WHITE};
+use crate::theme;
 
 /// Row of Win95 tabs. Returns `true` if the selection changed.
 /// Draw the tab page right below with `bevel_frame(ui, Bevel::Window, ...)`.
 pub fn tabs(ui: &mut Ui, selected: &mut usize, labels: &[&str]) -> bool {
     let mut changed = false;
     let font = theme::font(theme::FONT_SIZE);
+    let pal = theme::palette(ui.ctx());
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for (i, label) in labels.iter().enumerate() {
-            let galley = ui
-                .painter()
-                .layout_no_wrap(label.to_string(), font.clone(), BLACK);
+            let galley =
+                ui.painter()
+                    .layout_no_wrap(label.to_string(), font.clone(), pal.dark_shadow);
             let size = vec2(galley.size().x + 16.0, 20.0);
             let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
             let is_sel = *selected == i;
@@ -31,17 +32,21 @@ pub fn tabs(ui: &mut Ui, selected: &mut usize, labels: &[&str]) -> bool {
                 Rect::from_min_max(pos2(rect.left(), rect.top() + 2.0), rect.max)
             };
             let p = ui.painter();
-            p.rect_filled(r, 0.0, SILVER);
-            p.rect_filled(Rect::from_min_size(r.min, vec2(r.width(), 1.0)), 0.0, WHITE);
+            p.rect_filled(r, 0.0, pal.face);
+            p.rect_filled(
+                Rect::from_min_size(r.min, vec2(r.width(), 1.0)),
+                0.0,
+                pal.highlight,
+            );
             p.rect_filled(
                 Rect::from_min_size(r.min, vec2(1.0, r.height())),
                 0.0,
-                WHITE,
+                pal.highlight,
             );
             p.rect_filled(
                 Rect::from_min_size(pos2(r.max.x - 1.0, r.min.y), vec2(1.0, r.height())),
                 0.0,
-                BLACK,
+                pal.dark_shadow,
             );
             p.rect_filled(
                 Rect::from_min_size(
@@ -49,13 +54,13 @@ pub fn tabs(ui: &mut Ui, selected: &mut usize, labels: &[&str]) -> bool {
                     vec2(1.0, r.height() - 1.0),
                 ),
                 0.0,
-                GRAY,
+                pal.shadow,
             );
             if !is_sel {
                 p.rect_filled(
                     Rect::from_min_size(pos2(r.min.x, r.max.y - 1.0), vec2(r.width(), 1.0)),
                     0.0,
-                    LIGHT,
+                    pal.light,
                 );
             }
             p.text(
@@ -63,7 +68,7 @@ pub fn tabs(ui: &mut Ui, selected: &mut usize, labels: &[&str]) -> bool {
                 Align2::CENTER_CENTER,
                 *label,
                 font.clone(),
-                BLACK,
+                pal.dark_shadow,
             );
         }
     });

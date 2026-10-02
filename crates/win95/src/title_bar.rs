@@ -1,9 +1,7 @@
 use egui::{Align2, Color32, Mesh, Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, pos2, vec2};
 
 use crate::bevel::{self, Bevel};
-use crate::theme::{
-    self, BLACK, INACTIVE_TITLE, INACTIVE_TITLE_END, NAVY, SILVER, TITLE_END, WHITE,
-};
+use crate::theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitleAction {
@@ -45,12 +43,13 @@ impl<'a> TitleBar<'a> {
     }
 
     pub fn show(self, ui: &mut Ui) -> TitleAction {
+        let pal = theme::palette(ui.ctx());
         let width = ui.available_width();
         let (rect, bar) = ui.allocate_exact_size(vec2(width, HEIGHT), Sense::click_and_drag());
         let (start, end) = if self.active {
-            (NAVY, TITLE_END)
+            (pal.title, pal.title_end)
         } else {
-            (INACTIVE_TITLE, INACTIVE_TITLE_END)
+            (pal.inactive_title, pal.inactive_title_end)
         };
         ui.painter().add(gradient(rect, start, end));
         ui.painter().text(
@@ -58,7 +57,11 @@ impl<'a> TitleBar<'a> {
             Align2::LEFT_CENTER,
             self.title,
             theme::font(theme::FONT_SIZE),
-            if self.active { WHITE } else { SILVER },
+            if self.active {
+                pal.title_text
+            } else {
+                pal.inactive_title_text
+            },
         );
 
         let mut action = TitleAction::None;
@@ -104,8 +107,9 @@ fn caption_button(ui: &mut Ui, rect: Rect, glyph: Glyph, label: &str) -> bool {
     let label_owned = label.to_string();
     resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label_owned));
     let pressed = resp.is_pointer_button_down_on();
+    let pal = theme::palette(ui.ctx());
     let p = ui.painter();
-    p.rect_filled(rect, 0.0, SILVER);
+    p.rect_filled(rect, 0.0, pal.face);
     bevel::paint(
         p,
         rect,
@@ -121,22 +125,22 @@ fn caption_button(ui: &mut Ui, rect: Rect, glyph: Glyph, label: &str) -> bool {
         } else {
             vec2(0.0, 0.0)
         };
-    let s = Stroke::new(1.0, BLACK);
+    let s = Stroke::new(1.0, pal.text);
     match glyph {
         Glyph::Minimize => {
             p.rect_filled(
                 Rect::from_min_size(c + vec2(-4.0, 2.0), vec2(6.0, 2.0)),
                 0.0,
-                BLACK,
+                pal.text,
             );
         }
         Glyph::Maximize => {
             let r = Rect::from_min_size(c + vec2(-4.5, -4.5), vec2(9.0, 8.0));
             p.rect_stroke(r, 0.0, s, egui::StrokeKind::Inside);
-            p.rect_filled(Rect::from_min_size(r.min, vec2(9.0, 2.0)), 0.0, BLACK);
+            p.rect_filled(Rect::from_min_size(r.min, vec2(9.0, 2.0)), 0.0, pal.text);
         }
         Glyph::Close => {
-            let s = Stroke::new(1.5, BLACK);
+            let s = Stroke::new(1.5, pal.text);
             p.line_segment([c + vec2(-3.5, -3.0), c + vec2(3.5, 3.0)], s);
             p.line_segment([c + vec2(3.5, -3.0), c + vec2(-3.5, 3.0)], s);
         }

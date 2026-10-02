@@ -3,49 +3,170 @@
 use std::sync::Arc;
 
 use egui::{
-    Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Shadow, Stroke,
-    TextStyle, Vec2,
+    Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Id, Margin, Shadow,
+    Stroke, TextStyle, Vec2,
 };
 
+use crate::palette::{Palette, Scheme};
+
+// Windows Standard colors. Kept for code not yet reading the palette; prefer
+// `palette(ctx)`, which follows the user's color scheme.
 pub const SILVER: Color32 = Color32::from_rgb(0xC0, 0xC0, 0xC0);
 pub const LIGHT: Color32 = Color32::from_rgb(0xDF, 0xDF, 0xDF);
 pub const WHITE: Color32 = Color32::WHITE;
 pub const GRAY: Color32 = Color32::from_rgb(0x80, 0x80, 0x80);
 pub const BLACK: Color32 = Color32::BLACK;
 pub const NAVY: Color32 = Color32::from_rgb(0x00, 0x00, 0x80);
-pub const TITLE_END: Color32 = Color32::from_rgb(0x10, 0x84, 0xD0);
-pub const INACTIVE_TITLE: Color32 = Color32::from_rgb(0x80, 0x80, 0x80);
-pub const INACTIVE_TITLE_END: Color32 = Color32::from_rgb(0xB5, 0xB5, 0xB5);
 
 /// Base font size in points. W95FA is a pixel font: keep this a whole number.
 pub const FONT_SIZE: f32 = 13.0;
 pub const FONT_NAME: &str = "W95FA";
 
 static W95FA: &[u8] = include_bytes!("../assets/W95FA.otf");
+static ATKINSON: &[u8] = include_bytes!("../assets/AtkinsonHyperlegible-Regular.ttf");
+pub const ATKINSON_NAME: &str = "Atkinson Hyperlegible";
+
+/// Interface font (code and diffs always use egui's monospace font).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Font {
+    #[default]
+    W95fa,
+    Atkinson,
+}
+
+impl Font {
+    pub const ALL: [Font; 2] = [Font::W95fa, Font::Atkinson];
+
+    /// Name shown to the user, stored in the configuration, and egui font family name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Font::W95fa => FONT_NAME,
+            Font::Atkinson => ATKINSON_NAME,
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Font> {
+        Font::ALL.into_iter().find(|f| f.name() == name)
+    }
+
+    /// egui family with this font first and only emoji fallbacks: previews, glyph checks.
+    pub fn family(self) -> FontFamily {
+        FontFamily::Name(self.name().into())
+    }
+}
+
+/// What the user chose in View > Appearance (the size is egui's zoom factor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Appearance {
+    pub scheme: Scheme,
+    pub font: Font,
+}
+
+fn appearance_id() -> Id {
+    Id::new("win95_appearance")
+}
+
+fn override_id() -> Id {
+    Id::new("win95_palette_override")
+}
 
 pub fn font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Proportional)
 }
 
-/// Install the Win95 font and style on `ctx`. Call once at startup.
+/// Install the fonts and the Windows Standard look on `ctx`. Call once at startup.
 pub fn install(ctx: &egui::Context) {
+    ctx.set_theme(egui::Theme::Light);
+    set_fonts(ctx, Font::W95fa);
+    store(ctx, Appearance::default());
+}
+
+/// Switch color scheme and font (fonts are reloaded only when the font changes).
+pub fn apply(ctx: &egui::Context, a: Appearance) {
+    let before = appearance(ctx);
+    if before.font != a.font {
+        set_fonts(ctx, a.font);
+    }
+    store(ctx, a);
+}
+
+fn store(ctx: &egui::Context, a: Appearance) {
+    ctx.data_mut(|d| d.insert_temp(appearance_id(), a));
+    let palette = a.scheme.palette();
+    ctx.all_styles_mut(|style| apply_style(style, &palette));
+}
+
+/// The current choice (Windows Standard and W95FA if nothing was installed).
+pub fn appearance(ctx: &egui::Context) -> Appearance {
+    ctx.data(|d| d.get_temp(appearance_id()))
+        .unwrap_or_default()
+}
+
+/// Colors to paint with: the current scheme, or the one of [`with_palette`].
+pub fn palette(ctx: &egui::Context) -> Palette {
+    ctx.data(|d| d.get_temp::<Palette>(override_id()))
+        .unwrap_or_else(|| appearance(ctx).scheme.palette())
+}
+
+/// Draw `add` with another palette (the Appearance preview).
+pub fn with_palette<R>(
+    ui: &mut egui::Ui,
+    palette: Palette,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let ctx = ui.ctx().clone();
+    let before = ctx.data(|d| d.get_temp::<Palette>(override_id()));
+    ctx.data_mut(|d| d.insert_temp(override_id(), palette));
+    let r = ui
+        .scope(|ui| {
+            let mut style = (**ui.style()).clone();
+            apply_style(&mut style, &palette);
+            ui.set_style(style);
+            add(ui)
+        })
+        .inner;
+    ctx.data_mut(|d| {
+        if let Some(p) = before {
+            d.insert_temp(override_id(), p);
+        } else {
+            d.remove::<Palette>(override_id());
+        }
+    });
+    r
+}
+
+fn set_fonts(ctx: &egui::Context, first: Font) {
     let mut fonts = FontDefinitions::default();
     fonts
         .font_data
         .insert(FONT_NAME.to_owned(), Arc::new(FontData::from_static(W95FA)));
-    // W95FA first for UI text; egui's default fonts stay as fallback for missing glyphs.
-    // Monospace keeps egui's fixed-width font: W95FA is proportional and would misalign diffs.
-    fonts
+    fonts.font_data.insert(
+        ATKINSON_NAME.to_owned(),
+        Arc::new(FontData::from_static(ATKINSON)),
+    );
+    // egui's emoji fonts (not its text font) as fallback: they hold the replacement
+    // character, so `has_glyph` on these families tells whether the font itself has it.
+    let emoji: Vec<String> = fonts
         .families
-        .entry(FontFamily::Proportional)
-        .or_default()
-        .insert(0, FONT_NAME.to_owned());
+        .get(&FontFamily::Proportional)
+        .into_iter()
+        .flatten()
+        .filter(|n| n.contains("moji"))
+        .cloned()
+        .collect();
+    for f in Font::ALL {
+        let mut list = vec![f.name().to_owned()];
+        list.extend(emoji.iter().cloned());
+        fonts.families.insert(f.family(), list);
+    }
+    // The chosen font first for UI text; egui's default fonts stay as fallback.
+    // Monospace keeps egui's fixed-width font: both UI fonts are proportional.
+    let prop = fonts.families.entry(FontFamily::Proportional).or_default();
+    prop.insert(0, first.name().to_owned());
     ctx.set_fonts(fonts);
-    ctx.set_theme(egui::Theme::Light);
-    ctx.all_styles_mut(apply_style);
 }
 
-fn apply_style(style: &mut egui::Style) {
+fn apply_style(style: &mut egui::Style, p: &Palette) {
     style.text_styles = [
         (TextStyle::Small, font(FONT_SIZE)),
         (TextStyle::Body, font(FONT_SIZE)),
@@ -64,41 +185,45 @@ fn apply_style(style: &mut egui::Style) {
     style.animation_time = 0.0;
 
     let v = &mut style.visuals;
-    v.dark_mode = false;
-    v.panel_fill = SILVER;
-    v.window_fill = SILVER;
-    v.faint_bg_color = SILVER;
-    v.extreme_bg_color = WHITE;
-    v.text_edit_bg_color = Some(WHITE);
+    v.dark_mode = p.dark;
+    v.panel_fill = p.face;
+    v.window_fill = p.face;
+    v.faint_bg_color = p.face;
+    v.extreme_bg_color = p.window;
+    v.text_edit_bg_color = Some(p.window);
+    v.code_bg_color = p.code_bg;
+    v.weak_text_color = Some(p.gray_text);
     v.window_corner_radius = CornerRadius::ZERO;
     v.menu_corner_radius = CornerRadius::ZERO;
     v.window_shadow = Shadow::NONE;
     v.popup_shadow = Shadow::NONE;
-    v.window_stroke = Stroke::new(1.0, GRAY);
-    v.selection.bg_fill = NAVY;
-    v.selection.stroke = Stroke::new(1.0, WHITE);
-    v.hyperlink_color = NAVY;
+    v.window_stroke = Stroke::new(1.0, p.shadow);
+    v.selection.bg_fill = p.selection;
+    v.selection.stroke = Stroke::new(1.0, p.selection_text);
+    v.hyperlink_color = p.link;
+    v.error_fg_color = p.error;
+    v.warn_fg_color = p.warning;
     for w in [
         &mut v.widgets.noninteractive,
         &mut v.widgets.inactive,
         &mut v.widgets.open,
     ] {
-        w.bg_fill = SILVER;
-        w.weak_bg_fill = SILVER;
+        w.bg_fill = p.face;
+        w.weak_bg_fill = p.face;
         w.bg_stroke = Stroke::NONE;
-        w.fg_stroke = Stroke::new(1.0, BLACK);
+        w.fg_stroke = Stroke::new(1.0, p.text);
         w.corner_radius = CornerRadius::ZERO;
         w.expansion = 0.0;
     }
-    // Win95 menus and hovered items: navy highlight with white text.
+    // Win95 menus and hovered items: selection color with its text.
     for w in [&mut v.widgets.hovered, &mut v.widgets.active] {
-        w.bg_fill = NAVY;
-        w.weak_bg_fill = NAVY;
+        w.bg_fill = p.selection;
+        w.weak_bg_fill = p.selection;
         w.bg_stroke = Stroke::NONE;
-        w.fg_stroke = Stroke::new(1.0, WHITE);
+        w.fg_stroke = Stroke::new(1.0, p.selection_text);
         w.corner_radius = CornerRadius::ZERO;
         w.expansion = 0.0;
     }
-    v.widgets.open.weak_bg_fill = NAVY;
-    v.widgets.open.fg_stroke = Stroke::new(1.0, WHITE);
+    v.widgets.open.weak_bg_fill = p.selection;
+    v.widgets.open.fg_stroke = Stroke::new(1.0, p.selection_text);
 }

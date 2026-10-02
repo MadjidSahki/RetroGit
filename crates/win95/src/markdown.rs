@@ -4,7 +4,7 @@
 
 use egui::{Color32, RichText, Ui};
 
-use crate::theme::{self, BLACK, GRAY, NAVY};
+use crate::theme;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Inline {
@@ -240,9 +240,8 @@ pub fn inlines(text: &str) -> Vec<Inline> {
     out
 }
 
-const CODE_BG: Color32 = Color32::from_rgb(0xF0, 0xF0, 0xF0);
-
 fn show_inlines(ui: &mut Ui, items: &[Inline], size: f32, color: Color32) {
+    let pal = theme::palette(ui.ctx());
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for item in items {
@@ -252,7 +251,7 @@ fn show_inlines(ui: &mut Ui, items: &[Inline], size: f32, color: Color32) {
                 }
                 // W95FA has no bold face: bold text is drawn in navy.
                 Inline::Bold(t) => {
-                    ui.label(RichText::new(t).size(size).color(NAVY));
+                    ui.label(RichText::new(t).size(size).color(pal.link));
                 }
                 Inline::Italic(t) => {
                     ui.label(RichText::new(t).size(size).italics().color(color));
@@ -261,8 +260,8 @@ fn show_inlines(ui: &mut Ui, items: &[Inline], size: f32, color: Color32) {
                     ui.label(
                         RichText::new(t)
                             .font(egui::FontId::monospace(theme::FONT_SIZE))
-                            .background_color(CODE_BG)
-                            .color(BLACK),
+                            .background_color(pal.code_bg)
+                            .color(pal.window_text),
                     );
                 }
                 Inline::Link { text, url } => {
@@ -275,15 +274,16 @@ fn show_inlines(ui: &mut Ui, items: &[Inline], size: f32, color: Color32) {
 
 /// Draw Markdown `text`. Links open in the browser.
 pub fn markdown_view(ui: &mut Ui, text: &str) {
+    let pal = theme::palette(ui.ctx());
     let base = theme::FONT_SIZE;
     for block in markdown_blocks(text) {
         match block {
             Block::Heading(level, items) => {
                 let size = base + (4.0 - f32::from(level.min(4))).max(0.0) * 2.0;
                 ui.add_space(4.0);
-                show_inlines(ui, &items, size, NAVY);
+                show_inlines(ui, &items, size, pal.link);
             }
-            Block::Paragraph(items) => show_inlines(ui, &items, base, BLACK),
+            Block::Paragraph(items) => show_inlines(ui, &items, base, pal.window_text),
             Block::ListItem {
                 depth,
                 marker,
@@ -291,20 +291,20 @@ pub fn markdown_view(ui: &mut Ui, text: &str) {
             } => {
                 ui.horizontal(|ui| {
                     ui.add_space(8.0 + depth as f32 * 16.0);
-                    ui.label(RichText::new(marker).color(BLACK));
-                    show_inlines(ui, &content, base, BLACK);
+                    ui.label(RichText::new(marker).color(pal.window_text));
+                    show_inlines(ui, &content, base, pal.window_text);
                 });
             }
             Block::Code(code) => {
                 egui::Frame::NONE
-                    .fill(CODE_BG)
+                    .fill(pal.code_bg)
                     .inner_margin(egui::Margin::same(4))
                     .show(ui, |ui| {
                         ui.add(
                             egui::Label::new(
                                 RichText::new(code)
                                     .font(egui::FontId::monospace(base))
-                                    .color(BLACK),
+                                    .color(pal.window_text),
                             )
                             .extend(),
                         );
@@ -312,8 +312,8 @@ pub fn markdown_view(ui: &mut Ui, text: &str) {
             }
             Block::Quote(items) => {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("|").color(GRAY));
-                    show_inlines(ui, &items, base, GRAY);
+                    ui.label(RichText::new("|").color(pal.gray_text));
+                    show_inlines(ui, &items, base, pal.gray_text);
                 });
             }
             Block::Rule => {
