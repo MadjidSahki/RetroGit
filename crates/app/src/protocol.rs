@@ -156,6 +156,8 @@ pub enum Command {
     },
     /// One tag, or all (`None`).
     PushTags(Option<String>),
+    /// Stash the local changes (untracked included), then run the blocked command again.
+    StashAndRetry(Box<Command>),
     // --- Sub-project 6a: conflicts of the open repository. ---
     LoadConflict(String),
     /// Write `content` as the resolution of `path` and mark it resolved.
@@ -434,6 +436,11 @@ pub enum Event {
     OpFinished {
         outcome: gitcore::OpOutcome,
         note: String,
+    },
+    /// Local changes prevent `retry` from starting (nothing was changed).
+    OpBlocked {
+        retry: Box<Command>,
+        files: Vec<String>,
     },
     ResetInfo {
         id: String,

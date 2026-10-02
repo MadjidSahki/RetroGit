@@ -210,3 +210,31 @@ fn stashes_and_tags_are_listed_after_each_change() {
     let evs = until(&w, |e| matches!(e, Event::TagsLoaded(_)));
     assert!(matches!(evs.last(), Some(Event::TagsLoaded(t)) if t.is_empty()));
 }
+
+#[test]
+fn an_operation_blocked_by_local_changes_offers_stash_and_retry() {
+    let Some((_d, dir)) = repo() else { return };
+    git(&dir, &["switch", "-q", "-c", "other"]);
+    let theirs = commit(&dir, "a.txt", "theirs\n", "theirs");
+    git(&dir, &["switch", "-q", "main"]);
+    std::fs::write(dir.join("a.txt"), "dirty\n").unwrap();
+    let w = start(&dir);
+    let pick = Command::CherryPick(theirs);
+    w.send(pick.clone());
+    let evs = until(&w, |e| matches!(e, Event::OpBlocked { .. }));
+    match evs.last() {
+        Some(Event::OpBlocked { retry, files }) => {
+            assert_eq!(**retry, pick);
+            assert_eq!(files, &["a.txt"]);
+        }
+        other => panic!("{other:?}"),
+    }
+    w.send(Command::StashAndRetry(Box::new(pick)));
+    until(&w, |e| matches!(e, Event::OpFinished { .. }));
+    assert_eq!(git(&dir, &["log", "-1", "--format=%s"]), "theirs\n");
+    assert_eq!(
+        git(&dir, &["stash", "list"]).lines().count(),
+        1,
+        "changes kept in a stash"
+    );
+}

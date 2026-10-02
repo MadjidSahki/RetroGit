@@ -124,3 +124,32 @@ fn reset_soft_mixed_and_hard() {
     );
     assert_eq!(subjects(d.path()), "base\n");
 }
+
+#[test]
+fn local_changes_in_the_way_are_reported_as_would_overwrite() {
+    let Some(d) = tmp() else { return };
+    let r = init(d.path());
+    git(d.path(), &["switch", "-q", "-c", "other"]);
+    let theirs = commit(d.path(), "a.txt", "theirs\n", "theirs");
+    git(d.path(), &["switch", "-q", "main"]);
+    std::fs::write(d.path().join("a.txt"), "dirty\n").unwrap();
+    match r.cherry_pick(&theirs) {
+        Err(gitcore::GitError::WouldOverwrite { files }) => assert_eq!(files, ["a.txt"]),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(r.operation_in_progress(), None);
+    // A rebase refuses any unstaged change.
+    let base = git(d.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    commit(d.path(), "b.txt", "b\n", "b");
+    std::fs::write(d.path().join("a.txt"), "dirty again\n").unwrap();
+    let items = r.rebase_list(&base).unwrap();
+    let got = r.interactive_rebase(&base, &items);
+    assert!(
+        matches!(got, Err(gitcore::GitError::WouldOverwrite { .. })),
+        "{got:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(d.path().join("a.txt")).unwrap(),
+        "dirty again\n"
+    );
+}

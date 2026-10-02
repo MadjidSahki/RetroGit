@@ -18,7 +18,9 @@ pub use pulls_more::{
     LineSelection, PeopleKind, SelectionTarget, apply_disabled_reason, apply_disabled_reason_for,
     extend_selection, selection_target, suggestion_prefill,
 };
-pub use sync::{HistoryView, LOG_PAGE, PendingDialog, SyncView, Tab, branch_name_error};
+pub use sync::{
+    HistoryView, LOG_PAGE, PendingDialog, SyncView, Tab, branch_name_error, tag_name_error,
+};
 
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -411,6 +413,7 @@ impl AppState {
             | Event::AssignableLoaded { .. }) => self.apply_pulls(ev),
             Event::PrEvents(events) => self.add_notifications(events),
             ev @ (Event::OpFinished { .. }
+            | Event::OpBlocked { .. }
             | Event::ResetInfo { .. }
             | Event::RebaseListLoaded { .. }
             | Event::StashesLoaded(_)

@@ -53,7 +53,7 @@ and a pixel font.
   - your edits are never lost silently: changes on disk are offered with Reload, and leaving the file, switching repository or aborting asks first
 - Right-click a commit in History to cherry-pick it, revert it (choosing the side to keep for a merge), reset the branch to it (soft, mixed, or hard after a confirmation, with a warning when pushed commits are dropped), start an interactive rebase from it, or tag it
 - Interactive rebase: reorder commits with Up / Down and pick, reword, squash (with an optional new message), fixup or drop each one; Start explains why it is disabled, and pushed commits are flagged. Repository → Interactive rebase rewrites the commits not yet pushed
-- Cherry-pick, revert and rebase in progress get Continue / Skip / Abort; their conflicts open in the conflict editor
+- Cherry-pick, revert and rebase in progress get Continue / Skip / Abort; their conflicts open in the conflict editor. When local changes are in the way, Stash and retry puts them aside first
 - Stashes tab: stash changes (optionally with untracked files), browse each stash's files and diff, apply, pop or drop it (the id of a dropped stash is shown to recover it)
 - Repository → Tags: list and filter tags, create lightweight or annotated tags, delete them (also on origin), push one or all
 

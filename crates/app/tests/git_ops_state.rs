@@ -204,3 +204,44 @@ fn history_menu_actions_open_dialogs_or_send_commands() {
         })
     ));
 }
+
+#[test]
+fn a_blocked_operation_opens_the_stash_and_retry_dialog() {
+    use retrogit::protocol::{Command, Event};
+    use retrogit::state::GitDialog;
+    let mut st = retrogit::state::AppState::new(retrogit::config::Config::default());
+    st.apply(Event::OpBlocked {
+        retry: Box::new(Command::CherryPick("x".into())),
+        files: vec!["a.txt".into()],
+    });
+    assert!(matches!(
+        &st.git_dialog,
+        Some(GitDialog::StashRetry { retry, files }) if **retry == Command::CherryPick("x".into()) && files == &["a.txt"]
+    ));
+}
+
+#[test]
+fn tag_names_are_checked_before_sending() {
+    use retrogit::state::tag_name_error;
+    let tags = vec![gitcore::Tag {
+        name: "v1.0".into(),
+        commit: "c".into(),
+        annotated: false,
+        message: String::new(),
+    }];
+    assert_eq!(tag_name_error("v1.1", &tags), None);
+    assert!(tag_name_error("", &tags).is_some());
+    assert!(
+        tag_name_error("v1.0", &tags)
+            .unwrap()
+            .contains("already exists")
+    );
+    for bad in ["has space", "a..b", "-x", "x.lock", "a~1", "v1:2"] {
+        assert!(
+            tag_name_error(bad, &tags)
+                .unwrap()
+                .contains("not a valid tag name"),
+            "{bad}"
+        );
+    }
+}

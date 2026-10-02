@@ -316,7 +316,8 @@ impl Worker {
             | Command::LoadTags
             | Command::CreateTag { .. }
             | Command::DeleteTag { .. }
-            | Command::PushTags(_)) => self.handle_git_ops(op),
+            | Command::PushTags(_)
+            | Command::StashAndRetry(_)) => self.handle_git_ops(op),
             pr @ (Command::LoadPulls { .. }
             | Command::LoadPull { .. }
             | Command::RefreshPull { .. }

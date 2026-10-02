@@ -138,6 +138,11 @@ impl Repo {
             return Ok(OpOutcome::Done);
         }
         let text = out.text.to_lowercase();
+        if !out.success && blocked_by_local_changes(&text) {
+            return Err(GitError::WouldOverwrite {
+                files: crate::parse_overwritten_files(&out.text),
+            });
+        }
         if self.operation_in_progress() == Some(op) || self.operation_in_progress().is_some() {
             let empty = text.contains("nothing to commit")
                 || text.contains("is now empty")
@@ -161,4 +166,12 @@ impl Repo {
         }
         Err(crate::classify_commit_failure(&out.text))
     }
+}
+
+/// Git refused to start because of local changes ("would be overwritten", "cannot rebase:
+/// You have unstaged changes"); nothing was changed.
+fn blocked_by_local_changes(lowercase: &str) -> bool {
+    lowercase.contains("would be overwritten by")
+        || lowercase.contains("cannot rebase: you have unstaged changes")
+        || lowercase.contains("cannot rebase: your index contains uncommitted changes")
 }

@@ -48,6 +48,22 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
         GitDialog::DeleteTag { name, remote } => delete_tag(egui_ctx, cx, name, remote),
         GitDialog::Tags { filter, selected } => tags(egui_ctx, cx, filter, selected),
         GitDialog::StashSave { message, untracked } => stash_save(egui_ctx, cx, message, untracked),
+        GitDialog::StashRetry { retry, files } => {
+            let question = format!("{}\n\n{}", s::STASH_RETRY_QUESTION, files.join("\n"));
+            match confirm_with(
+                egui_ctx,
+                s::STASH_RETRY_TITLE,
+                &question,
+                s::STASH_AND_RETRY,
+            ) {
+                Some(true) => {
+                    cx.worker.send(Command::StashAndRetry(retry));
+                    None
+                }
+                Some(false) => None,
+                None => Some(GitDialog::StashRetry { retry, files }),
+            }
+        }
         GitDialog::StashDrop { index } => {
             match confirm(
                 egui_ctx,
@@ -71,6 +87,11 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
 
 /// A question with OK / Cancel: `Some(true)` OK, `Some(false)` cancelled, `None` open.
 fn confirm(egui_ctx: &egui::Context, title: &str, question: &str) -> Option<bool> {
+    confirm_with(egui_ctx, title, question, s::OK)
+}
+
+/// [`confirm`] with a named OK button.
+fn confirm_with(egui_ctx: &egui::Context, title: &str, question: &str, ok: &str) -> Option<bool> {
     let mut result = None;
     let r = Dialog::new(("git_confirm", title), title)
         .width(400.0)
@@ -78,7 +99,7 @@ fn confirm(egui_ctx: &egui::Context, title: &str, question: &str) -> Option<bool
             ui.add(egui::Label::new(question).wrap());
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.add(Button95::new(s::OK).min_size(BUTTON)).clicked() {
+                if ui.add(Button95::new(ok).min_size(BUTTON)).clicked() {
                     result = Some(true);
                 }
                 if ui.add(Button95::new(s::CANCEL).min_size(BUTTON)).clicked() {
@@ -316,7 +337,7 @@ fn create_tag(
     mut annotated: bool,
 ) -> Option<GitDialog> {
     let (mut ok, mut cancel) = (false, false);
-    let exists = cx.state.tags.iter().any(|t| t.name == name.trim());
+    let error = crate::state::tag_name_error(&name, &cx.state.tags);
     let r = Dialog::new("create_tag", s::CREATE_TAG_TITLE)
         .width(420.0)
         .show(egui_ctx, |ui| {
@@ -327,14 +348,14 @@ fn create_tag(
                 ui.label(s::TAG_MESSAGE);
                 text_area(ui, &mut message, 400.0, 3);
             }
-            if exists {
-                ui.label(egui::RichText::new(s::TAG_EXISTS).color(win95::theme::GRAY));
+            if let Some(e) = &error
+                && !name.trim().is_empty()
+            {
+                ui.label(egui::RichText::new(e).color(win95::theme::GRAY));
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                let ready = !name.trim().is_empty()
-                    && !exists
-                    && (!annotated || !message.trim().is_empty());
+                let ready = error.is_none() && (!annotated || !message.trim().is_empty());
                 ok = ui
                     .add(Button95::new(s::CREATE).min_size(BUTTON).enabled(ready))
                     .clicked();

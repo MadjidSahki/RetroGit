@@ -162,3 +162,18 @@ fn the_tags_window_lists_tags() {
     assert!(h.query_by_label_contains("v1.0").is_some());
     assert!(h.query_by_label(s::PUSH_ALL_TAGS).is_some());
 }
+
+#[test]
+fn the_stash_and_retry_dialog_lists_the_files_in_the_way() {
+    let mut w = world();
+    w.state.git_dialog = Some(GitDialog::StashRetry {
+        retry: Box::new(retrogit::protocol::Command::CherryPick("x".into())),
+        files: vec!["src/in_the_way.rs".into()],
+    });
+    let mut h = harness(w);
+    h.run();
+    assert!(h.query_by_label_contains("src/in_the_way.rs").is_some());
+    h.get_by_label(s::STASH_AND_RETRY).click();
+    h.run();
+    assert!(h.state().state.git_dialog.is_none());
+}

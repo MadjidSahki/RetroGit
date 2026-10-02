@@ -46,6 +46,11 @@ pub enum GitDialog {
     StashDrop {
         index: usize,
     },
+    /// Local changes block `retry`: offer to stash them and run it again.
+    StashRetry {
+        retry: Box<Command>,
+        files: Vec<String>,
+    },
 }
 
 /// Move `items[i]` up (or down) by one, within bounds.
@@ -139,6 +144,9 @@ impl AppState {
                 }
                 OpOutcome::Empty => {}
             },
+            Event::OpBlocked { retry, files } => {
+                self.git_dialog = Some(GitDialog::StashRetry { retry, files });
+            }
             Event::ResetInfo { id, drops_pushed } => {
                 if let Some(GitDialog::Reset {
                     id: shown,

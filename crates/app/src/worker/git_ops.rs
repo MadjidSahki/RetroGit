@@ -10,15 +10,25 @@ use crate::strings as s;
 impl Worker {
     pub(super) fn handle_git_ops(&mut self, cmd: Command) {
         match cmd {
-            Command::CherryPick(id) => {
-                self.history_op(s::NOTE_CHERRY_PICKED, |r| r.cherry_pick(&id))
+            Command::CherryPick(ref id) => {
+                self.history_op(s::NOTE_CHERRY_PICKED, &cmd, |r| r.cherry_pick(id))
             }
-            Command::Revert { id, mainline } => {
-                self.history_op(s::NOTE_REVERTED, |r| r.revert(&id, mainline))
+            Command::Revert { ref id, mainline } => {
+                self.history_op(s::NOTE_REVERTED, &cmd, |r| r.revert(id, mainline))
             }
-            Command::Reset { id, mode } => self.history_op(s::NOTE_RESET, |r| {
-                r.reset(&id, mode).map(|()| OpOutcome::Done)
+            Command::Reset { ref id, mode } => self.history_op(s::NOTE_RESET, &cmd, |r| {
+                r.reset(id, mode).map(|()| OpOutcome::Done)
             }),
+            Command::StashAndRetry(retry) => {
+                let Some(r) = self.open_current(Op::Changes) else {
+                    return;
+                };
+                match r.stash_save(s::STASH_RETRY_MESSAGE, true) {
+                    Ok(_) => self.handle_git_ops(*retry),
+                    Err(e) => self.fail(Op::Changes, AppError::from_git(&e)),
+                }
+                self.send_stashes();
+            }
             Command::LoadResetInfo(id) => {
                 if let Some(r) = self.open_current(Op::History) {
                     let drops_pushed = r.reset_drops_pushed(&id);
@@ -26,13 +36,14 @@ impl Worker {
                 }
             }
             Command::LoadRebaseList(base) => self.load_rebase_list(base),
-            Command::InteractiveRebase { base, items } => {
-                self.history_op(s::NOTE_REBASED, |r| r.interactive_rebase(&base, &items))
-            }
+            Command::InteractiveRebase {
+                ref base,
+                ref items,
+            } => self.history_op(s::NOTE_REBASED, &cmd, |r| r.interactive_rebase(base, items)),
             Command::ContinueOperation => {
-                self.history_op(s::NOTE_CONTINUED, Repo::continue_operation)
+                self.history_op(s::NOTE_CONTINUED, &cmd, Repo::continue_operation)
             }
-            Command::SkipOperation => self.history_op(s::NOTE_SKIPPED, Repo::skip_operation),
+            Command::SkipOperation => self.history_op(s::NOTE_SKIPPED, &cmd, Repo::skip_operation),
             Command::LoadStashes => self.send_stashes(),
             Command::StashSave { message, untracked } => {
                 let Some(r) = self.open_current(Op::Changes) else {
@@ -133,7 +144,12 @@ impl Worker {
     }
 
     /// Run a history operation, reload what depends on HEAD, then report its outcome.
-    fn history_op(&mut self, note: &str, run: impl FnOnce(&Repo) -> Result<OpOutcome, GitError>) {
+    fn history_op(
+        &mut self,
+        note: &str,
+        cmd: &Command,
+        run: impl FnOnce(&Repo) -> Result<OpOutcome, GitError>,
+    ) {
         let Some(repo) = self.open_current(Op::History) else {
             return;
         };
@@ -152,6 +168,10 @@ impl Worker {
                     note: note.to_string(),
                 });
             }
+            Err(GitError::WouldOverwrite { files }) => self.emit(Event::OpBlocked {
+                retry: Box::new(cmd.clone()),
+                files,
+            }),
             Err(e) => self.fail(Op::History, AppError::from_git(&e)),
         }
     }
