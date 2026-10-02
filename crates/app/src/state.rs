@@ -1,12 +1,14 @@
 //! All UI state, updated by the pure `apply` function.
 
 mod conflicts;
+mod git_ops;
 mod notifications;
 mod pulls;
 mod pulls_more;
 mod sync;
 
 pub use conflicts::{ConflictConfirm, ConflictEditor, text_as_diff};
+pub use git_ops::{GitDialog, StashesView, move_item};
 pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};
 pub use pulls::{
     CHECKS_REFRESH, PullDialog, PullTab, PullsView, default_merge_method, merge_defaults,
@@ -197,6 +199,10 @@ pub struct AppState {
     // --- Sub-project 4 ---
     pub pulls: PullsView,
     pub notifications: NotificationsView,
+    // --- Sub-project 6c ---
+    pub git_dialog: Option<GitDialog>,
+    pub stashes: StashesView,
+    pub tags: Vec<gitcore::Tag>,
 }
 
 impl AppState {
@@ -230,6 +236,9 @@ impl AppState {
             ides: Vec::new(),
             pulls: PullsView::default(),
             notifications: NotificationsView::default(),
+            git_dialog: None,
+            stashes: StashesView::default(),
+            tags: Vec::new(),
             accounts: Vec::new(),
             accounts_dialog: false,
             repo_account_dialog: false,
@@ -398,6 +407,13 @@ impl AppState {
             | Event::PullActionDone { .. }
             | Event::AssignableLoaded { .. }) => self.apply_pulls(ev),
             Event::PrEvents(events) => self.add_notifications(events),
+            ev @ (Event::OpFinished { .. }
+            | Event::ResetInfo { .. }
+            | Event::RebaseListLoaded { .. }
+            | Event::StashesLoaded(_)
+            | Event::StashFilesLoaded { .. }
+            | Event::StashFileDiffLoaded { .. }
+            | Event::TagsLoaded(_)) => self.apply_git_ops(ev),
             Event::Error { during, error } => {
                 self.on_error(during);
                 self.messages.push_back(error);
@@ -468,6 +484,9 @@ impl AppState {
             self.operation = None;
             self.signing = None;
             self.repo_account = None;
+            self.git_dialog = None;
+            self.stashes = StashesView::default();
+            self.tags.clear();
             let slug = summary
                 .origin_url
                 .as_deref()

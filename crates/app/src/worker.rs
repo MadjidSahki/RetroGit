@@ -3,6 +3,7 @@
 mod accounts;
 mod changes;
 mod conflicts;
+mod git_ops;
 mod pulls;
 mod sync;
 
@@ -297,6 +298,25 @@ impl Worker {
             Command::ForcePush => self.force_push(),
             Command::AbortOperation => self.abort_operation(),
             Command::ContinueRebase => self.continue_rebase(),
+            op @ (Command::CherryPick(_)
+            | Command::Revert { .. }
+            | Command::Reset { .. }
+            | Command::LoadResetInfo(_)
+            | Command::LoadRebaseList(_)
+            | Command::InteractiveRebase { .. }
+            | Command::ContinueOperation
+            | Command::SkipOperation
+            | Command::LoadStashes
+            | Command::StashSave { .. }
+            | Command::StashApply(_)
+            | Command::StashPop(_)
+            | Command::StashDrop(_)
+            | Command::LoadStashFiles(_)
+            | Command::LoadStashFileDiff { .. }
+            | Command::LoadTags
+            | Command::CreateTag { .. }
+            | Command::DeleteTag { .. }
+            | Command::PushTags(_)) => self.handle_git_ops(op),
             pr @ (Command::LoadPulls { .. }
             | Command::LoadPull { .. }
             | Command::RefreshPull { .. }

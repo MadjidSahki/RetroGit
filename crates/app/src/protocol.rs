@@ -108,6 +108,54 @@ pub enum Command {
     ForcePush,
     AbortOperation,
     ContinueRebase,
+    // --- Sub-project 6c ---
+    CherryPick(String),
+    /// `mainline`: parent to keep when reverting a merge (1-based).
+    Revert {
+        id: String,
+        mainline: Option<u32>,
+    },
+    Reset {
+        id: String,
+        mode: gitcore::ResetMode,
+    },
+    /// Whether resetting to `id` drops pushed commits (for the Reset dialog).
+    LoadResetInfo(String),
+    /// Commits after `base` (`None`: the branch's upstream).
+    LoadRebaseList(Option<String>),
+    InteractiveRebase {
+        base: String,
+        items: Vec<gitcore::TodoItem>,
+    },
+    /// Continue / skip the cherry-pick, revert or rebase in progress.
+    ContinueOperation,
+    SkipOperation,
+    LoadStashes,
+    StashSave {
+        message: String,
+        untracked: bool,
+    },
+    StashApply(usize),
+    StashPop(usize),
+    StashDrop(usize),
+    LoadStashFiles(usize),
+    LoadStashFileDiff {
+        index: usize,
+        path: String,
+    },
+    LoadTags,
+    CreateTag {
+        name: String,
+        id: String,
+        message: Option<String>,
+    },
+    /// `remote`: delete it on origin too.
+    DeleteTag {
+        name: String,
+        remote: bool,
+    },
+    /// One tag, or all (`None`).
+    PushTags(Option<String>),
     // --- Sub-project 6a: conflicts of the open repository. ---
     LoadConflict(String),
     /// Write `content` as the resolution of `path` and mark it resolved.
@@ -382,6 +430,31 @@ pub enum Event {
     ConflictLoaded(Box<gitcore::ConflictFile>),
     /// `path` is no longer in conflict (sent after the refreshed status).
     ConflictResolved(String),
+    /// A history operation finished: done, stopped on conflicts, or empty.
+    OpFinished {
+        outcome: gitcore::OpOutcome,
+        note: String,
+    },
+    ResetInfo {
+        id: String,
+        drops_pushed: bool,
+    },
+    /// `pushed`: how many of `items` are already on the upstream.
+    RebaseListLoaded {
+        base: String,
+        items: Vec<gitcore::TodoItem>,
+        pushed: usize,
+    },
+    StashesLoaded(Vec<gitcore::StashEntry>),
+    StashFilesLoaded {
+        index: usize,
+        files: Vec<gitcore::ChangedFile>,
+    },
+    StashFileDiffLoaded {
+        index: usize,
+        diff: gitcore::FileDiff,
+    },
+    TagsLoaded(Vec<gitcore::Tag>),
     AssignableLoaded {
         slug: Slug,
         users: Vec<String>,
