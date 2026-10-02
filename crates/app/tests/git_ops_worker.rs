@@ -291,3 +291,21 @@ fn a_rebase_from_a_commit_of_another_branch_is_refused() {
         evs.last()
     );
 }
+
+#[test]
+fn pushing_a_tag_reports_in_the_tags_window() {
+    let Some((d, dir)) = repo() else { return };
+    let bare = d.path().join("origin.git");
+    git(d.path(), &["init", "-q", "--bare", bare.to_str().unwrap()]);
+    git(&dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git(&dir, &["tag", "v1"]);
+    let w = start(&dir);
+    w.send(Command::PushTags(Some("v1".into())));
+    let evs = until(&w, |e| matches!(e, Event::TagsStatus(_)));
+    assert!(
+        matches!(evs.last(), Some(Event::TagsStatus(t)) if t.contains("v1")),
+        "{:?}",
+        evs.last()
+    );
+    assert!(git(&bare, &["tag"]).contains("v1"));
+}

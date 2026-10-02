@@ -158,6 +158,7 @@ fn the_tags_window_lists_tags() {
     w.state.git_dialog = Some(GitDialog::Tags {
         filter: String::new(),
         selected: None,
+        status: None,
     });
     let mut h = harness(w);
     h.run();
@@ -215,6 +216,7 @@ fn new_tag_from_the_tags_window_targets_head() {
     w.state.git_dialog = Some(GitDialog::Tags {
         filter: String::new(),
         selected: None,
+        status: None,
     });
     let mut h = harness(w);
     h.run();
@@ -244,4 +246,67 @@ fn skip_asks_before_dropping_the_commit() {
         Some(GitDialog::ConfirmSkip)
     ));
     assert!(h.query_by_label_contains("left out").is_some());
+}
+
+fn tags_world() -> World {
+    let mut w = world();
+    w.state.apply(Event::TagsLoaded(vec![gitcore::Tag {
+        name: "v1.0".into(),
+        commit: "0123456789".into(),
+        annotated: false,
+        message: String::new(),
+    }]));
+    w
+}
+
+#[test]
+fn creating_or_deleting_a_tag_from_the_tags_window_goes_back_to_it() {
+    let mut w = tags_world();
+    w.state.git_dialog = Some(GitDialog::CreateTag {
+        id: "HEAD".into(),
+        name: "v2.0".into(),
+        message: String::new(),
+        annotated: false,
+        back_to_tags: true,
+    });
+    let mut h = harness(w);
+    h.run();
+    h.get_by_label(s::CREATE).click();
+    h.run();
+    assert!(matches!(
+        h.state().state.git_dialog,
+        Some(GitDialog::Tags { .. })
+    ));
+    h.state_mut().state.git_dialog = Some(GitDialog::DeleteTag {
+        name: "v1.0".into(),
+        remote: false,
+        back_to_tags: true,
+    });
+    h.run();
+    h.get_by_label(s::CANCEL).click();
+    h.run();
+    assert!(matches!(
+        h.state().state.git_dialog,
+        Some(GitDialog::Tags { .. })
+    ));
+}
+
+#[test]
+fn pushing_tags_shows_progress_then_the_result_in_the_window() {
+    let mut w = tags_world();
+    w.state.git_dialog = Some(GitDialog::Tags {
+        filter: String::new(),
+        selected: None,
+        status: None,
+    });
+    let mut h = harness(w);
+    h.run();
+    h.get_by_label(s::PUSH_ALL_TAGS).click();
+    h.run();
+    assert!(h.query_by_label(s::PUSHING_TAGS).is_some());
+    h.state_mut()
+        .state
+        .apply(Event::TagsStatus("Pushed all tags to origin".into()));
+    h.run();
+    assert!(h.query_by_label("Pushed all tags to origin").is_some());
 }

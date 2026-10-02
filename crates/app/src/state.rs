@@ -419,7 +419,8 @@ impl AppState {
             | Event::StashesLoaded(_)
             | Event::StashFilesLoaded { .. }
             | Event::StashFileDiffLoaded { .. }
-            | Event::TagsLoaded(_)) => self.apply_git_ops(ev),
+            | Event::TagsLoaded(_)
+            | Event::TagsStatus(_)) => self.apply_git_ops(ev),
             Event::Error { during, error } => {
                 self.on_error(during);
                 self.messages.push_back(error);

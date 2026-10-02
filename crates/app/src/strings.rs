@@ -547,3 +547,10 @@ pub const TAG_TARGET: &str = "On: {commit}";
 pub const SKIP_TITLE: &str = "Skip this commit";
 pub const SKIP_CONFIRM: &str =
     "The commit being applied is left out, with any conflict resolution done on it. Skip it?";
+pub const PUSHING_TAGS: &str = "Pushing to origin...";
+pub const WORKING: &str = "Working...";
+pub const TAG_PUSHED_STATUS: &str = "Pushed {name} to origin.";
+pub const TAGS_PUSHED_STATUS: &str = "Pushed all tags to origin.";
+pub const TAG_CREATED_STATUS: &str = "Created {name}.";
+pub const TAG_DELETED_STATUS: &str = "Deleted {name}.";
+pub const TAG_ACTION_FAILED: &str = "Failed: see the message.";

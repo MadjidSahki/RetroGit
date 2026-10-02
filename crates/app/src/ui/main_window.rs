@@ -175,6 +175,7 @@ fn menu(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                 cx.state.git_dialog = Some(crate::state::GitDialog::Tags {
                     filter: String::new(),
                     selected: None,
+                    status: None,
                 });
                 cx.worker.send(Command::LoadTags);
             }

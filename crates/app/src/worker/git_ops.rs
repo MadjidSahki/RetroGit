@@ -99,8 +99,16 @@ impl Worker {
             Command::CreateTag { name, id, message } => {
                 if let Some(r) = self.open_current(Op::History) {
                     match r.create_tag(name.trim(), &id, message.as_deref()) {
-                        Ok(()) => self.note(s::NOTE_TAG_CREATED),
-                        Err(e) => self.fail(Op::History, AppError::from_git(&e)),
+                        Ok(()) => {
+                            self.note(s::NOTE_TAG_CREATED);
+                            self.emit(Event::TagsStatus(
+                                s::TAG_CREATED_STATUS.replace("{name}", name.trim()),
+                            ));
+                        }
+                        Err(e) => {
+                            self.emit(Event::TagsStatus(s::TAG_ACTION_FAILED.into()));
+                            self.fail(Op::History, AppError::from_git(&e));
+                        }
                     }
                     self.after_ref_change(&r);
                     self.send_tags();
@@ -119,8 +127,16 @@ impl Worker {
                 })
                 .and_then(|()| r.delete_tag(&name));
                 match result {
-                    Ok(()) => self.note(s::NOTE_TAG_DELETED),
-                    Err(e) => self.fail(Op::History, AppError::from_git(&e)),
+                    Ok(()) => {
+                        self.note(s::NOTE_TAG_DELETED);
+                        self.emit(Event::TagsStatus(
+                            s::TAG_DELETED_STATUS.replace("{name}", &name),
+                        ));
+                    }
+                    Err(e) => {
+                        self.emit(Event::TagsStatus(s::TAG_ACTION_FAILED.into()));
+                        self.fail(Op::History, AppError::from_git(&e));
+                    }
                 }
                 self.after_ref_change(&r);
                 self.send_tags();
@@ -136,8 +152,18 @@ impl Worker {
                     None => r.push_tags(&auth, &never),
                 };
                 match result {
-                    Ok(()) => self.note(s::NOTE_TAGS_PUSHED),
-                    Err(e) => self.fail(Op::Sync, AppError::from_git(&e)),
+                    Ok(()) => {
+                        self.note(s::NOTE_TAGS_PUSHED);
+                        let text = match &name {
+                            Some(n) => s::TAG_PUSHED_STATUS.replace("{name}", n),
+                            None => s::TAGS_PUSHED_STATUS.to_string(),
+                        };
+                        self.emit(Event::TagsStatus(text));
+                    }
+                    Err(e) => {
+                        self.emit(Event::TagsStatus(s::TAG_ACTION_FAILED.into()));
+                        self.fail(Op::Sync, AppError::from_git(&e));
+                    }
                 }
             }
             _ => {}

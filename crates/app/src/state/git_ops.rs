@@ -26,19 +26,24 @@ pub enum GitDialog {
         items: Vec<TodoItem>,
         pushed: usize,
     },
+    /// `back_to_tags`: opened from the Tags window, which comes back afterwards.
     CreateTag {
         id: String,
         name: String,
         message: String,
         annotated: bool,
+        back_to_tags: bool,
     },
     DeleteTag {
         name: String,
         remote: bool,
+        back_to_tags: bool,
     },
+    /// `status`: what the last tag action did ("Pushing...", "Pushed v1 to origin").
     Tags {
         filter: String,
         selected: Option<String>,
+        status: Option<String>,
     },
     StashSave {
         message: String,
@@ -133,6 +138,7 @@ impl AppState {
                     name: String::new(),
                     message: String::new(),
                     annotated: true,
+                    back_to_tags: false,
                 });
                 None
             }
@@ -204,6 +210,11 @@ impl AppState {
                 }
             }
             Event::TagsLoaded(tags) => self.tags = tags,
+            Event::TagsStatus(text) => {
+                if let Some(GitDialog::Tags { status, .. }) = self.git_dialog.as_mut() {
+                    *status = Some(text);
+                }
+            }
             _ => {}
         }
     }

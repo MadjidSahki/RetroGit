@@ -64,9 +64,18 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             name,
             message,
             annotated,
-        } => create_tag(egui_ctx, cx, id, name, message, annotated),
-        GitDialog::DeleteTag { name, remote } => delete_tag(egui_ctx, cx, name, remote),
-        GitDialog::Tags { filter, selected } => tags(egui_ctx, cx, filter, selected),
+            back_to_tags,
+        } => create_tag(egui_ctx, cx, id, name, message, annotated, back_to_tags),
+        GitDialog::DeleteTag {
+            name,
+            remote,
+            back_to_tags,
+        } => delete_tag(egui_ctx, cx, name, remote, back_to_tags),
+        GitDialog::Tags {
+            filter,
+            selected,
+            status,
+        } => tags(egui_ctx, cx, filter, selected, status),
         GitDialog::StashSave { message, untracked } => stash_save(egui_ctx, cx, message, untracked),
         GitDialog::StashRetry { retry, files } => {
             let question = format!("{}\n\n{}", s::STASH_RETRY_QUESTION, files.join("\n"));
@@ -367,6 +376,7 @@ fn create_tag(
     mut name: String,
     mut message: String,
     mut annotated: bool,
+    back_to_tags: bool,
 ) -> Option<GitDialog> {
     let (mut ok, mut cancel) = (false, false);
     let error = crate::state::tag_name_error(&name, &cx.state.tags);
@@ -401,7 +411,7 @@ fn create_tag(
             });
         });
     if cancel || r.close_requested {
-        return None;
+        return back_to_tags.then(|| tags_window(None));
     }
     if ok {
         cx.worker.send(Command::CreateTag {
@@ -409,13 +419,14 @@ fn create_tag(
             id,
             message: annotated.then(|| message.trim().to_string()),
         });
-        return None;
+        return back_to_tags.then(|| tags_window(Some(s::WORKING.to_string())));
     }
     Some(GitDialog::CreateTag {
         id,
         name,
         message,
         annotated,
+        back_to_tags,
     })
 }
 
@@ -424,6 +435,7 @@ fn delete_tag(
     cx: &mut Ctx<'_>,
     name: String,
     mut remote: bool,
+    back_to_tags: bool,
 ) -> Option<GitDialog> {
     let (mut ok, mut cancel) = (false, false);
     let r = Dialog::new("delete_tag", s::DELETE_TAG_TITLE)
@@ -438,13 +450,26 @@ fn delete_tag(
             });
         });
     if cancel || r.close_requested {
-        return None;
+        return back_to_tags.then(|| tags_window(None));
     }
     if ok {
         cx.worker.send(Command::DeleteTag { name, remote });
-        return None;
+        return back_to_tags.then(|| tags_window(Some(s::WORKING.to_string())));
     }
-    Some(GitDialog::DeleteTag { name, remote })
+    Some(GitDialog::DeleteTag {
+        name,
+        remote,
+        back_to_tags,
+    })
+}
+
+/// The Tags window, freshly opened (with an optional status line).
+fn tags_window(status: Option<String>) -> GitDialog {
+    GitDialog::Tags {
+        filter: String::new(),
+        selected: None,
+        status,
+    }
 }
 
 fn tags(
@@ -452,6 +477,7 @@ fn tags(
     cx: &mut Ctx<'_>,
     mut filter: String,
     mut selected: Option<String>,
+    mut status: Option<String>,
 ) -> Option<GitDialog> {
     let mut close = false;
     let mut next: Option<GitDialog> = None;
@@ -496,6 +522,9 @@ fn tags(
                         }
                     });
             });
+            if let Some(text) = &status {
+                ui.label(text);
+            }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if ui.add(Button95::new(s::NEW_TAG).min_size(BUTTON)).clicked() {
@@ -504,6 +533,7 @@ fn tags(
                         name: String::new(),
                         message: String::new(),
                         annotated: true,
+                        back_to_tags: true,
                     });
                 }
                 let has = selected.is_some();
@@ -515,6 +545,7 @@ fn tags(
                     next = Some(GitDialog::DeleteTag {
                         name,
                         remote: false,
+                        back_to_tags: true,
                     });
                 }
                 if ui
@@ -522,12 +553,14 @@ fn tags(
                     .clicked()
                 {
                     cx.worker.send(Command::PushTags(selected.clone()));
+                    status = Some(s::PUSHING_TAGS.to_string());
                 }
                 if ui
                     .add(Button95::new(s::PUSH_ALL_TAGS).min_size(BUTTON))
                     .clicked()
                 {
                     cx.worker.send(Command::PushTags(None));
+                    status = Some(s::PUSHING_TAGS.to_string());
                 }
                 close = ui.add(Button95::new(s::CLOSE).min_size(BUTTON)).clicked();
             });
@@ -538,7 +571,11 @@ fn tags(
     if next.is_some() {
         return next;
     }
-    Some(GitDialog::Tags { filter, selected })
+    Some(GitDialog::Tags {
+        filter,
+        selected,
+        status,
+    })
 }
 
 fn stash_save(

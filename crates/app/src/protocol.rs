@@ -448,6 +448,8 @@ pub enum Event {
         note: String,
     },
     /// Local changes prevent `retry` from starting (nothing was changed).
+    /// Result of a tag action, shown in the Tags window.
+    TagsStatus(String),
     OpBlocked {
         retry: Box<Command>,
         files: Vec<String>,
