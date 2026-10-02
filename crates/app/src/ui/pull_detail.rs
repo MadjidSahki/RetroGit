@@ -324,6 +324,7 @@ fn people_row(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
             filter: String::new(),
         });
         if let Some(slug) = cx.state.github_slug() {
+            cx.state.pulls.assignable_query = Some(String::new());
             cx.worker.send(Command::LoadAssignable {
                 slug,
                 query: String::new(),
@@ -615,6 +616,9 @@ fn files_tab(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     }
 }
 
+/// A line comment to open: path, last line, side, quoted text, first line, prefilled body.
+type CommentOn = (String, u32, DiffSide, String, Option<u32>, Option<String>);
+
 fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     let p = &cx.state.pulls;
     let Some(diff) = &p.file_diff else {
@@ -632,7 +636,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     let can_comment = d.summary.state == PrState::Open;
     let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
     let rows = file_rows(diff, &d.threads, &p.pending);
-    let mut comment_on: Option<(String, u32, DiffSide, String, Option<u32>, bool)> = None;
+    let mut comment_on: Option<CommentOn> = None;
     let mut select: Option<(usize, usize, bool)> = None;
     let selection = p.selection;
     let branch = cx
@@ -731,7 +735,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                                             t.side,
                                             t.lines.join("\n"),
                                             start,
-                                            false,
+                                            None,
                                         ));
                                     }
                                     if t.side == DiffSide::Right
@@ -743,7 +747,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                                             t.side,
                                             t.lines.join("\n"),
                                             start,
-                                            true,
+                                            Some(crate::state::suggestion_prefill(&t)),
                                         ));
                                     }
                                 });
@@ -829,7 +833,8 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                         let comment = &thread.comments[c];
                         let range = thread_range(thread);
                         let current = range.and_then(|(a, b)| new_side_lines(diff, a, b));
-                        let why = crate::state::apply_disabled_reason(
+                        let why = crate::state::apply_disabled_reason_for(
+                            d.cross_repository,
                             &d.summary.head,
                             d.summary.number,
                             branch.as_deref(),
@@ -885,13 +890,8 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
             }
         });
     let p = &mut cx.state.pulls;
-    if let Some((path, line, side, quote, start, suggest)) = comment_on {
-        let body = if suggest {
-            let lines: Vec<String> = quote.lines().map(str::to_string).collect();
-            github::suggestion_block(&lines)
-        } else {
-            String::new()
-        };
+    if let Some((path, line, side, quote, start, prefill)) = comment_on {
+        let body = prefill.unwrap_or_default();
         p.dialog = Some(PullDialog::LineComment {
             path,
             line,

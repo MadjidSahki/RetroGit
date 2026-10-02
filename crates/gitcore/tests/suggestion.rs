@@ -118,3 +118,18 @@ fn a_refused_commit_puts_the_file_back() {
         "nothing left staged"
     );
 }
+
+#[test]
+fn each_line_keeps_its_own_ending() {
+    let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        gitcore::replace_lines("a\nb\r\nc\n", 3, 3, &s(&["c"]), "C\n").as_deref(),
+        Some("a\nb\r\nC\n"),
+        "only the replaced line changes"
+    );
+    assert_eq!(
+        gitcore::replace_lines("a\r\nb\nc\n", 1, 1, &s(&["a"]), "A1\nA2\n").as_deref(),
+        Some("A1\r\nA2\r\nb\nc\n"),
+        "new lines take the ending of the line they replace"
+    );
+}

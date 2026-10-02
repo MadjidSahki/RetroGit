@@ -2,24 +2,10 @@
 
 use crate::{CommitBackend, GitError, Repo};
 
-/// `content` cut into lines without their endings, the line ending used, and whether the
-/// last line ends with one.
-fn split(content: &str) -> (Vec<&str>, &'static str, bool) {
-    let eol = if content.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
-    let final_eol = content.ends_with('\n');
-    let lines = content
-        .split_inclusive('\n')
-        .map(|l| l.trim_end_matches(['\n', '\r']))
-        .collect();
-    (lines, eol, final_eol)
-}
-
 /// Pure: `content` with lines `start..=end` (1-based) replaced by `replacement`, if they are
-/// still `expected`. Line endings of the file are kept.
+/// still `expected`. Every other line keeps its own ending; new lines take the ending of
+/// the lines they replace (the last one keeps the last replaced line's ending, so a file
+/// without a final newline stays so).
 pub fn replace_lines(
     content: &str,
     start: usize,
@@ -27,30 +13,44 @@ pub fn replace_lines(
     expected: &[String],
     replacement: &str,
 ) -> Option<String> {
-    let (lines, eol, final_eol) = split(content);
+    let lines: Vec<&str> = content.split_inclusive('\n').collect();
     if start == 0 || end < start || end > lines.len() {
         return None;
     }
+    let body = |l: &str| l.trim_end_matches(['\n', '\r']).to_string();
     let current = &lines[start - 1..end];
     let same = current.len() == expected.len()
         && current
             .iter()
             .zip(expected)
-            .all(|(a, b)| *a == b.trim_end_matches(['\n', '\r']));
+            .all(|(a, b)| body(a) == b.trim_end_matches(['\n', '\r']));
     if !same {
         return None;
     }
-    let new: Vec<&str> = replacement
+    let ending = |l: &str| l[l.trim_end_matches(['\n', '\r']).len()..].to_string();
+    let first_eol = {
+        let e = ending(current[0]);
+        if e.is_empty() { "\n".to_string() } else { e }
+    };
+    let last_eol = ending(current[current.len() - 1]);
+    let new: Vec<String> = replacement
         .split_inclusive('\n')
-        .map(|l| l.trim_end_matches(['\n', '\r']))
+        .map(|l| l.trim_end_matches(['\n', '\r']).to_string())
         .collect();
-    let mut all: Vec<&str> = Vec::with_capacity(lines.len() + new.len());
-    all.extend(&lines[..start - 1]);
-    all.extend(&new);
-    all.extend(&lines[end..]);
-    let mut out = all.join(eol);
-    if final_eol && !all.is_empty() {
-        out.push_str(eol);
+    let mut out = String::with_capacity(content.len() + replacement.len());
+    for l in &lines[..start - 1] {
+        out.push_str(l);
+    }
+    for (i, l) in new.iter().enumerate() {
+        out.push_str(l);
+        out.push_str(if i + 1 == new.len() {
+            &last_eol
+        } else {
+            &first_eol
+        });
+    }
+    for l in &lines[end..] {
+        out.push_str(l);
     }
     Some(out)
 }

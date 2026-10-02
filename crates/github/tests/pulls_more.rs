@@ -208,3 +208,16 @@ fn the_detail_gives_reviewers_assignees_and_ranges() {
     assert_eq!(d.threads[0].start_line, Some(12));
     assert_eq!(d.threads[0].start_side, Some(DiffSide::Right));
 }
+
+#[test]
+fn suggestion_fences_follow_markdown() {
+    // A fence with an info string cannot close the block: it is part of the code (a bare
+    // fence does close it, as in Markdown).
+    let body = "```suggestion\nSee:\n```rust\nlet x = 1;\n```\nend\n";
+    assert_eq!(suggestions(body), ["See:\n```rust\nlet x = 1;\n"]);
+    // Longer fences (for code that contains fences) and tildes.
+    assert_eq!(suggestions("````suggestion\n```\n````"), ["```\n"]);
+    assert_eq!(suggestions("~~~suggestion  \nx\n~~~"), ["x\n"]);
+    // An unclosed block runs to the end, like Markdown.
+    assert_eq!(suggestions("```suggestion\nx\ny"), ["x\ny\n"]);
+}

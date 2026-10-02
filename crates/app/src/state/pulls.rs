@@ -111,6 +111,8 @@ pub struct PullsView {
     pub selection: Option<super::LineSelection>,
     /// People who can be reviewers or assignees (for the People dialog).
     pub assignable: Vec<String>,
+    /// Search sent for `assignable` (GitHub returns at most 100 people per search).
+    pub assignable_query: Option<String>,
 }
 
 impl PullsView {
@@ -159,6 +161,7 @@ impl PullsView {
             return;
         };
         self.file = Some(path.to_string());
+        self.selection = None;
         self.file_diff = Some(crate::pr_diff::parse_patch(&f.path, f.patch.as_deref()));
         self.file_colors = crate::highlight::Colors::NotRequested;
     }
@@ -298,6 +301,7 @@ impl AppState {
             } => {
                 if p.slug.as_ref() == Some(&slug) && p.selected == Some(number) {
                     p.files = Some(Arc::new(files));
+                    p.selection = None;
                     // Same file still there: refresh its diff (new commits), else clear.
                     match p.file.clone() {
                         Some(path)

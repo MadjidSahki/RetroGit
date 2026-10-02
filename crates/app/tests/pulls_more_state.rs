@@ -130,3 +130,87 @@ fn the_people_dialog_lists_checked_people_then_matching_candidates() {
         "checked first, no duplicate, filtered"
     );
 }
+
+#[test]
+fn a_suggestion_prefill_keeps_blank_lines() {
+    let d = parse_patch("a.rs", Some("@@ -1,2 +1,3 @@\n a\n+foo\n+\n b"));
+    let t = selection_target(
+        &d,
+        LineSelection {
+            hunk: 0,
+            from: 1,
+            to: 2,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        retrogit::state::suggestion_prefill(&t),
+        "```suggestion\nfoo\n\n```\n"
+    );
+}
+
+#[test]
+fn suggestions_of_a_forks_pull_request_cannot_be_pushed_from_here() {
+    assert_eq!(
+        retrogit::state::apply_disabled_reason_for(
+            true,
+            "x",
+            7,
+            Some("pr/7"),
+            false,
+            DiffSide::Right
+        ),
+        Some(s::WHY_FORK_SUGGESTION)
+    );
+    assert_eq!(
+        retrogit::state::apply_disabled_reason_for(
+            false,
+            "x",
+            7,
+            Some("x"),
+            false,
+            DiffSide::Right
+        ),
+        None
+    );
+}
+
+#[test]
+fn opening_another_file_clears_the_selection() {
+    use retrogit::protocol::Event;
+    let mut st = retrogit::state::AppState::new(retrogit::config::Config::default());
+    st.pulls.slug = Some(("o".into(), "r".into()));
+    st.pulls.select(7);
+    let file = |p: &str| github::PrFile {
+        path: p.into(),
+        previous_path: None,
+        status: "modified".into(),
+        additions: 1,
+        deletions: 0,
+        patch: Some("@@ -1 +1 @@\n-a\n+b".into()),
+    };
+    st.apply(Event::PullFilesLoaded {
+        slug: ("o".into(), "r".into()),
+        number: 7,
+        files: vec![file("a.rs"), file("b.rs")],
+    });
+    st.pulls.open_file("a.rs");
+    st.pulls.selection = Some(LineSelection {
+        hunk: 0,
+        from: 0,
+        to: 1,
+    });
+    st.pulls.open_file("b.rs");
+    assert_eq!(st.pulls.selection, None);
+    st.pulls.selection = Some(LineSelection {
+        hunk: 0,
+        from: 0,
+        to: 1,
+    });
+    st.apply(Event::PullFilesLoaded {
+        slug: ("o".into(), "r".into()),
+        number: 7,
+        files: vec![file("b.rs")],
+    });
+    assert_eq!(st.pulls.selection, None, "files reloaded");
+}

@@ -817,5 +817,25 @@ mod suggestions {
             git(&dir, &["log", "-1", "--format=%s"]).trim(),
             "Apply suggestion from @bob"
         );
+        // A second suggestion of the same review (HEAD is now past the PR head).
+        w.send(Command::ApplySuggestion {
+            number: 7,
+            head_branch: "main".into(),
+            head_sha: head.clone(),
+            path: "a.rs".into(),
+            start: 1,
+            end: 1,
+            expected: vec!["a".into()],
+            replacement: "A\n".into(),
+            author: "carol".into(),
+        });
+        let evs = until(&w, |e| {
+            matches!(e, Event::PullActionDone { .. } | Event::Error { .. })
+        });
+        assert!(
+            matches!(evs.last(), Some(Event::PullActionDone { .. })),
+            "{evs:?}"
+        );
+        assert_eq!(std::fs::read_to_string(dir.join("a.rs")).unwrap(), "A\nB\n");
     }
 }

@@ -216,3 +216,21 @@ fn suggestions_show_a_mini_diff_and_apply_needs_a_checkout() {
         "range thread"
     );
 }
+
+#[test]
+fn typing_in_the_people_filter_searches_github() {
+    let mut h = harness(world(false));
+    h.run();
+    h.get_by_label(s::EDIT_ASSIGNEES).click();
+    h.run();
+    h.get_by_role(egui::accesskit::Role::TextInput).focus();
+    h.run();
+    h.get_by_role(egui::accesskit::Role::TextInput)
+        .type_text("car");
+    h.run();
+    h.run();
+    assert_eq!(
+        h.state().state.pulls.assignable_query.as_deref(),
+        Some("car")
+    );
+}

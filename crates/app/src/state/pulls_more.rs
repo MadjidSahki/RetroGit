@@ -85,6 +85,28 @@ pub fn selection_target(diff: &FileDiff, sel: LineSelection) -> Option<Selection
     })
 }
 
+/// Body of a "Suggest change": a ```suggestion block of the selected lines (blank lines
+/// included).
+pub fn suggestion_prefill(t: &SelectionTarget) -> String {
+    github::suggestion_block(&t.lines)
+}
+
+/// Like `apply_disabled_reason`, also refusing a fork's pull request: its `pr/N` branch
+/// cannot be pushed to the fork from here.
+pub fn apply_disabled_reason_for(
+    cross_repository: bool,
+    head: &str,
+    number: u64,
+    current_branch: Option<&str>,
+    outdated: bool,
+    side: DiffSide,
+) -> Option<&'static str> {
+    if cross_repository {
+        return Some(s::WHY_FORK_SUGGESTION);
+    }
+    apply_disabled_reason(head, number, current_branch, outdated, side)
+}
+
 /// Why "Apply suggestion" is disabled: the pull request (head branch `head`, number
 /// `number`) must be the checked-out branch, and the thread current on the new side.
 pub fn apply_disabled_reason(

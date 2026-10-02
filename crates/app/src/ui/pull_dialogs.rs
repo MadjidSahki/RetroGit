@@ -668,6 +668,14 @@ fn people(
     if cancel || r.close_requested {
         return Outcome::Close;
     }
+    // Ask GitHub for the people matching the filter (more than the first 100).
+    if cx.state.pulls.assignable_query.as_deref() != Some(filter.trim()) {
+        cx.state.pulls.assignable_query = Some(filter.trim().to_string());
+        cx.worker.send(Command::LoadAssignable {
+            slug: slug.clone(),
+            query: filter.trim().to_string(),
+        });
+    }
     let keep = PullDialog::People {
         kind,
         checked: checked.clone(),

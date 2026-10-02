@@ -13,8 +13,8 @@ pub use pulls::{
     prefill_title, review_events_allowed,
 };
 pub use pulls_more::{
-    LineSelection, PeopleKind, SelectionTarget, apply_disabled_reason, extend_selection,
-    selection_target,
+    LineSelection, PeopleKind, SelectionTarget, apply_disabled_reason, apply_disabled_reason_for,
+    extend_selection, selection_target, suggestion_prefill,
 };
 pub use sync::{HistoryView, LOG_PAGE, PendingDialog, SyncView, Tab, branch_name_error};
 

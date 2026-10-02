@@ -356,16 +356,17 @@ impl Worker {
             return;
         };
         let branch = repo.current_branch().map(|b| b.name);
-        let on_it = branch
-            .as_deref()
-            .is_some_and(|b| b == head_branch || b == format!("pr/{number}"));
+        let _ = number;
+        let on_it = branch.as_deref() == Some(head_branch);
         if !on_it {
             return self.fail(
                 Op::PullAction,
                 AppError::new(Severity::Info, s::WHY_CHECKOUT_FIRST),
             );
         }
-        if repo.head_oid().as_deref() != Some(head_sha) {
+        // Local commits on top (an earlier suggestion applied) are fine: the lines are
+        // checked one by one anyway.
+        if !repo.head_descends_from(head_sha) {
             return self.fail(
                 Op::PullAction,
                 AppError::new(Severity::Info, s::WHY_PULL_FIRST),

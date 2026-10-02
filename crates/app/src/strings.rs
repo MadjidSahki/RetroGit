@@ -443,3 +443,5 @@ pub const COMMENT_ON_LINES: &str = "Comment on lines {a}-{b}...";
 pub const SUGGEST_CHANGE: &str = "Suggest change...";
 pub const APPLY_SUGGESTION: &str = "Apply suggestion";
 pub const LINES_RANGE: &str = "lines {a}-{b}";
+pub const WHY_FORK_SUGGESTION: &str =
+    "This pull request comes from a fork: apply its suggestions on github.com.";

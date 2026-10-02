@@ -457,24 +457,45 @@ impl Client {
     }
 }
 
-/// The code of each ```suggestion block of a comment (lines end with `\n`).
+/// The code of each ```suggestion block of a comment (lines end with `\n`), following
+/// Markdown fences: ``` or ~~~, possibly longer; only a fence of the same character, at
+/// least as long and with nothing after it closes the block; an unclosed block runs to
+/// the end of the comment.
 pub fn suggestions(body: &str) -> Vec<String> {
     let mut out = Vec::new();
-    let mut current: Option<String> = None;
+    // (fence character, fence length, code so far)
+    let mut open: Option<(char, usize, String)> = None;
     for line in body.lines() {
         let trimmed = line.trim();
-        match current.as_mut() {
-            Some(code) if trimmed.starts_with("```") => {
-                out.push(std::mem::take(code));
-                current = None;
+        let fence = |t: &str| -> Option<(char, usize)> {
+            let c = t.chars().next().filter(|c| *c == '`' || *c == '~')?;
+            let n = t.chars().take_while(|x| *x == c).count();
+            (n >= 3).then_some((c, n))
+        };
+        match open.as_mut() {
+            Some((c, n, code)) => {
+                let closes = fence(trimmed).is_some_and(|(fc, fnn)| {
+                    fc == *c && fnn >= *n && trimmed.chars().all(|x| x == fc)
+                });
+                if closes {
+                    out.push(std::mem::take(code));
+                    open = None;
+                } else {
+                    code.push_str(line.trim_end_matches('\r'));
+                    code.push('\n');
+                }
             }
-            Some(code) => {
-                code.push_str(line);
-                code.push('\n');
+            None => {
+                if let Some((c, n)) = fence(trimmed)
+                    && trimmed[n..].trim() == "suggestion"
+                {
+                    open = Some((c, n, String::new()));
+                }
             }
-            None if trimmed == "```suggestion" => current = Some(String::new()),
-            None => {}
         }
+    }
+    if let Some((_, _, code)) = open {
+        out.push(code);
     }
     out
 }
