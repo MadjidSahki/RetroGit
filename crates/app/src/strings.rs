@@ -445,3 +445,4 @@ pub const APPLY_SUGGESTION: &str = "Apply suggestion";
 pub const LINES_RANGE: &str = "lines {a}-{b}";
 pub const WHY_FORK_SUGGESTION: &str =
     "This pull request comes from a fork: apply its suggestions on github.com.";
+pub const WHY_CHECKS_RUNNING: &str = "Waiting for the required checks to finish.";

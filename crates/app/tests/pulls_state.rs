@@ -444,3 +444,51 @@ fn merge_commit_defaults_follow_github() {
         Some(MergeMethod::Rebase)
     );
 }
+
+#[test]
+fn checks_still_running_are_not_called_missing() {
+    let mut d = detail(1);
+    d.merge_state = "BLOCKED".into();
+    d.summary.checks = ChecksState::Pending;
+    assert_eq!(merge_disabled_reason(&d), Some(s::WHY_CHECKS_RUNNING));
+    d.summary.checks = ChecksState::Success;
+    assert_eq!(
+        merge_disabled_reason(&d),
+        Some(s::WHY_BLOCKED),
+        "blocked by reviews"
+    );
+}
+
+#[test]
+fn a_pull_request_with_running_checks_is_reloaded_every_30_seconds() {
+    use retrogit::state::needs_auto_refresh;
+    use std::time::{Duration, Instant};
+    let mut d = detail(1);
+    let t0 = Instant::now();
+    d.summary.checks = ChecksState::Pending;
+    assert!(!needs_auto_refresh(&d, t0, t0 + Duration::from_secs(10)));
+    assert!(needs_auto_refresh(&d, t0, t0 + Duration::from_secs(30)));
+    d.summary.checks = ChecksState::Success;
+    assert!(
+        !needs_auto_refresh(&d, t0, t0 + Duration::from_secs(300)),
+        "settled"
+    );
+    d.summary.checks = ChecksState::Pending;
+    d.summary.state = PrState::Merged;
+    assert!(
+        !needs_auto_refresh(&d, t0, t0 + Duration::from_secs(300)),
+        "not open"
+    );
+}
+
+#[test]
+fn loading_a_pull_request_remembers_when() {
+    let mut st = opened(Some("https://github.com/o/r"));
+    st.pulls.select(3);
+    assert!(st.pulls.loaded_at.is_none());
+    st.apply(Event::PullLoaded {
+        slug: slug(),
+        detail: Box::new(detail(3)),
+    });
+    assert!(st.pulls.loaded_at.is_some());
+}

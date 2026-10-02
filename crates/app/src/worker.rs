@@ -299,6 +299,7 @@ impl Worker {
             Command::ContinueRebase => self.continue_rebase(),
             pr @ (Command::LoadPulls { .. }
             | Command::LoadPull { .. }
+            | Command::RefreshPull { .. }
             | Command::LoadRepoMeta(_)
             | Command::CreatePull { .. }
             | Command::SubmitReview { .. }

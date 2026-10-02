@@ -132,6 +132,11 @@ pub enum Command {
         slug: Slug,
         number: u64,
     },
+    /// The detail only (checks running): the files and the user's selection stay.
+    RefreshPull {
+        slug: Slug,
+        number: u64,
+    },
     /// Default branch and labels, for the "New pull request" dialog.
     LoadRepoMeta(Slug),
     /// `publish`: push the head branch (`push -u origin`) first.

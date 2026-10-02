@@ -90,6 +90,21 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
             ui.label(s::LOADING_PULL);
             return;
         };
+        // Checks running: reload now and then, so Merge follows them.
+        if let Some(at) = cx.state.pulls.loaded_at {
+            let now = std::time::Instant::now();
+            if crate::state::needs_auto_refresh(&d, at, now)
+                && let Some(slug) = cx.state.github_slug()
+            {
+                cx.state.pulls.loaded_at = Some(now);
+                cx.worker.send(Command::RefreshPull {
+                    slug,
+                    number: d.summary.number,
+                });
+            } else if d.summary.checks == github::ChecksState::Pending {
+                ui.ctx().request_repaint_after(crate::state::CHECKS_REFRESH);
+            }
+        }
         header(ui, cx, &d);
         ui.separator();
         let files = cx.state.pulls.files.as_ref().map(|f| f.len()).unwrap_or(0);

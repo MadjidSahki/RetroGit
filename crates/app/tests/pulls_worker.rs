@@ -669,6 +669,34 @@ mod more {
     use super::*;
 
     #[test]
+    fn a_refresh_reloads_the_detail_but_not_the_files() {
+        let mut server = mockito::Server::new();
+        let w = signed_in(&mut server, TokenProvider::without_gh());
+        let detail = server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::PartialJson(
+                json!({ "variables": { "number": 7 } }),
+            ))
+            .with_body(detail_body(7, "abc"))
+            .create();
+        let files = server
+            .mock("GET", "/repos/o/r/pulls/7/files")
+            .match_query(Matcher::Any)
+            .with_body("[]")
+            .expect(0)
+            .create();
+        w.send(Command::RefreshPull {
+            slug: slug(),
+            number: 7,
+        });
+        until(&w, |e| matches!(e, Event::PullLoaded { .. }));
+        w.send(Command::ValidateToken);
+        until(&w, |e| matches!(e, Event::SignedIn(_) | Event::SignedOut));
+        detail.assert();
+        files.assert();
+    }
+
+    #[test]
     fn title_reviewers_assignees_and_draft_are_changed_then_reloaded() {
         let mut server = mockito::Server::new();
         let w = signed_in(&mut server, TokenProvider::without_gh());

@@ -9,8 +9,8 @@ mod sync;
 pub use conflicts::{ConflictConfirm, ConflictEditor, text_as_diff};
 pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};
 pub use pulls::{
-    PullDialog, PullTab, PullsView, default_merge_method, merge_defaults, merge_disabled_reason,
-    prefill_title, review_events_allowed,
+    CHECKS_REFRESH, PullDialog, PullTab, PullsView, default_merge_method, merge_defaults,
+    merge_disabled_reason, needs_auto_refresh, prefill_title, review_events_allowed,
 };
 pub use pulls_more::{
     LineSelection, PeopleKind, SelectionTarget, apply_disabled_reason, apply_disabled_reason_for,

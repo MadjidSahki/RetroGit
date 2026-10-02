@@ -111,6 +111,8 @@ pub struct PullsView {
     pub selection: Option<super::LineSelection>,
     /// People who can be reviewers or assignees (for the People dialog).
     pub assignable: Vec<String>,
+    /// When the shown detail was loaded (pull requests with running checks are reloaded).
+    pub loaded_at: Option<std::time::Instant>,
     /// Search sent for `assignable` (GitHub returns at most 100 people per search).
     pub assignable_query: Option<String>,
 }
@@ -186,6 +188,10 @@ pub fn merge_disabled_reason(d: &PrDetail) -> Option<&'static str> {
         return Some(s::WHY_CONFLICTS);
     }
     match d.merge_state.as_str() {
+        // GitHub says BLOCKED while required checks are still running.
+        "BLOCKED" if d.summary.checks == github::ChecksState::Pending => {
+            return Some(s::WHY_CHECKS_RUNNING);
+        }
         "BLOCKED" => return Some(s::WHY_BLOCKED),
         "BEHIND" => return Some(s::WHY_BEHIND),
         _ => {}
@@ -194,6 +200,21 @@ pub fn merge_disabled_reason(d: &PrDetail) -> Option<&'static str> {
         return Some(s::WHY_NO_METHOD);
     }
     None
+}
+
+/// How often a pull request whose checks are running is reloaded.
+pub const CHECKS_REFRESH: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The shown pull request has checks running and was loaded `CHECKS_REFRESH` ago or more:
+/// reload it (its merge state follows the checks).
+pub fn needs_auto_refresh(
+    d: &PrDetail,
+    loaded_at: std::time::Instant,
+    now: std::time::Instant,
+) -> bool {
+    d.summary.state == PrState::Open
+        && d.summary.checks == github::ChecksState::Pending
+        && now.duration_since(loaded_at) >= CHECKS_REFRESH
 }
 
 /// Review kinds the viewer may submit (GitHub refuses approving one's own pull request).
@@ -292,6 +313,7 @@ impl AppState {
                         *row = detail.summary.clone();
                     }
                     p.detail = Some(Arc::new(*detail));
+                    p.loaded_at = Some(std::time::Instant::now());
                 }
             }
             Event::PullFilesLoaded {

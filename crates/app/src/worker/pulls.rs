@@ -73,6 +73,16 @@ impl Worker {
         match cmd {
             Command::LoadPulls { slug, filter } => self.load_pulls(slug, filter),
             Command::LoadPull { slug, number } => self.load_pull(&slug, number),
+            Command::RefreshPull { slug, number } => {
+                match self.on_github(&slug, |c, t, o, r| c.pull_detail(t, o, r, number)) {
+                    Ok(detail) => self.emit(Event::PullLoaded {
+                        slug,
+                        detail: Box::new(detail),
+                    }),
+                    // Background: a failure only waits for the next try.
+                    Err(e) => log::info!("pull request refresh failed: {e}"),
+                }
+            }
             Command::LoadRepoMeta(slug) => {
                 match self.on_github(&slug, |c, t, o, r| c.repo_meta(t, o, r)) {
                     Ok(meta) => self.emit(Event::RepoMetaLoaded { slug, meta }),
