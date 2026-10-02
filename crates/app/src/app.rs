@@ -208,6 +208,20 @@ impl RetroGitApp {
     }
 }
 
+/// Size and position of the window to save (`None` when maximized or unknown).
+pub fn viewport_geometry(ctx: &egui::Context) -> Option<WindowGeometry> {
+    // Read before `input`: egui's context lock is not reentrant.
+    let zoom = ctx.zoom_factor();
+    ctx.input(|i| {
+        let vp = i.viewport();
+        if vp.maximized == Some(true) {
+            return None;
+        }
+        vp.inner_rect
+            .map(|inner| WindowGeometry::from_viewport(inner, vp.outer_rect, zoom))
+    })
+}
+
 /// Scheme, font and zoom of `saved` on `ctx`; the minimum window size follows the zoom.
 /// Called before the first frame (fonts and zoom take effect at the next pass).
 pub fn apply_appearance(ctx: &egui::Context, saved: &crate::config::AppearanceConfig) {
@@ -267,18 +281,9 @@ impl eframe::App for RetroGitApp {
             self.worker.send(Command::RefreshStatus);
         }
         self.was_focused = focused;
-        ctx.input(|i| {
-            let vp = i.viewport();
-            if vp.maximized != Some(true)
-                && let Some(inner) = vp.inner_rect
-            {
-                self.geometry = Some(WindowGeometry::from_viewport(
-                    inner,
-                    vp.outer_rect,
-                    ctx.zoom_factor(),
-                ));
-            }
-        });
+        if let Some(g) = viewport_geometry(ctx) {
+            self.geometry = Some(g);
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

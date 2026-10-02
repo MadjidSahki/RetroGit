@@ -285,3 +285,28 @@ fn the_saved_appearance_is_in_place_for_the_first_frame() {
         "{commands:?}"
     );
 }
+
+#[test]
+fn the_window_geometry_is_read_without_locking_egui_twice() {
+    let ctx = egui::Context::default();
+    ctx.set_zoom_factor(1.5);
+    let mut input = egui::RawInput::default();
+    let vp = input.viewports.entry(egui::ViewportId::ROOT).or_default();
+    vp.inner_rect = Some(egui::Rect::from_min_size(
+        egui::pos2(0.0, 30.0),
+        egui::vec2(600.0, 400.0),
+    ));
+    vp.outer_rect = Some(egui::Rect::from_min_size(
+        egui::pos2(0.0, 0.0),
+        egui::vec2(600.0, 430.0),
+    ));
+    let mut got = None;
+    for _ in 0..2 {
+        let mut out = ctx.run_ui(input.clone(), |ui| {
+            got = retrogit::app::viewport_geometry(ui.ctx());
+        });
+        out.textures_delta.clear();
+    }
+    let g = got.unwrap();
+    assert_eq!((g.width, g.height), (900.0, 600.0));
+}
