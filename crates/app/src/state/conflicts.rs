@@ -369,6 +369,9 @@ impl AppState {
                 let message = match self.operation {
                     Some(gitcore::Operation::Rebase) => s::ALL_RESOLVED_REBASE,
                     Some(gitcore::Operation::Merge) => s::ALL_RESOLVED_MERGE,
+                    Some(gitcore::Operation::CherryPick | gitcore::Operation::Revert) => {
+                        s::ALL_RESOLVED_CONTINUE
+                    }
                     None => s::ALL_RESOLVED,
                 };
                 self.messages

@@ -5,6 +5,29 @@ use crate::{GitError, Repo};
 pub enum Operation {
     Merge,
     Rebase,
+    CherryPick,
+    Revert,
+}
+
+/// How a cherry-pick, revert or rebase step ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpOutcome {
+    Done,
+    /// Stopped on conflicts: resolve, then continue (or abort).
+    Conflicts,
+    /// Nothing left to commit (already applied): skip, or abort.
+    Empty,
+}
+
+/// How far `reset` goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResetMode {
+    /// Keep the changes staged.
+    Soft,
+    /// Keep the changes, unstaged.
+    Mixed,
+    /// Throw the changes away (untracked files stay).
+    Hard,
 }
 
 impl Repo {
@@ -13,14 +36,24 @@ impl Repo {
         match self.git().state() {
             S::Merge => Some(Operation::Merge),
             S::Rebase | S::RebaseInteractive | S::RebaseMerge => Some(Operation::Rebase),
+            S::CherryPick | S::CherryPickSequence => Some(Operation::CherryPick),
+            S::Revert | S::RevertSequence => Some(Operation::Revert),
             _ => None,
+        }
+    }
+
+    fn op_command(op: Operation) -> &'static str {
+        match op {
+            Operation::Merge => "merge",
+            Operation::Rebase => "rebase",
+            Operation::CherryPick => "cherry-pick",
+            Operation::Revert => "revert",
         }
     }
 
     pub fn abort_operation(&self) -> Result<(), GitError> {
         match self.operation_in_progress() {
-            Some(Operation::Merge) => self.git_ok(&["merge", "--abort"]).map(|_| ()),
-            Some(Operation::Rebase) => self.git_ok(&["rebase", "--abort"]).map(|_| ()),
+            Some(op) => self.git_ok(&[Self::op_command(op), "--abort"]).map(|_| ()),
             None => Ok(()),
         }
     }
@@ -33,5 +66,99 @@ impl Repo {
         } else {
             Err(crate::classify_commit_failure(&out.text))
         }
+    }
+
+    /// Continue the cherry-pick, revert or rebase in progress (conflicts resolved and
+    /// staged). A merge is finished by committing.
+    pub fn continue_operation(&self) -> Result<OpOutcome, GitError> {
+        let Some(op) = self.operation_in_progress() else {
+            return Ok(OpOutcome::Done);
+        };
+        if op == Operation::Merge {
+            return Err(GitError::Unsupported("commit to finish the merge".into()));
+        }
+        let out = self.run_git(&["-c", "core.editor=true", Self::op_command(op), "--continue"])?;
+        self.outcome(out, op)
+    }
+
+    /// Skip the current commit of a cherry-pick, revert or rebase (e.g. already applied).
+    pub fn skip_operation(&self) -> Result<OpOutcome, GitError> {
+        let Some(op) = self.operation_in_progress() else {
+            return Ok(OpOutcome::Done);
+        };
+        let out = self.run_git(&[Self::op_command(op), "--skip"])?;
+        self.outcome(out, op)
+    }
+
+    /// Whether commit `id` has several parents.
+    pub fn is_merge(&self, id: &str) -> Result<bool, GitError> {
+        let oid = git2::Oid::from_str(id).map_err(|e| GitError::from_git2(&e))?;
+        let c = self
+            .git()
+            .find_commit(oid)
+            .map_err(|e| GitError::from_git2(&e))?;
+        Ok(c.parent_count() > 1)
+    }
+
+    /// Copy commit `id` onto the current branch.
+    pub fn cherry_pick(&self, id: &str) -> Result<OpOutcome, GitError> {
+        let out = self.run_git(&["cherry-pick", id])?;
+        self.outcome(out, Operation::CherryPick)
+    }
+
+    /// Add a commit undoing `id`; a merge needs the parent to keep (`mainline`, 1-based).
+    pub fn revert(&self, id: &str, mainline: Option<u32>) -> Result<OpOutcome, GitError> {
+        let m = mainline.map(|m| m.to_string());
+        let mut args = vec!["revert", "--no-edit"];
+        if let Some(m) = &m {
+            args.extend(["-m", m]);
+        }
+        args.push(id);
+        let out = self.run_git(&args)?;
+        self.outcome(out, Operation::Revert)
+    }
+
+    /// Move the current branch to `id`.
+    pub fn reset(&self, id: &str, mode: ResetMode) -> Result<(), GitError> {
+        let flag = match mode {
+            ResetMode::Soft => "--soft",
+            ResetMode::Mixed => "--mixed",
+            ResetMode::Hard => "--hard",
+        };
+        self.git_ok(&["reset", "-q", flag, id]).map(|_| ())
+    }
+
+    /// Done, stopped on conflicts, or empty (nothing to commit), from git's answer.
+    pub(crate) fn outcome(
+        &self,
+        out: crate::cli::GitOutput,
+        op: Operation,
+    ) -> Result<OpOutcome, GitError> {
+        if out.success && self.operation_in_progress().is_none() {
+            return Ok(OpOutcome::Done);
+        }
+        let text = out.text.to_lowercase();
+        if self.operation_in_progress() == Some(op) || self.operation_in_progress().is_some() {
+            let empty = text.contains("nothing to commit")
+                || text.contains("is now empty")
+                || text.contains("previous cherry-pick is now empty");
+            let conflicted = self
+                .status()
+                .map(|f| {
+                    f.iter()
+                        .any(|f| f.unstaged == Some(crate::Change::Conflicted))
+                })
+                .unwrap_or(false);
+            if conflicted {
+                return Ok(OpOutcome::Conflicts);
+            }
+            if empty {
+                return Ok(OpOutcome::Empty);
+            }
+            if out.success {
+                return Ok(OpOutcome::Done);
+            }
+        }
+        Err(crate::classify_commit_failure(&out.text))
     }
 }

@@ -35,7 +35,7 @@ pub use log::{LogEntry, RefKind, RefLabel};
 pub use net::{
     ASKPASS_TOKEN_VAR, NetAuth, NetSettings, askpass_answer, net_settings, set_askpass_program,
 };
-pub use ops::Operation;
+pub use ops::{OpOutcome, Operation, ResetMode};
 pub use remote::{
     NetProgress, PullMode, PullOutcome, PushMode, classify_net_failure, parse_progress,
     retry_without_token,

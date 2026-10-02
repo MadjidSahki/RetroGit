@@ -260,6 +260,8 @@ pub fn menu_entries(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         let label = match op {
             gitcore::Operation::Merge => s::ABORT_MERGE,
             gitcore::Operation::Rebase => s::ABORT_REBASE,
+            gitcore::Operation::CherryPick => s::ABORT_CHERRY_PICK,
+            gitcore::Operation::Revert => s::ABORT_REVERT,
         };
         if ui.button(label).clicked() && cx.state.changes.request_abort() {
             cx.worker.send(Command::AbortOperation);

@@ -67,6 +67,8 @@ fn operation_banner(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let (text, abort) = match op {
         gitcore::Operation::Merge => (s::MERGE_IN_PROGRESS, s::ABORT_MERGE),
         gitcore::Operation::Rebase => (s::REBASE_IN_PROGRESS, s::ABORT_REBASE),
+        gitcore::Operation::CherryPick => (s::CHERRY_PICK_IN_PROGRESS, s::ABORT_CHERRY_PICK),
+        gitcore::Operation::Revert => (s::REVERT_IN_PROGRESS, s::ABORT_REVERT),
     };
     egui::Frame::NONE
         .fill(egui::Color32::from_rgb(0xFF, 0xFF, 0xC0))

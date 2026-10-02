@@ -446,3 +446,9 @@ pub const LINES_RANGE: &str = "lines {a}-{b}";
 pub const WHY_FORK_SUGGESTION: &str =
     "This pull request comes from a fork: apply its suggestions on github.com.";
 pub const WHY_CHECKS_RUNNING: &str = "Waiting for the required checks to finish.";
+pub const CHERRY_PICK_IN_PROGRESS: &str =
+    "Cherry-pick in progress: resolve conflicts, stage, then continue.";
+pub const REVERT_IN_PROGRESS: &str = "Revert in progress: resolve conflicts, stage, then continue.";
+pub const ABORT_CHERRY_PICK: &str = "Abort cherry-pick";
+pub const ABORT_REVERT: &str = "Abort revert";
+pub const ALL_RESOLVED_CONTINUE: &str = "All conflicts are resolved. Click Continue to finish.";
