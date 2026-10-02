@@ -451,6 +451,9 @@ impl AppError {
                 AppError::new(Severity::Error, s::ERR_SIGNING_REQUIRES_GIT)
             }
             GitError::GitMissing => AppError::new(Severity::Warning, s::ERR_GIT_MISSING),
+            GitError::SuggestionOutdated => {
+                AppError::new(Severity::Warning, s::ERR_SUGGESTION_OUTDATED)
+            }
             GitError::AccessDenied(d) => {
                 AppError::new(Severity::Warning, s::ERR_ACCESS_DENIED).with_detail(d)
             }

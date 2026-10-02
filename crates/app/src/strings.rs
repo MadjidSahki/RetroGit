@@ -414,3 +414,5 @@ pub const CONFLICT_DELETED_IN: &str =
     "This file was deleted in {deleted} and changed in {changed}.";
 pub const CONFIRM_ABORT_EDITS: &str =
     "Abort the whole operation? Your edits to this file and every resolution so far are lost.";
+pub const ERR_SUGGESTION_OUTDATED: &str =
+    "The lines of this suggestion changed since it was written: it was not applied.";

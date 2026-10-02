@@ -44,6 +44,9 @@ pub enum GitError {
     /// SSO authorization, or an organization blocking the OAuth App.
     #[error("access denied: {0}")]
     AccessDenied(String),
+    /// The lines a suggestion replaces changed since it was written.
+    #[error("the lines changed since the suggestion was written")]
+    SuggestionOutdated,
     #[error("{0}")]
     Other(String),
 }
