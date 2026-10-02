@@ -11,9 +11,9 @@ pub fn tabs(ui: &mut Ui, selected: &mut usize, labels: &[&str]) -> bool {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for (i, label) in labels.iter().enumerate() {
-            let galley =
-                ui.painter()
-                    .layout_no_wrap(label.to_string(), font.clone(), pal.dark_shadow);
+            let galley = ui
+                .painter()
+                .layout_no_wrap(label.to_string(), font.clone(), pal.text);
             let size = vec2(galley.size().x + 16.0, 20.0);
             let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
             let is_sel = *selected == i;
@@ -68,7 +68,7 @@ pub fn tabs(ui: &mut Ui, selected: &mut usize, labels: &[&str]) -> bool {
                 Align2::CENTER_CENTER,
                 *label,
                 font.clone(),
-                pal.dark_shadow,
+                pal.text,
             );
         }
     });

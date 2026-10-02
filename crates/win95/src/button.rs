@@ -64,13 +64,17 @@ impl Widget for Button95 {
             if self.enabled {
                 p.text(center, Align2::CENTER_CENTER, &self.text, font, pal.text);
             } else {
-                p.text(
-                    center + vec2(1.0, 1.0),
-                    Align2::CENTER_CENTER,
-                    &self.text,
-                    font.clone(),
-                    pal.highlight,
-                );
+                // Win95 embosses disabled text with the highlight color, when it is lighter
+                // than the face (not in High Contrast White, where it is black).
+                if crate::palette::luminance(pal.highlight) > crate::palette::luminance(pal.face) {
+                    p.text(
+                        center + vec2(1.0, 1.0),
+                        Align2::CENTER_CENTER,
+                        &self.text,
+                        font.clone(),
+                        pal.highlight,
+                    );
+                }
                 p.text(
                     center,
                     Align2::CENTER_CENTER,

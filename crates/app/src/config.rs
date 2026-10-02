@@ -12,12 +12,28 @@ pub struct RecentRepo {
     pub path: PathBuf,
 }
 
+/// Window size and position in unzoomed points (what the window is created with).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct WindowGeometry {
     pub width: f32,
     pub height: f32,
     pub x: Option<f32>,
     pub y: Option<f32>,
+}
+
+/// Smallest window, in points at the current zoom (the layout needs this much room).
+pub const MIN_WINDOW: [f32; 2] = [520.0, 360.0];
+
+impl WindowGeometry {
+    /// From egui's viewport rectangles, which are in zoomed points.
+    pub fn from_viewport(inner: egui::Rect, outer: Option<egui::Rect>, zoom: f32) -> Self {
+        WindowGeometry {
+            width: inner.width() * zoom,
+            height: inner.height() * zoom,
+            x: outer.map(|r| r.left() * zoom),
+            y: outer.map(|r| r.top() * zoom),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

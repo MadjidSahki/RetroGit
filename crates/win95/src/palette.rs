@@ -111,20 +111,22 @@ impl Scheme {
     }
 }
 
+/// WCAG relative luminance (0 black to 1 white).
+pub fn luminance(c: Color32) -> f32 {
+    let ch = |v: u8| {
+        let v = f32::from(v) / 255.0;
+        if v <= 0.039_28 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
+}
+
 /// WCAG contrast ratio between two colors (1 to 21).
 pub fn contrast(a: Color32, b: Color32) -> f32 {
-    fn lum(c: Color32) -> f32 {
-        let ch = |v: u8| {
-            let v = f32::from(v) / 255.0;
-            if v <= 0.039_28 {
-                v / 12.92
-            } else {
-                ((v + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
-    }
-    let (la, lb) = (lum(a), lum(b));
+    let (la, lb) = (luminance(a), luminance(b));
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }
 

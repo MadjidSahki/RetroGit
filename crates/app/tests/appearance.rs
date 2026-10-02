@@ -233,3 +233,55 @@ fn dark_schemes_get_dark_syntax_colors_and_late_light_ones_are_dropped() {
     });
     assert_eq!(st.changes.diff_colors, Colors::Plain);
 }
+
+#[test]
+fn the_window_geometry_is_saved_in_unzoomed_points() {
+    use retrogit::config::WindowGeometry;
+    let inner = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(600.0, 400.0));
+    let outer = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(600.0, 420.0));
+    // At 150 %, egui reports a 900x600 window as 600x400 points.
+    let g = WindowGeometry::from_viewport(inner, Some(outer), 1.5);
+    assert_eq!(
+        g,
+        WindowGeometry {
+            width: 900.0,
+            height: 600.0,
+            x: Some(15.0),
+            y: Some(0.0),
+        }
+    );
+}
+
+#[test]
+fn the_saved_appearance_is_in_place_for_the_first_frame() {
+    let ctx = egui::Context::default();
+    win95::theme::install(&ctx);
+    let saved = AppearanceConfig::from_choice(
+        Appearance {
+            scheme: Scheme::Dark,
+            font: Font::Atkinson,
+        },
+        1.5,
+    );
+    retrogit::app::apply_appearance(&ctx, &saved);
+    let mut first_font = None;
+    let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+        first_font = ui.ctx().fonts(|f| {
+            f.definitions().families[&egui::FontFamily::Proportional]
+                .first()
+                .cloned()
+        });
+    });
+    out.textures_delta.clear();
+    assert_eq!(first_font.as_deref(), Some("Atkinson Hyperlegible"));
+    assert_eq!(ctx.zoom_factor(), 1.5);
+    assert_eq!(win95::theme::palette(&ctx), Scheme::Dark.palette());
+    // The minimum size is in zoomed points: the layout always gets 520x360 points.
+    let commands = &out.viewport_output[&egui::ViewportId::ROOT].commands;
+    assert!(
+        commands.contains(&egui::ViewportCommand::MinInnerSize(egui::vec2(
+            520.0, 360.0
+        ))),
+        "{commands:?}"
+    );
+}

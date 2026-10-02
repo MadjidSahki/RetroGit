@@ -142,3 +142,101 @@ fn the_title_bar_draws_its_icon() {
     });
     assert!(drawn, "the icon is painted in the title bar");
 }
+
+/// Text colors painted by `add`, in `scheme`.
+fn texts_painted(scheme: Scheme, add: impl Fn(&mut egui::Ui)) -> Vec<Color32> {
+    let ctx = egui::Context::default();
+    theme::install(&ctx);
+    theme::apply(
+        &ctx,
+        Appearance {
+            scheme,
+            font: Font::W95fa,
+        },
+    );
+    let mut out = ctx.run_ui(egui::RawInput::default(), |ui| add(ui));
+    out.textures_delta.clear();
+    let mut texts = Vec::new();
+    for s in &out.shapes {
+        if let Shape::Text(t) = &s.shape {
+            texts.extend(t.galley.job.sections.iter().map(|s| s.format.color));
+            texts.push(t.fallback_color);
+        }
+    }
+    texts.retain(|c| *c != Color32::PLACEHOLDER);
+    texts
+}
+
+#[test]
+fn tab_labels_and_selected_rows_are_readable_in_every_scheme() {
+    for scheme in Scheme::ALL {
+        let p = scheme.palette();
+        let tabs = texts_painted(scheme, |ui| {
+            let mut sel = 0;
+            win95::tabs(ui, &mut sel, &["One", "Two"]);
+        });
+        assert!(!tabs.is_empty());
+        for c in tabs {
+            assert!(
+                win95::palette::contrast(c, p.face) >= 4.5,
+                "{}: tab label {c:?} on {:?}",
+                scheme.name(),
+                p.face
+            );
+        }
+        let rows = texts_painted(scheme, |ui| {
+            const COLS: &[win95::Column] = &[win95::Column {
+                title: "Name",
+                width: 100.0,
+            }];
+            win95::ListView::new("l", COLS, 1)
+                .height(60.0)
+                .show(ui, Some(0), |_, _| win95::Cell::from("row"));
+        });
+        assert!(
+            rows.contains(&p.selection_text),
+            "{}: selected row text",
+            scheme.name()
+        );
+    }
+}
+
+#[test]
+fn disabled_buttons_have_no_dark_emboss() {
+    // High Contrast White's highlight is black: an emboss would make disabled text bold.
+    let p = Scheme::HighContrastWhite.palette();
+    let texts = texts_painted(Scheme::HighContrastWhite, |ui| {
+        ui.add(win95::Button95::new("Off").enabled(false));
+    });
+    assert!(!texts.contains(&p.highlight), "{texts:?}");
+    let std = Scheme::Standard.palette();
+    let texts = texts_painted(Scheme::Standard, |ui| {
+        ui.add(win95::Button95::new("Off").enabled(false));
+    });
+    assert!(
+        texts.contains(&std.highlight),
+        "Standard keeps the white emboss"
+    );
+}
+
+#[test]
+fn the_text_cursor_follows_the_scheme() {
+    for scheme in Scheme::ALL {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        theme::apply(
+            &ctx,
+            Appearance {
+                scheme,
+                font: Font::W95fa,
+            },
+        );
+        let v = ctx.global_style().visuals.clone();
+        assert_eq!(
+            v.text_cursor.stroke.color,
+            scheme.palette().window_text,
+            "{}",
+            scheme.name()
+        );
+    }
+}

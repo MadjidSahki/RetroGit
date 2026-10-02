@@ -457,10 +457,8 @@ fn commits(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                 let date = c.date.get(..10).unwrap_or("");
                 let text = format!("{}  {}  {}  {date}", c.short_oid, c.headline, c.author);
                 if ui
-                    .selectable_label(
-                        false,
-                        RichText::new(text).color(win95::theme::palette(ui.ctx()).text),
-                    )
+                    // No forced color: the hovered row uses the selection's text color.
+                    .selectable_label(false, text)
                     .clicked()
                 {
                     open = Some(c.oid.clone());

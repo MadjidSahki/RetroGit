@@ -143,7 +143,7 @@ impl<'a> ListView<'a> {
                         let r =
                             Rect::from_min_size(pos2(x, rect.top()), vec2(col.width, ROW_HEIGHT));
                         let color = match (is_sel, c.dimmed) {
-                            (true, _) => pal.window,
+                            (true, _) => pal.selection_text,
                             (false, true) => pal.gray_text,
                             (false, false) => pal.window_text,
                         };

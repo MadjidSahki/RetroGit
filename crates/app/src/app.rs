@@ -46,6 +46,7 @@ impl RetroGitApp {
         // Cmd/Ctrl +, - and 0 are handled here (bounded steps, saved in the config).
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let ides_ctx = ctx.clone();
+        let ides_ctx_for_appearance = ctx.clone();
         let (tx, highlighted) = std::sync::mpsc::channel();
         let highlighter = crate::highlight::Service::start(move |h| {
             let _ = tx.send(h);
@@ -58,7 +59,7 @@ impl RetroGitApp {
             let _ = ides_tx.send(crate::ide::detect());
             repaint.request_repaint();
         });
-        RetroGitApp {
+        let mut app = RetroGitApp {
             ides: Some(ides),
             notices_tx,
             notices,
@@ -75,7 +76,10 @@ impl RetroGitApp {
             watcher: None,
             was_focused: true,
             applied: None,
-        }
+        };
+        // Saved scheme, font and zoom in place before the window first shows.
+        app.sync_appearance(&ides_ctx_for_appearance);
+        app
     }
 
     /// Accept folders from the `retrogit` command (single instance), and open `initial`.
@@ -161,8 +165,7 @@ impl RetroGitApp {
             return;
         }
         let dark = want.0.scheme.palette().dark;
-        win95::theme::apply(ctx, want.0);
-        ctx.set_zoom_factor(want.1);
+        apply_appearance(ctx, &self.state.config.appearance);
         self.highlighter.set_dark(dark);
         if self.applied.map(|(a, _)| a.scheme.palette().dark) != Some(dark) {
             self.state.forget_colors(dark);
@@ -203,6 +206,16 @@ impl RetroGitApp {
         }
         self.state.config_dirty = false;
     }
+}
+
+/// Scheme, font and zoom of `saved` on `ctx`; the minimum window size follows the zoom.
+/// Called before the first frame (fonts and zoom take effect at the next pass).
+pub fn apply_appearance(ctx: &egui::Context, saved: &crate::config::AppearanceConfig) {
+    win95::theme::apply(ctx, saved.appearance());
+    ctx.set_zoom_factor(saved.zoom());
+    ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::Vec2::from(
+        crate::config::MIN_WINDOW,
+    )));
 }
 
 impl eframe::App for RetroGitApp {
@@ -259,13 +272,11 @@ impl eframe::App for RetroGitApp {
             if vp.maximized != Some(true)
                 && let Some(inner) = vp.inner_rect
             {
-                let outer = vp.outer_rect;
-                self.geometry = Some(WindowGeometry {
-                    width: inner.width(),
-                    height: inner.height(),
-                    x: outer.map(|r| r.left()),
-                    y: outer.map(|r| r.top()),
-                });
+                self.geometry = Some(WindowGeometry::from_viewport(
+                    inner,
+                    vp.outer_rect,
+                    ctx.zoom_factor(),
+                ));
             }
         });
     }

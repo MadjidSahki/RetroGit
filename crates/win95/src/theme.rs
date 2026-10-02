@@ -202,6 +202,7 @@ fn apply_style(style: &mut egui::Style, p: &Palette) {
     v.window_stroke = Stroke::new(1.0, p.shadow);
     v.selection.bg_fill = p.selection;
     v.selection.stroke = Stroke::new(1.0, p.selection_text);
+    v.text_cursor.stroke = Stroke::new(2.0, p.window_text);
     v.hyperlink_color = p.link;
     v.error_fg_color = p.error;
     v.warn_fg_color = p.warning;
