@@ -7,6 +7,7 @@ use win95::{Bevel, bevel_frame, splitter};
 use super::Ctx;
 use crate::format::format_epoch;
 use crate::protocol::Command;
+use crate::state::HistoryAction;
 use crate::strings as s;
 
 pub const ROW_HEIGHT: f32 = 20.0;
@@ -109,6 +110,7 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             .unwrap_or(0);
         let font = win95::theme::font(win95::theme::FONT_SIZE);
         let mut clicked: Option<String> = None;
+        let mut menu: Option<(HistoryAction, gitcore::LogEntry)> = None;
         let mut last_visible = 0;
         ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -195,6 +197,20 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                     if resp.clicked() {
                         clicked = Some(e.id.clone());
                     }
+                    resp.context_menu(|ui| {
+                        for (action, label) in [
+                            (HistoryAction::CherryPick, s::MENU_CHERRY_PICK),
+                            (HistoryAction::Revert, s::MENU_REVERT),
+                            (HistoryAction::Reset, s::MENU_RESET),
+                            (HistoryAction::RebaseFrom, s::MENU_REBASE_FROM),
+                            (HistoryAction::CreateTag, s::MENU_CREATE_TAG),
+                        ] {
+                            if ui.button(label).clicked() {
+                                menu = Some((action, e.clone()));
+                                ui.close();
+                            }
+                        }
+                    });
                 }
             });
         let need_more = last_visible + PREFETCH_ROWS >= cx.state.history.entries.len()
@@ -204,6 +220,15 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             cx.worker.send(Command::LoadLog {
                 skip: cx.state.history.entries.len(),
             });
+        }
+        if let Some((action, e)) = menu {
+            if let Some(cmd) = cx.state.history_action(action, &e) {
+                cx.worker.send(cmd);
+            }
+            if action == HistoryAction::CreateTag {
+                // The dialog flags names already taken.
+                cx.worker.send(Command::LoadTags);
+            }
         }
         if let Some(id) = clicked {
             cx.state.select_commit(&id);
@@ -311,6 +336,21 @@ fn commit_file_diff(ui: &mut egui::Ui, h: &crate::state::HistoryView) {
         }
         return;
     };
+    diff_rows(
+        ui,
+        diff,
+        &h.detail_colors,
+        ("commit_file_diff", &h.selected, &diff.path),
+    );
+}
+
+/// A read-only colored diff (History commits, stashes).
+pub fn diff_rows(
+    ui: &mut egui::Ui,
+    diff: &gitcore::FileDiff,
+    colors: &crate::highlight::Colors,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+) {
     if diff.binary {
         ui.label(s::BINARY_FILE);
         return;
@@ -320,10 +360,9 @@ fn commit_file_diff(ui: &mut egui::Ui, h: &crate::state::HistoryView) {
         return;
     }
     let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
-    let colors = &h.detail_colors;
     let rows = super::diff_view::rows(diff);
     ScrollArea::both()
-        .id_salt(("commit_file_diff", &h.selected, &diff.path))
+        .id_salt(salt)
         .auto_shrink([false, false])
         .show_rows(ui, super::diff_view::ROW_HEIGHT, rows.len(), |ui, range| {
             ui.spacing_mut().item_spacing.y = 0.0;

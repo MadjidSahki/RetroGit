@@ -1,12 +1,14 @@
 //! All UI state, updated by the pure `apply` function.
 
 mod conflicts;
+mod git_ops;
 mod notifications;
 mod pulls;
 mod pulls_more;
 mod sync;
 
 pub use conflicts::{ConflictConfirm, ConflictEditor, text_as_diff};
+pub use git_ops::{GitDialog, HistoryAction, StashesView, move_item};
 pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};
 pub use pulls::{
     CHECKS_REFRESH, PullDialog, PullTab, PullsView, default_merge_method, merge_defaults,
@@ -16,7 +18,9 @@ pub use pulls_more::{
     LineSelection, PeopleKind, SelectionTarget, apply_disabled_reason, apply_disabled_reason_for,
     extend_selection, selection_target, suggestion_prefill,
 };
-pub use sync::{HistoryView, LOG_PAGE, PendingDialog, SyncView, Tab, branch_name_error};
+pub use sync::{
+    HistoryView, LOG_PAGE, PendingDialog, SyncView, Tab, branch_name_error, tag_name_error,
+};
 
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -197,6 +201,12 @@ pub struct AppState {
     // --- Sub-project 4 ---
     pub pulls: PullsView,
     pub notifications: NotificationsView,
+    // --- Sub-project 6c ---
+    pub git_dialog: Option<GitDialog>,
+    pub stashes: StashesView,
+    pub tags: Vec<gitcore::Tag>,
+    /// The Stashes tab asked for the list once (since the repository was opened).
+    pub stashes_loaded: bool,
 }
 
 impl AppState {
@@ -230,6 +240,10 @@ impl AppState {
             ides: Vec::new(),
             pulls: PullsView::default(),
             notifications: NotificationsView::default(),
+            git_dialog: None,
+            stashes: StashesView::default(),
+            tags: Vec::new(),
+            stashes_loaded: false,
             accounts: Vec::new(),
             accounts_dialog: false,
             repo_account_dialog: false,
@@ -398,6 +412,15 @@ impl AppState {
             | Event::PullActionDone { .. }
             | Event::AssignableLoaded { .. }) => self.apply_pulls(ev),
             Event::PrEvents(events) => self.add_notifications(events),
+            ev @ (Event::OpFinished { .. }
+            | Event::OpBlocked { .. }
+            | Event::ResetInfo { .. }
+            | Event::RebaseListLoaded { .. }
+            | Event::StashesLoaded(_)
+            | Event::StashFilesLoaded { .. }
+            | Event::StashFileDiffLoaded { .. }
+            | Event::TagsLoaded(_)
+            | Event::TagsStatus(_)) => self.apply_git_ops(ev),
             Event::Error { during, error } => {
                 self.on_error(during);
                 self.messages.push_back(error);
@@ -468,6 +491,10 @@ impl AppState {
             self.operation = None;
             self.signing = None;
             self.repo_account = None;
+            self.git_dialog = None;
+            self.stashes = StashesView::default();
+            self.tags.clear();
+            self.stashes_loaded = false;
             let slug = summary
                 .origin_url
                 .as_deref()

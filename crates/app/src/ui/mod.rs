@@ -7,6 +7,7 @@ pub mod clone_dialog;
 pub mod conflict_view;
 pub mod diff_view;
 pub mod discard;
+pub mod git_dialogs;
 pub mod history;
 pub mod main_window;
 pub mod message;
@@ -15,6 +16,7 @@ pub mod pull_detail;
 pub mod pull_dialogs;
 pub mod pulls;
 pub mod sign_in;
+pub mod stashes;
 pub mod sync_dialogs;
 pub mod sync_toolbar;
 

@@ -48,6 +48,23 @@ impl Repo {
             .map(|o| o.id().to_string())
     }
 
+    /// Whether commit `id` is on the current branch's upstream (already pushed).
+    pub fn is_pushed(&self, id: &str) -> bool {
+        self.upstream_oid()
+            .is_some_and(|up| up == id || self.is_ancestor(id, &up))
+    }
+
+    /// Whether moving the current branch to `id` drops commits already pushed.
+    pub fn reset_drops_pushed(&self, id: &str) -> bool {
+        self.upstream_oid()
+            .is_some_and(|up| up != id && !self.is_ancestor(&up, id))
+    }
+
+    /// Whether `ancestor` is `id` or one of its ancestors.
+    pub fn is_ancestor_of(&self, ancestor: &str, id: &str) -> bool {
+        ancestor == id || self.is_ancestor(ancestor, id)
+    }
+
     /// HEAD is `commit` or a descendant of it (local commits on top).
     pub fn head_descends_from(&self, commit: &str) -> bool {
         self.rev("HEAD")

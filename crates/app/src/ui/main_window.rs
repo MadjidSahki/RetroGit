@@ -35,18 +35,20 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             .show(ui, |ui| {
                 if cx.state.current.is_some() {
                     use crate::state::Tab;
-                    const TABS: [Tab; 3] = [Tab::Changes, Tab::History, Tab::PullRequests];
+                    const TABS: [Tab; 4] =
+                        [Tab::Changes, Tab::History, Tab::PullRequests, Tab::Stashes];
                     let mut tab = TABS.iter().position(|t| *t == cx.state.tab).unwrap_or(0);
                     win95::tabs(
                         ui,
                         &mut tab,
-                        &[s::TAB_CHANGES, s::TAB_HISTORY, s::TAB_PULLS],
+                        &[s::TAB_CHANGES, s::TAB_HISTORY, s::TAB_PULLS, s::TAB_STASHES],
                     );
                     cx.state.tab = TABS[tab];
                     match cx.state.tab {
                         Tab::Changes => super::changes::show(ui, cx),
                         Tab::History => super::history::show(ui, cx),
                         Tab::PullRequests => super::pulls::show(ui, cx),
+                        Tab::Stashes => super::stashes::show(ui, cx),
                     }
                 } else {
                     bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 8, |ui| {
@@ -165,6 +167,23 @@ fn menu(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                     &files,
                     gitcore::Side::Staged,
                 ));
+            }
+            if ui
+                .add_enabled(open, egui::Button::new(s::TAGS_MENU))
+                .clicked()
+            {
+                cx.state.git_dialog = Some(crate::state::GitDialog::Tags {
+                    filter: String::new(),
+                    selected: None,
+                    status: None,
+                });
+                cx.worker.send(Command::LoadTags);
+            }
+            if ui
+                .add_enabled(open, egui::Button::new(s::MENU_REBASE_UPSTREAM))
+                .clicked()
+            {
+                cx.worker.send(Command::LoadRebaseList(None));
             }
             if ui
                 .add_enabled(

@@ -15,6 +15,7 @@ mod ignore;
 mod log;
 mod net;
 mod ops;
+mod rebase_todo;
 mod remote;
 mod repo;
 mod signing;
@@ -22,6 +23,7 @@ mod stage;
 mod stash;
 mod status;
 mod suggestion;
+mod tags;
 
 pub use branch::{Branch, parse_overwritten_files};
 pub use commit_detail::{ChangedFile, CommitDetail, SignatureStatus, parse_signature_status};
@@ -35,13 +37,16 @@ pub use log::{LogEntry, RefKind, RefLabel};
 pub use net::{
     ASKPASS_TOKEN_VAR, NetAuth, NetSettings, askpass_answer, net_settings, set_askpass_program,
 };
-pub use ops::Operation;
+pub use ops::{OpOutcome, Operation, ResetMode};
+pub use rebase_todo::{TodoAction, TodoItem, TodoText, todo_text, validate_todo};
 pub use remote::{
     NetProgress, PullMode, PullOutcome, PushMode, classify_net_failure, parse_progress,
     retry_without_token,
 };
 pub use signing::{SigningConfig, SigningFormat};
+pub use stash::StashEntry;
 pub use suggestion::replace_lines;
+pub use tags::Tag;
 
 pub use clone::{CloneProgress, CloneRequest, Credentials, clone};
 pub use commit::{

@@ -18,6 +18,7 @@ pub enum Tab {
     Changes,
     History,
     PullRequests,
+    Stashes,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -195,6 +196,9 @@ impl AppState {
                     Target::History if self.history.detail_diff.as_ref() == Some(&diff) => {
                         self.history.detail_colors = value
                     }
+                    Target::History if self.stashes.diff.as_ref() == Some(&diff) => {
+                        self.stashes.colors = value
+                    }
                     Target::Pull if self.pulls.file_diff.as_ref() == Some(&diff) => {
                         self.pulls.file_colors = value
                     }
@@ -236,10 +240,36 @@ pub fn branch_name_error(name: &str, existing: &[gitcore::Branch]) -> Option<Str
     if n.is_empty() {
         return Some("Enter a branch name.".into());
     }
+    if !ref_name_ok(n) {
+        return Some(format!("'{n}' is not a valid branch name."));
+    }
+    if existing.iter().any(|b| !b.remote && b.name == n) {
+        return Some(format!("A branch named '{n}' already exists."));
+    }
+    None
+}
+
+/// Pure check of a new tag name against Git's rules and the existing tags.
+pub fn tag_name_error(name: &str, existing: &[gitcore::Tag]) -> Option<String> {
+    let n = name.trim();
+    if n.is_empty() {
+        return Some("Enter a tag name.".into());
+    }
+    if !ref_name_ok(n) {
+        return Some(format!("'{n}' is not a valid tag name."));
+    }
+    if existing.iter().any(|t| t.name == n) {
+        return Some(format!("A tag named '{n}' already exists."));
+    }
+    None
+}
+
+/// Git's rules for a reference name (`git check-ref-format`).
+fn ref_name_ok(n: &str) -> bool {
     let bad_char = n
         .chars()
         .any(|c| c.is_whitespace() || c.is_control() || "~^:?*[\\".contains(c));
-    let bad = bad_char
+    !(bad_char
         || n.starts_with('-')
         || n.starts_with('/')
         || n.ends_with('/')
@@ -249,12 +279,5 @@ pub fn branch_name_error(name: &str, existing: &[gitcore::Branch]) -> Option<Str
         || n.contains("//")
         || n.contains("@{")
         || n == "@"
-        || n.split('/').any(|part| part.starts_with('.'));
-    if bad {
-        return Some(format!("'{n}' is not a valid branch name."));
-    }
-    if existing.iter().any(|b| !b.remote && b.name == n) {
-        return Some(format!("A branch named '{n}' already exists."));
-    }
-    None
+        || n.split('/').any(|part| part.starts_with('.')))
 }
