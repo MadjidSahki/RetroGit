@@ -322,6 +322,7 @@ fn a_single_line_comment_is_sent_then_the_pull_request_reloaded() {
             path: "a.rs".into(),
             line: 2,
             side: github::DiffSide::Right,
+            start: None,
             body: "Typo".into(),
         },
     });

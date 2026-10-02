@@ -87,6 +87,10 @@ fn detail(number: u64) -> PrDetail {
         viewer_is_author: false,
         viewer_can_write: true,
         repo_labels: vec![],
+        id: "PR_1".into(),
+        viewer_can_update: true,
+        reviewers: vec![],
+        assignees: vec![],
     }
 }
 
@@ -166,6 +170,7 @@ fn selecting_another_pull_request_resets_the_detail_and_pending_review() {
         path: "a".into(),
         line: 1,
         side: github::DiffSide::Right,
+        start: None,
         body: "x".into(),
     });
     st.pulls.select(1);
@@ -256,6 +261,7 @@ fn pending_comments_are_cleared_only_when_the_review_went_through() {
         path: "a".into(),
         line: 1,
         side: github::DiffSide::Right,
+        start: None,
         body: "x".into(),
     });
     st.pulls.dialog = Some(retrogit::state::PullDialog::Review {

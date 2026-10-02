@@ -210,6 +210,8 @@ mod tests {
             line,
             original_line: line,
             side,
+            start_line: None,
+            start_side: None,
             outdated,
             resolved: false,
             comments: vec![],

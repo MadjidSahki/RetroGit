@@ -126,12 +126,14 @@ fn review_is_pinned_to_the_commit_with_line_comments() {
                         path: "src/a.rs".into(),
                         line: 12,
                         side: DiffSide::Right,
+                        start: None,
                         body: "Why?".into(),
                     },
                     LineComment {
                         path: "src/b.rs".into(),
                         line: 3,
                         side: DiffSide::Left,
+                        start: None,
                         body: "Keep this".into(),
                     },
                 ],
@@ -361,6 +363,7 @@ fn a_single_line_comment_is_posted_at_once() {
                 path: "src/a.rs".into(),
                 line: 12,
                 side: DiffSide::Left,
+                start: None,
                 body: "Why?".into(),
             },
         )

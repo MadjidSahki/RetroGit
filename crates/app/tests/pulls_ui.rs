@@ -101,6 +101,13 @@ fn world(draft: bool) -> World {
                 color: [0x00, 0x75, 0xca],
                 description: Some("Documentation".into()),
             }],
+            id: "PR_7".into(),
+            viewer_can_update: true,
+            reviewers: vec![github::Reviewer {
+                login: "carol".into(),
+                state: None,
+            }],
+            assignees: vec!["ada".into()],
         }),
     });
     let (notices, _rx) = std::sync::mpsc::channel();

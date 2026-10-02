@@ -653,6 +653,8 @@ mod tests {
             line: Some(2),
             original_line: Some(2),
             side: DiffSide::Right,
+            start_line: None,
+            start_side: None,
             outdated: false,
             resolved: false,
             comments: vec![
@@ -674,6 +676,7 @@ mod tests {
             path: "a.rs".into(),
             line: 2,
             side: DiffSide::Left,
+            start: None,
             body: "keep b".into(),
         }];
         assert_eq!(
@@ -700,6 +703,8 @@ mod tests {
             line: Some(1),
             original_line: Some(1),
             side: DiffSide::Right,
+            start_line: None,
+            start_side: None,
             outdated: false,
             resolved,
             comments: vec![],

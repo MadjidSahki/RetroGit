@@ -116,6 +116,7 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                 path: path.clone(),
                 line,
                 side,
+                start: None,
                 body,
             };
             match text_dialog(

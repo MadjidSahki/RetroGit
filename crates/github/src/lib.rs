@@ -24,9 +24,12 @@ pub use link::next_link;
 pub use pulls::{
     CheckRun, CheckStatus, ChecksState, DiffSide, Label, MergeMethod, Mergeable, PrCommit,
     PrDetail, PrFile, PrFilter, PrState, PrSummary, ReviewDecision, ReviewState, ReviewThread,
-    ThreadComment, TimelineItem, parse_color, search_query,
+    Reviewer, ThreadComment, TimelineItem, parse_color, search_query,
 };
-pub use pulls_write::{LineComment, Merge, NewPull, RepoMeta, Review, ReviewEvent, encode_segment};
+pub use pulls_write::{
+    LineComment, Merge, NewPull, RepoMeta, Review, ReviewEvent, diff_lists, encode_segment,
+    suggestion_block, suggestions,
+};
 pub use token::{
     GhTokenSource, TokenProvider, gh_auth_token, hidden_by_restriction, parse_gh_token,
 };

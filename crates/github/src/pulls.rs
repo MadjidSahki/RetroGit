@@ -173,9 +173,20 @@ pub struct ReviewThread {
     pub line: Option<u32>,
     pub original_line: Option<u32>,
     pub side: DiffSide,
+    /// First line of a thread on several lines (`line` is the last one).
+    pub start_line: Option<u32>,
+    pub start_side: Option<DiffSide>,
     pub outdated: bool,
     pub resolved: bool,
     pub comments: Vec<ThreadComment>,
+}
+
+/// Someone asked for a review, or who reviewed (latest review state).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reviewer {
+    pub login: String,
+    /// `None`: requested, not reviewed yet.
+    pub state: Option<ReviewState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -229,6 +240,13 @@ pub struct PrDetail {
     /// The viewer may merge and edit labels (write access or more).
     pub viewer_can_write: bool,
     pub repo_labels: Vec<Label>,
+    /// GraphQL node id (draft / ready mutations).
+    pub id: String,
+    /// The viewer may edit the title, description, reviewers and assignees.
+    pub viewer_can_update: bool,
+    /// Requested reviewers first, then people who reviewed (latest state).
+    pub reviewers: Vec<Reviewer>,
+    pub assignees: Vec<String>,
 }
 
 /// A changed file of a pull request.
@@ -475,6 +493,12 @@ fn thread(t: &Value) -> ReviewThread {
         } else {
             DiffSide::Right
         },
+        start_line: line(&t["startLine"]),
+        start_side: match t["startDiffSide"].as_str() {
+            Some("LEFT") => Some(DiffSide::Left),
+            Some("RIGHT") => Some(DiffSide::Right),
+            _ => None,
+        },
         outdated: t["isOutdated"].as_bool().unwrap_or(false),
         resolved: t["isResolved"].as_bool().unwrap_or(false),
         comments: nodes(&t["comments"])
@@ -572,7 +596,34 @@ fn parse_detail(data: &Value) -> Result<PrDetail, GithubError> {
             Some("ADMIN" | "MAINTAIN" | "WRITE")
         ),
         repo_labels: labels(&repo["labels"]),
+        id: text(&p["id"]),
+        viewer_can_update: p["viewerCanUpdate"].as_bool().unwrap_or(false),
+        reviewers: reviewers(p),
+        assignees: nodes(&p["assignees"])
+            .filter_map(|a| a["login"].as_str().map(str::to_string))
+            .collect(),
     })
+}
+
+fn reviewers(p: &Value) -> Vec<Reviewer> {
+    let mut out: Vec<Reviewer> = nodes(&p["reviewRequests"])
+        .filter_map(|r| r["requestedReviewer"]["login"].as_str())
+        .map(|login| Reviewer {
+            login: login.to_string(),
+            state: None,
+        })
+        .collect();
+    for r in nodes(&p["latestReviews"]) {
+        let login = login(&r["author"]);
+        if out.iter().any(|o| o.login.eq_ignore_ascii_case(&login)) {
+            continue;
+        }
+        out.push(Reviewer {
+            login,
+            state: review_state(&r["state"]),
+        });
+    }
+    out
 }
 
 #[cfg(test)]
