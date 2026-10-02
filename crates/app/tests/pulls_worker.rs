@@ -322,6 +322,7 @@ fn a_single_line_comment_is_sent_then_the_pull_request_reloaded() {
             path: "a.rs".into(),
             line: 2,
             side: github::DiffSide::Right,
+            start: None,
             body: "Typo".into(),
         },
     });
@@ -661,5 +662,208 @@ mod checkout {
             !evs.iter()
                 .any(|e| matches!(e, Event::PullActionDone { .. }))
         );
+    }
+}
+
+mod more {
+    use super::*;
+
+    #[test]
+    fn a_refresh_reloads_the_detail_but_not_the_files() {
+        let mut server = mockito::Server::new();
+        let w = signed_in(&mut server, TokenProvider::without_gh());
+        let detail = server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::PartialJson(
+                json!({ "variables": { "number": 7 } }),
+            ))
+            .with_body(detail_body(7, "abc"))
+            .create();
+        let files = server
+            .mock("GET", "/repos/o/r/pulls/7/files")
+            .match_query(Matcher::Any)
+            .with_body("[]")
+            .expect(0)
+            .create();
+        w.send(Command::RefreshPull {
+            slug: slug(),
+            number: 7,
+        });
+        until(&w, |e| matches!(e, Event::PullLoaded { .. }));
+        w.send(Command::ValidateToken);
+        until(&w, |e| matches!(e, Event::SignedIn(_) | Event::SignedOut));
+        detail.assert();
+        files.assert();
+    }
+
+    #[test]
+    fn title_reviewers_assignees_and_draft_are_changed_then_reloaded() {
+        let mut server = mockito::Server::new();
+        let w = signed_in(&mut server, TokenProvider::without_gh());
+        let patch = server
+            .mock("PATCH", "/repos/o/r/pulls/7")
+            .with_body("{}")
+            .create();
+        let reviewers = server
+            .mock("POST", "/repos/o/r/pulls/7/requested_reviewers")
+            .match_body(Matcher::Json(json!({ "reviewers": ["carol"] })))
+            .with_status(201)
+            .with_body("{}")
+            .create();
+        let ready = server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::Regex("markPullRequestReadyForReview".into()))
+            .with_body(
+                r#"{"data":{"markPullRequestReadyForReview":{"pullRequest":{"isDraft":false}}}}"#,
+            )
+            .create();
+        let (_d, _f) = mock_detail(&mut server, 7);
+        w.send(Command::UpdatePull {
+            slug: slug(),
+            number: 7,
+            title: "New".into(),
+            body: "Text".into(),
+        });
+        until(&w, |e| matches!(e, Event::PullFilesLoaded { .. }));
+        w.send(Command::SetPeople {
+            slug: slug(),
+            number: 7,
+            kind: retrogit::state::PeopleKind::Reviewers,
+            add: vec!["carol".into()],
+            remove: vec![],
+        });
+        until(&w, |e| matches!(e, Event::PullFilesLoaded { .. }));
+        w.send(Command::SetDraft {
+            slug: slug(),
+            number: 7,
+            pull_id: "PR_7".into(),
+            draft: false,
+        });
+        let evs = until(&w, |e| matches!(e, Event::PullFilesLoaded { .. }));
+        assert!(evs.iter().any(|e| matches!(e, Event::PullActionDone { note, .. } if note == retrogit::strings::NOTE_READY)));
+        patch.assert();
+        reviewers.assert();
+        ready.assert();
+    }
+
+    #[test]
+    fn people_who_can_be_asked_are_loaded() {
+        let mut server = mockito::Server::new();
+        let w = signed_in(&mut server, TokenProvider::without_gh());
+        server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::Regex("assignableUsers".into()))
+            .with_body(
+                r#"{"data":{"repository":{"assignableUsers":{"nodes":[{"login":"carol"}]}}}}"#,
+            )
+            .create();
+        w.send(Command::LoadAssignable {
+            slug: slug(),
+            query: String::new(),
+        });
+        let evs = until(&w, |e| matches!(e, Event::AssignableLoaded { .. }));
+        assert!(
+            matches!(evs.last(), Some(Event::AssignableLoaded { users, .. }) if users == &["carol".to_string()])
+        );
+    }
+}
+
+mod suggestions {
+    use super::*;
+    use std::process::Command as Cmd;
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = Cmd::new("git")
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    #[test]
+    fn a_suggestion_is_applied_only_on_the_pull_request_branch_at_its_head() {
+        if !gitcore::git_available() {
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        let dir = retrogit::watch::canonical(d.path());
+        git(&dir, &["-c", "init.defaultBranch=main", "init", "-q"]);
+        for (k, v) in [
+            ("user.name", "Ada"),
+            ("user.email", "ada@example.com"),
+            ("commit.gpgsign", "false"),
+            ("core.hooksPath", ".git/hooks"),
+            ("core.autocrlf", "false"),
+        ] {
+            git(&dir, &["config", k, v]);
+        }
+        std::fs::write(dir.join("a.rs"), "a\nb\n").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-q", "-m", "base"]);
+        let head = git(&dir, &["rev-parse", "HEAD"]).trim().to_string();
+        let server = mockito::Server::new();
+        let w = start(&server, TokenProvider::without_gh());
+        w.send(Command::OpenRepo(dir.clone()));
+        until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+        let apply = |branch: &str, sha: &str| Command::ApplySuggestion {
+            number: 7,
+            head_branch: branch.into(),
+            head_sha: sha.into(),
+            path: "a.rs".into(),
+            start: 2,
+            end: 2,
+            expected: vec!["b".into()],
+            replacement: "B\n".into(),
+            author: "bob".into(),
+        };
+        // Not the pull request's branch: refused.
+        w.send(apply("feat/x", &head));
+        let evs = until(&w, |e| matches!(e, Event::Error { .. }));
+        assert!(
+            matches!(evs.last(), Some(Event::Error { error, .. }) if error.message == retrogit::strings::WHY_CHECKOUT_FIRST)
+        );
+        // Right branch, but the pull request moved on GitHub: pull first.
+        w.send(apply("main", "0000000000000000000000000000000000000000"));
+        let evs = until(&w, |e| matches!(e, Event::Error { .. }));
+        assert!(
+            matches!(evs.last(), Some(Event::Error { error, .. }) if error.message == retrogit::strings::WHY_PULL_FIRST)
+        );
+        // Right branch at the right commit.
+        w.send(apply("main", &head));
+        let evs = until(&w, |e| matches!(e, Event::PullActionDone { .. }));
+        assert!(
+            matches!(evs.last(), Some(Event::PullActionDone { note, .. }) if note == retrogit::strings::NOTE_SUGGESTION_APPLIED)
+        );
+        assert_eq!(std::fs::read_to_string(dir.join("a.rs")).unwrap(), "a\nB\n");
+        assert_eq!(
+            git(&dir, &["log", "-1", "--format=%s"]).trim(),
+            "Apply suggestion from @bob"
+        );
+        // A second suggestion of the same review (HEAD is now past the PR head).
+        w.send(Command::ApplySuggestion {
+            number: 7,
+            head_branch: "main".into(),
+            head_sha: head.clone(),
+            path: "a.rs".into(),
+            start: 1,
+            end: 1,
+            expected: vec!["a".into()],
+            replacement: "A\n".into(),
+            author: "carol".into(),
+        });
+        let evs = until(&w, |e| {
+            matches!(e, Event::PullActionDone { .. } | Event::Error { .. })
+        });
+        assert!(
+            matches!(evs.last(), Some(Event::PullActionDone { .. })),
+            "{evs:?}"
+        );
+        assert_eq!(std::fs::read_to_string(dir.join("a.rs")).unwrap(), "A\nB\n");
     }
 }

@@ -7,6 +7,13 @@ query PullDetail($owner: String!, $name: String!, $number: Int!) {
     viewerPermission
     labels(first: 100) { nodes { name color description } }
     pullRequest(number: $number) {
+      id
+      viewerCanUpdate
+      reviewRequests(first: 50) {
+        nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug } } }
+      }
+      latestReviews(first: 50) { nodes { author { login } state } }
+      assignees(first: 50) { nodes { login } }
       number
       title
       url
@@ -66,6 +73,8 @@ query PullDetail($owner: String!, $name: String!, $number: Int!) {
           line
           originalLine
           diffSide
+          startLine
+          startDiffSide
           comments(first: 50) { nodes { databaseId author { login } body createdAt } }
         }
       }

@@ -43,7 +43,33 @@ pub struct LineComment {
     /// Line number in the file on `side` (old file for `Left`, new file for `Right`).
     pub line: u32,
     pub side: DiffSide,
+    /// First line and side of a comment on several lines (`line` is the last one).
+    pub start: Option<(u32, DiffSide)>,
     pub body: String,
+}
+
+fn side_name(side: DiffSide) -> &'static str {
+    match side {
+        DiffSide::Left => "LEFT",
+        DiffSide::Right => "RIGHT",
+    }
+}
+
+impl LineComment {
+    /// Fields of the comment in GitHub's REST payloads.
+    fn to_json(&self) -> Value {
+        let mut v = json!({
+            "path": self.path,
+            "line": self.line,
+            "side": side_name(self.side),
+            "body": self.body,
+        });
+        if let Some((line, side)) = self.start.filter(|(l, _)| *l < self.line) {
+            v["start_line"] = json!(line);
+            v["start_side"] = json!(side_name(side));
+        }
+        v
+    }
 }
 
 /// A review to submit.
@@ -153,18 +179,7 @@ impl Client {
         number: u64,
         review: &Review,
     ) -> Result<(), GithubError> {
-        let comments: Vec<Value> = review
-            .comments
-            .iter()
-            .map(|c| {
-                json!({
-                    "path": c.path,
-                    "line": c.line,
-                    "side": match c.side { DiffSide::Left => "LEFT", DiffSide::Right => "RIGHT" },
-                    "body": c.body,
-                })
-            })
-            .collect();
+        let comments: Vec<Value> = review.comments.iter().map(LineComment::to_json).collect();
         let mut payload = json!({
             "commit_id": review.commit_id,
             "event": review.event.api_name(),
@@ -211,23 +226,112 @@ impl Client {
         commit_id: &str,
         comment: &LineComment,
     ) -> Result<(), GithubError> {
-        let side = match comment.side {
-            DiffSide::Left => "LEFT",
-            DiffSide::Right => "RIGHT",
-        };
+        let mut payload = comment.to_json();
+        payload["commit_id"] = json!(commit_id);
         self.api_send(
             "POST",
             &format!("/repos/{owner}/{repo}/pulls/{number}/comments"),
             token,
-            Some(&json!({
-                "commit_id": commit_id,
-                "path": comment.path,
-                "line": comment.line,
-                "side": side,
-                "body": comment.body,
-            })),
+            Some(&payload),
         )
         .map(|_| ())
+    }
+
+    /// New title and description.
+    pub fn update_pull(
+        &self,
+        token: &str,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        title: &str,
+        body: &str,
+    ) -> Result<(), GithubError> {
+        self.api_send(
+            "PATCH",
+            &format!("/repos/{owner}/{repo}/pulls/{number}"),
+            token,
+            Some(&json!({ "title": title, "body": body })),
+        )
+        .map(|_| ())
+    }
+
+    /// Request reviews from `add`, withdraw the requests of `remove`.
+    pub fn set_reviewers(
+        &self,
+        token: &str,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        add: &[String],
+        remove: &[String],
+    ) -> Result<(), GithubError> {
+        let path = format!("/repos/{owner}/{repo}/pulls/{number}/requested_reviewers");
+        if !add.is_empty() {
+            self.api_send("POST", &path, token, Some(&json!({ "reviewers": add })))?;
+        }
+        if !remove.is_empty() {
+            self.api_send(
+                "DELETE",
+                &path,
+                token,
+                Some(&json!({ "reviewers": remove })),
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn set_assignees(
+        &self,
+        token: &str,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        add: &[String],
+        remove: &[String],
+    ) -> Result<(), GithubError> {
+        let path = format!("/repos/{owner}/{repo}/issues/{number}/assignees");
+        if !add.is_empty() {
+            self.api_send("POST", &path, token, Some(&json!({ "assignees": add })))?;
+        }
+        if !remove.is_empty() {
+            self.api_send(
+                "DELETE",
+                &path,
+                token,
+                Some(&json!({ "assignees": remove })),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Turn the pull request (GraphQL id `pull_id`) into a draft, or mark it ready.
+    pub fn set_draft(&self, token: &str, pull_id: &str, draft: bool) -> Result<(), GithubError> {
+        let mutation = if draft {
+            "mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }"
+        } else {
+            "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }"
+        };
+        self.graphql(token, mutation, json!({ "id": pull_id }))
+            .map(|_| ())
+    }
+
+    /// People who can be asked for a review or assigned (matching `query`, first 100).
+    pub fn assignable_users(
+        &self,
+        token: &str,
+        owner: &str,
+        repo: &str,
+        query: &str,
+    ) -> Result<Vec<String>, GithubError> {
+        let data = self.graphql(
+            token,
+            include_str!("queries/assignable.graphql"),
+            json!({ "owner": owner, "name": repo, "q": query }),
+        )?;
+        Ok(crate::pulls::nodes(&data["repository"]["assignableUsers"])
+            .filter_map(|n| n["login"].as_str().map(str::to_string))
+            .collect())
     }
 
     /// Mark a line-comment thread resolved (`true`) or not (GraphQL only).
@@ -351,6 +455,69 @@ impl Client {
             labels,
         })
     }
+}
+
+/// The code of each ```suggestion block of a comment (lines end with `\n`), following
+/// Markdown fences: ``` or ~~~, possibly longer; only a fence of the same character, at
+/// least as long and with nothing after it closes the block; an unclosed block runs to
+/// the end of the comment.
+pub fn suggestions(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    // (fence character, fence length, code so far)
+    let mut open: Option<(char, usize, String)> = None;
+    for line in body.lines() {
+        let trimmed = line.trim();
+        let fence = |t: &str| -> Option<(char, usize)> {
+            let c = t.chars().next().filter(|c| *c == '`' || *c == '~')?;
+            let n = t.chars().take_while(|x| *x == c).count();
+            (n >= 3).then_some((c, n))
+        };
+        match open.as_mut() {
+            Some((c, n, code)) => {
+                let closes = fence(trimmed).is_some_and(|(fc, fnn)| {
+                    fc == *c && fnn >= *n && trimmed.chars().all(|x| x == fc)
+                });
+                if closes {
+                    out.push(std::mem::take(code));
+                    open = None;
+                } else {
+                    code.push_str(line.trim_end_matches('\r'));
+                    code.push('\n');
+                }
+            }
+            None => {
+                if let Some((c, n)) = fence(trimmed)
+                    && trimmed[n..].trim() == "suggestion"
+                {
+                    open = Some((c, n, String::new()));
+                }
+            }
+        }
+    }
+    if let Some((_, _, code)) = open {
+        out.push(code);
+    }
+    out
+}
+
+/// A comment body proposing to replace `lines` (prefilled with them, ready to edit).
+pub fn suggestion_block(lines: &[String]) -> String {
+    let mut out = String::from("```suggestion\n");
+    for l in lines {
+        out.push_str(l.trim_end_matches(['\n', '\r']));
+        out.push('\n');
+    }
+    out.push_str("```\n");
+    out
+}
+
+/// `(to add, to remove)` to go from `old` to `new` (logins, case-insensitive).
+pub fn diff_lists(old: &[String], new: &[String]) -> (Vec<String>, Vec<String>) {
+    let has = |list: &[String], x: &str| list.iter().any(|l| l.eq_ignore_ascii_case(x));
+    (
+        new.iter().filter(|n| !has(old, n)).cloned().collect(),
+        old.iter().filter(|o| !has(new, o)).cloned().collect(),
+    )
 }
 
 #[cfg(test)]

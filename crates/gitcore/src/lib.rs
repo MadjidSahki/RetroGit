@@ -21,6 +21,7 @@ mod signing;
 mod stage;
 mod stash;
 mod status;
+mod suggestion;
 
 pub use branch::{Branch, parse_overwritten_files};
 pub use commit_detail::{ChangedFile, CommitDetail, SignatureStatus, parse_signature_status};
@@ -40,6 +41,7 @@ pub use remote::{
     retry_without_token,
 };
 pub use signing::{SigningConfig, SigningFormat};
+pub use suggestion::replace_lines;
 
 pub use clone::{CloneProgress, CloneRequest, Credentials, clone};
 pub use commit::{

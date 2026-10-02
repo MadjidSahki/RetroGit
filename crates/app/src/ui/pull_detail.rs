@@ -17,6 +17,9 @@ use crate::strings as s;
 
 const COMMENT_BG: Color32 = Color32::from_rgb(0xFF, 0xFF, 0xE8);
 const PENDING_BG: Color32 = Color32::from_rgb(0xFF, 0xF0, 0xC0);
+const SELECTED_BG: Color32 = Color32::from_rgb(0xD0, 0xE0, 0xFF);
+const SUGGEST_OLD_BG: Color32 = Color32::from_rgb(0xFF, 0xE6, 0xE6);
+const SUGGEST_NEW_BG: Color32 = Color32::from_rgb(0xE6, 0xFF, 0xE6);
 
 pub fn state_text(d: &PrDetail) -> (&'static str, Color32) {
     match d.summary.state {
@@ -87,6 +90,21 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
             ui.label(s::LOADING_PULL);
             return;
         };
+        // Checks running: reload now and then, so Merge follows them.
+        if let Some(at) = cx.state.pulls.loaded_at {
+            let now = std::time::Instant::now();
+            if crate::state::needs_auto_refresh(&d, at, now)
+                && let Some(slug) = cx.state.github_slug()
+            {
+                cx.state.pulls.loaded_at = Some(now);
+                cx.worker.send(Command::RefreshPull {
+                    slug,
+                    number: d.summary.number,
+                });
+            } else if d.summary.checks == github::ChecksState::Pending {
+                ui.ctx().request_repaint_after(crate::state::CHECKS_REFRESH);
+            }
+        }
         header(ui, cx, &d);
         ui.separator();
         let files = cx.state.pulls.files.as_ref().map(|f| f.len()).unwrap_or(0);
@@ -120,11 +138,20 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
 
 fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     let navy = win95::theme::NAVY;
-    ui.label(
-        RichText::new(format!("#{} {}", d.summary.number, d.summary.title))
-            .size(win95::theme::FONT_SIZE + 3.0)
-            .color(navy),
-    );
+    let busy = cx.state.pulls.busy;
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!("#{} {}", d.summary.number, d.summary.title))
+                .size(win95::theme::FONT_SIZE + 3.0)
+                .color(navy),
+        );
+        if d.viewer_can_update && ui.add(Button95::new(s::EDIT_PULL).enabled(!busy)).clicked() {
+            cx.state.pulls.dialog = Some(PullDialog::EditPull {
+                title: d.summary.title.clone(),
+                body: d.body.clone(),
+            });
+        }
+    });
     let (state, color) = state_text(d);
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(state).color(color));
@@ -151,6 +178,7 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
             });
         }
     });
+    people_row(ui, cx, d);
     ui.horizontal(|ui| {
         let busy = cx.state.pulls.busy;
         let size = egui::vec2(80.0, 22.0);
@@ -209,6 +237,30 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                 delete_branch: !d.cross_repository,
             });
         }
+        if open && d.viewer_can_update {
+            let (label, draft) = if d.summary.draft {
+                (s::READY_FOR_REVIEW, false)
+            } else {
+                (s::CONVERT_TO_DRAFT, true)
+            };
+            if ui
+                .add(
+                    Button95::new(label)
+                        .min_size(egui::vec2(120.0, 22.0))
+                        .enabled(!busy),
+                )
+                .clicked()
+                && let Some(slug) = cx.state.github_slug()
+            {
+                cx.state.pulls.busy = true;
+                cx.worker.send(Command::SetDraft {
+                    slug,
+                    number: d.summary.number,
+                    pull_id: d.id.clone(),
+                    draft,
+                });
+            }
+        }
         if ui
             .add(Button95::new(s::OPEN_ON_GITHUB).min_size(egui::vec2(110.0, 22.0)))
             .clicked()
@@ -226,6 +278,73 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
             ))
             .color(AMBER),
         );
+    }
+}
+
+/// "@carol", or "@dan (approved)" once reviewed.
+pub fn reviewer_text(r: &github::Reviewer) -> String {
+    match r.state {
+        None => format!("@{}", r.login),
+        Some(state) => format!("@{} ({})", r.login, review_verb(state)),
+    }
+}
+
+fn people_row(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
+    let busy = cx.state.pulls.busy;
+    let mut open: Option<crate::state::PeopleKind> = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.label(s::REVIEWERS);
+        if d.reviewers.is_empty() {
+            ui.label(RichText::new(s::NOBODY).color(win95::theme::GRAY));
+        }
+        for r in &d.reviewers {
+            ui.label(reviewer_text(r));
+        }
+        if d.viewer_can_update
+            && ui
+                .add(Button95::new(s::EDIT_REVIEWERS).enabled(!busy))
+                .clicked()
+        {
+            open = Some(crate::state::PeopleKind::Reviewers);
+        }
+        ui.separator();
+        ui.label(s::ASSIGNEES);
+        if d.assignees.is_empty() {
+            ui.label(RichText::new(s::NOBODY).color(win95::theme::GRAY));
+        }
+        for a in &d.assignees {
+            ui.label(format!("@{a}"));
+        }
+        if d.viewer_can_update
+            && ui
+                .add(Button95::new(s::EDIT_ASSIGNEES).enabled(!busy))
+                .clicked()
+        {
+            open = Some(crate::state::PeopleKind::Assignees);
+        }
+    });
+    if let Some(kind) = open {
+        let checked = match kind {
+            crate::state::PeopleKind::Reviewers => d
+                .reviewers
+                .iter()
+                .filter(|r| r.state.is_none())
+                .map(|r| r.login.clone())
+                .collect(),
+            crate::state::PeopleKind::Assignees => d.assignees.clone(),
+        };
+        cx.state.pulls.dialog = Some(PullDialog::People {
+            kind,
+            checked,
+            filter: String::new(),
+        });
+        if let Some(slug) = cx.state.github_slug() {
+            cx.state.pulls.assignable_query = Some(String::new());
+            cx.worker.send(Command::LoadAssignable {
+                slug,
+                query: String::new(),
+            });
+        }
     }
 }
 
@@ -391,6 +510,31 @@ pub enum FileRow {
     Comment(usize, usize),
     /// Index in the pending review.
     Pending(usize),
+    /// A comment's suggestion: the current lines (`Old`), the proposed ones (`New`), then
+    /// the Apply row. Thread index, comment index, line index.
+    SuggestionOld(usize, usize, usize),
+    SuggestionNew(usize, usize, usize),
+    SuggestionApply(usize, usize),
+}
+
+/// Lines `start..=end` (first..last) a thread is about.
+pub fn thread_range(t: &github::ReviewThread) -> Option<(u32, u32)> {
+    let end = t.line?;
+    Some((t.start_line.filter(|s| *s <= end).unwrap_or(end), end))
+}
+
+/// Text of the new-side lines `start..=end` of `diff`, if all are shown in it.
+pub fn new_side_lines(diff: &gitcore::FileDiff, start: u32, end: u32) -> Option<Vec<String>> {
+    let found: Vec<(u32, String)> = diff
+        .hunks
+        .iter()
+        .flat_map(|h| &h.lines)
+        .filter_map(|l| {
+            let n = l.new_no?;
+            (n >= start && n <= end).then(|| (n, l.text.trim_end_matches(['\n', '\r']).to_string()))
+        })
+        .collect();
+    (found.len() as u32 == end - start + 1).then(|| found.into_iter().map(|(_, t)| t).collect())
 }
 
 /// Pure: lay out `diff` with the comments of `threads` and `pending` under their lines.
@@ -405,7 +549,19 @@ pub fn file_rows(
         for (l, line) in hunk.lines.iter().enumerate() {
             out.push(FileRow::Line(h, l));
             for t in crate::pr_diff::threads_at(threads, &diff.path, line) {
-                out.extend((0..threads[t].comments.len()).map(|c| FileRow::Comment(t, c)));
+                let thread = &threads[t];
+                for (c, comment) in thread.comments.iter().enumerate() {
+                    out.push(FileRow::Comment(t, c));
+                    let Some(code) = github::suggestions(&comment.body).into_iter().next() else {
+                        continue;
+                    };
+                    let old = thread_range(thread)
+                        .and_then(|(a, b)| new_side_lines(diff, a, b))
+                        .map_or(0, |l| l.len());
+                    out.extend((0..old).map(|k| FileRow::SuggestionOld(t, c, k)));
+                    out.extend((0..code.lines().count()).map(|k| FileRow::SuggestionNew(t, c, k)));
+                    out.push(FileRow::SuggestionApply(t, c));
+                }
             }
             if let Some(target) = crate::pr_diff::line_target(line) {
                 out.extend(
@@ -475,6 +631,9 @@ fn files_tab(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     }
 }
 
+/// A line comment to open: path, last line, side, quoted text, first line, prefilled body.
+type CommentOn = (String, u32, DiffSide, String, Option<u32>, Option<String>);
+
 fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     let p = &cx.state.pulls;
     let Some(diff) = &p.file_diff else {
@@ -492,7 +651,16 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     let can_comment = d.summary.state == PrState::Open;
     let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
     let rows = file_rows(diff, &d.threads, &p.pending);
-    let mut comment_on: Option<(String, u32, DiffSide, String)> = None;
+    let mut comment_on: Option<CommentOn> = None;
+    let mut select: Option<(usize, usize, bool)> = None;
+    let selection = p.selection;
+    let branch = cx
+        .state
+        .branches
+        .iter()
+        .find(|b| b.is_head && !b.remote)
+        .map(|b| b.name.clone());
+    let mut apply: Option<Command> = None;
     let mut reply_to: Option<u64> = None;
     let mut toggle: Option<(String, bool)> = None;
     let busy = p.busy;
@@ -544,14 +712,61 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             mono.clone(),
                             Color32::TRANSPARENT,
                         );
+                        let in_selection = selection
+                            .is_some_and(|sel| sel.hunk == hi && (sel.from..=sel.to).contains(&li));
+                        let bg = if in_selection { SELECTED_BG } else { bg };
                         let resp = crate::highlight::diff_row(ui, job, ROW_HEIGHT, bg);
-                        if can_comment && let Some((line, side)) = crate::pr_diff::line_target(l) {
-                            resp.context_menu(|ui| {
-                                if ui.button(s::ADD_COMMENT).clicked() {
-                                    comment_on =
-                                        Some((diff.path.clone(), line, side, text.to_string()));
-                                }
-                            });
+                        let row_resp = resp.interact(egui::Sense::click());
+                        if row_resp.clicked() || row_resp.secondary_clicked() && !in_selection {
+                            let shift = ui.input(|i| i.modifiers.shift) && row_resp.clicked();
+                            select = Some((hi, li, shift));
+                        }
+                        if can_comment {
+                            // The selection when right-clicking inside it, else this line.
+                            let sel = if in_selection {
+                                selection
+                            } else {
+                                Some(crate::state::LineSelection {
+                                    hunk: hi,
+                                    from: li,
+                                    to: li,
+                                })
+                            };
+                            let target = sel.and_then(|s| crate::state::selection_target(diff, s));
+                            if let Some(t) = target {
+                                resp.context_menu(|ui| {
+                                    let label = if t.start < t.end {
+                                        s::COMMENT_ON_LINES
+                                            .replace("{a}", &t.start.to_string())
+                                            .replace("{b}", &t.end.to_string())
+                                    } else {
+                                        s::ADD_COMMENT.to_string()
+                                    };
+                                    let start = (t.start < t.end).then_some(t.start);
+                                    if ui.button(label).clicked() {
+                                        comment_on = Some((
+                                            diff.path.clone(),
+                                            t.end,
+                                            t.side,
+                                            t.lines.join("\n"),
+                                            start,
+                                            None,
+                                        ));
+                                    }
+                                    if t.side == DiffSide::Right
+                                        && ui.button(s::SUGGEST_CHANGE).clicked()
+                                    {
+                                        comment_on = Some((
+                                            diff.path.clone(),
+                                            t.end,
+                                            t.side,
+                                            t.lines.join("\n"),
+                                            start,
+                                            Some(crate::state::suggestion_prefill(&t)),
+                                        ));
+                                    }
+                                });
+                            }
                         }
                     }
                     FileRow::Comment(t, c) => {
@@ -559,8 +774,16 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                         let comment = &thread.comments[c];
                         let first = comment.body.lines().next().unwrap_or("");
                         let mut suffix = String::new();
+                        if c == 0
+                            && let Some((a, b)) = thread_range(thread).filter(|(a, b)| a < b)
+                        {
+                            let range = s::LINES_RANGE
+                                .replace("{a}", &a.to_string())
+                                .replace("{b}", &b.to_string());
+                            suffix = format!("  ({range})");
+                        }
                         if thread.resolved {
-                            suffix = format!("  ({})", s::RESOLVED);
+                            suffix.push_str(&format!("  ({})", s::RESOLVED));
                         }
                         let job = crate::highlight::colored_line(
                             &format!("              > {}: ", comment.author),
@@ -589,6 +812,77 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             });
                         }
                     }
+                    FileRow::SuggestionOld(t, _, k) => {
+                        let line = thread_range(&d.threads[t])
+                            .and_then(|(a, b)| new_side_lines(diff, a, b))
+                            .and_then(|l| l.get(k).cloned())
+                            .unwrap_or_default();
+                        let job = crate::highlight::colored_line(
+                            "              - ",
+                            &line,
+                            None,
+                            "",
+                            mono.clone(),
+                            Color32::TRANSPARENT,
+                        );
+                        crate::highlight::diff_row(ui, job, ROW_HEIGHT, SUGGEST_OLD_BG);
+                    }
+                    FileRow::SuggestionNew(t, c, k) => {
+                        let code = github::suggestions(&d.threads[t].comments[c].body)
+                            .into_iter()
+                            .next()
+                            .unwrap_or_default();
+                        let line = code.lines().nth(k).unwrap_or_default().to_string();
+                        let job = crate::highlight::colored_line(
+                            "              + ",
+                            &line,
+                            None,
+                            "",
+                            mono.clone(),
+                            Color32::TRANSPARENT,
+                        );
+                        crate::highlight::diff_row(ui, job, ROW_HEIGHT, SUGGEST_NEW_BG);
+                    }
+                    FileRow::SuggestionApply(t, c) => {
+                        let thread = &d.threads[t];
+                        let comment = &thread.comments[c];
+                        let range = thread_range(thread);
+                        let current = range.and_then(|(a, b)| new_side_lines(diff, a, b));
+                        let why = crate::state::apply_disabled_reason_for(
+                            d.cross_repository,
+                            &d.summary.head,
+                            d.summary.number,
+                            branch.as_deref(),
+                            thread.outdated || current.is_none(),
+                            thread.side,
+                        );
+                        ui.horizontal(|ui| {
+                            ui.add_space(110.0);
+                            let b = ui.add(
+                                Button95::new(s::APPLY_SUGGESTION).enabled(why.is_none() && !busy),
+                            );
+                            if let Some(why) = why {
+                                ui.label(RichText::new(why).color(win95::theme::GRAY));
+                            } else if b.clicked()
+                                && let (Some((a, b)), Some(expected)) = (range, current)
+                            {
+                                apply = Some(Command::ApplySuggestion {
+                                    number: d.summary.number,
+                                    head_branch: d.summary.head.clone(),
+                                    head_sha: d.head_sha.clone(),
+                                    path: diff.path.clone(),
+                                    start: a,
+                                    end: b,
+                                    expected,
+                                    replacement: github::suggestions(&comment.body)
+                                        .into_iter()
+                                        .next()
+                                        .unwrap_or_default(),
+                                    author: comment.author.clone(),
+                                });
+                            }
+                        });
+                    }
                     FileRow::Pending(i) => {
                         let c = &p.pending[i];
                         let first = c.body.lines().next().unwrap_or("");
@@ -611,14 +905,33 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
             }
         });
     let p = &mut cx.state.pulls;
-    if let Some((path, line, side, quote)) = comment_on {
+    if let Some((path, line, side, quote, start, prefill)) = comment_on {
+        let body = prefill.unwrap_or_default();
         p.dialog = Some(PullDialog::LineComment {
             path,
             line,
             side,
+            start,
             quote,
-            body: String::new(),
+            body,
         });
+    }
+    if let Some((hunk, line, shift)) = select {
+        p.selection = Some(match p.selection {
+            Some(sel) if shift => crate::state::extend_selection(sel, hunk, line),
+            _ => crate::state::LineSelection {
+                hunk,
+                from: line,
+                to: line,
+            },
+        });
+    }
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) && p.dialog.is_none() {
+        p.selection = None;
+    }
+    if let Some(cmd) = apply {
+        p.busy = true;
+        cx.worker.send(cmd);
     }
     if let Some((id, resolve)) = toggle {
         send_resolve(cx, d.summary.number, id, resolve);
@@ -653,6 +966,8 @@ mod tests {
             line: Some(2),
             original_line: Some(2),
             side: DiffSide::Right,
+            start_line: None,
+            start_side: None,
             outdated: false,
             resolved: false,
             comments: vec![
@@ -674,6 +989,7 @@ mod tests {
             path: "a.rs".into(),
             line: 2,
             side: DiffSide::Left,
+            start: None,
             body: "keep b".into(),
         }];
         assert_eq!(
@@ -700,6 +1016,8 @@ mod tests {
             line: Some(1),
             original_line: Some(1),
             side: DiffSide::Right,
+            start_line: None,
+            start_side: None,
             outdated: false,
             resolved,
             comments: vec![],

@@ -299,6 +299,7 @@ impl Worker {
             Command::ContinueRebase => self.continue_rebase(),
             pr @ (Command::LoadPulls { .. }
             | Command::LoadPull { .. }
+            | Command::RefreshPull { .. }
             | Command::LoadRepoMeta(_)
             | Command::CreatePull { .. }
             | Command::SubmitReview { .. }
@@ -306,6 +307,11 @@ impl Worker {
             | Command::AddPullComment { .. }
             | Command::AddLineComment { .. }
             | Command::ResolveThread { .. }
+            | Command::UpdatePull { .. }
+            | Command::SetPeople { .. }
+            | Command::SetDraft { .. }
+            | Command::LoadAssignable { .. }
+            | Command::ApplySuggestion { .. }
             | Command::MergePull { .. }
             | Command::SetLabels { .. }
             | Command::CheckoutPull { .. }) => self.handle_pulls(pr),

@@ -132,6 +132,11 @@ pub enum Command {
         slug: Slug,
         number: u64,
     },
+    /// The detail only (checks running): the files and the user's selection stay.
+    RefreshPull {
+        slug: Slug,
+        number: u64,
+    },
     /// Default branch and labels, for the "New pull request" dialog.
     LoadRepoMeta(Slug),
     /// `publish`: push the head branch (`push -u origin`) first.
@@ -161,6 +166,43 @@ pub enum Command {
         number: u64,
         thread_id: String,
         resolve: bool,
+    },
+    UpdatePull {
+        slug: Slug,
+        number: u64,
+        title: String,
+        body: String,
+    },
+    SetPeople {
+        slug: Slug,
+        number: u64,
+        kind: crate::state::PeopleKind,
+        add: Vec<String>,
+        remove: Vec<String>,
+    },
+    /// `pull_id`: the GraphQL id of the pull request.
+    SetDraft {
+        slug: Slug,
+        number: u64,
+        pull_id: String,
+        draft: bool,
+    },
+    LoadAssignable {
+        slug: Slug,
+        query: String,
+    },
+    /// Apply a suggestion on lines `start..=end` (new side) of `path` as a commit, if the
+    /// open repository is on the pull request's branch at `head_sha`.
+    ApplySuggestion {
+        number: u64,
+        head_branch: String,
+        head_sha: String,
+        path: String,
+        start: u32,
+        end: u32,
+        expected: Vec<String>,
+        replacement: String,
+        author: String,
     },
     /// A line comment posted at once, outside a review.
     AddLineComment {
@@ -340,6 +382,10 @@ pub enum Event {
     ConflictLoaded(Box<gitcore::ConflictFile>),
     /// `path` is no longer in conflict (sent after the refreshed status).
     ConflictResolved(String),
+    AssignableLoaded {
+        slug: Slug,
+        users: Vec<String>,
+    },
     /// Changes on the user's pull requests (from the watcher thread).
     PrEvents(Vec<github::PrEvent>),
     Error {
@@ -451,6 +497,9 @@ impl AppError {
                 AppError::new(Severity::Error, s::ERR_SIGNING_REQUIRES_GIT)
             }
             GitError::GitMissing => AppError::new(Severity::Warning, s::ERR_GIT_MISSING),
+            GitError::SuggestionOutdated => {
+                AppError::new(Severity::Warning, s::ERR_SUGGESTION_OUTDATED)
+            }
             GitError::AccessDenied(d) => {
                 AppError::new(Severity::Warning, s::ERR_ACCESS_DENIED).with_detail(d)
             }

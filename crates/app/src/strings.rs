@@ -414,3 +414,35 @@ pub const CONFLICT_DELETED_IN: &str =
     "This file was deleted in {deleted} and changed in {changed}.";
 pub const CONFIRM_ABORT_EDITS: &str =
     "Abort the whole operation? Your edits to this file and every resolution so far are lost.";
+pub const ERR_SUGGESTION_OUTDATED: &str =
+    "The lines of this suggestion changed since it was written: it was not applied.";
+pub const REVIEWERS_TITLE: &str = "Reviewers";
+pub const ASSIGNEES_TITLE: &str = "Assignees";
+pub const WHY_CHECKOUT_FIRST: &str =
+    "Check out this pull request first: the suggestion is applied as a commit on its branch.";
+pub const WHY_PULL_FIRST: &str =
+    "Your branch is not at the pull request's latest commit: pull first.";
+pub const WHY_OUTDATED_SUGGESTION: &str = "This suggestion is outdated.";
+pub const NOTE_PULL_UPDATED: &str = "Pull request updated";
+pub const NOTE_PEOPLE: &str = "Reviewers and assignees updated";
+pub const NOTE_READY: &str = "Ready for review";
+pub const NOTE_DRAFT: &str = "Converted to draft";
+pub const NOTE_SUGGESTION_APPLIED: &str = "Suggestion applied - push to publish";
+pub const SUGGESTION_COMMIT: &str = "Apply suggestion from @{author}";
+pub const EDIT_PULL_TITLE: &str = "Edit pull request";
+pub const SAVE: &str = "Save";
+pub const EDIT_PULL: &str = "Edit";
+pub const EDIT_REVIEWERS: &str = "Edit reviewers";
+pub const EDIT_ASSIGNEES: &str = "Edit assignees";
+pub const REVIEWERS: &str = "Reviewers:";
+pub const ASSIGNEES: &str = "Assignees:";
+pub const NOBODY: &str = "nobody";
+pub const READY_FOR_REVIEW: &str = "Ready for review";
+pub const CONVERT_TO_DRAFT: &str = "Convert to draft";
+pub const COMMENT_ON_LINES: &str = "Comment on lines {a}-{b}...";
+pub const SUGGEST_CHANGE: &str = "Suggest change...";
+pub const APPLY_SUGGESTION: &str = "Apply suggestion";
+pub const LINES_RANGE: &str = "lines {a}-{b}";
+pub const WHY_FORK_SUGGESTION: &str =
+    "This pull request comes from a fork: apply its suggestions on github.com.";
+pub const WHY_CHECKS_RUNNING: &str = "Waiting for the required checks to finish.";

@@ -48,6 +48,12 @@ impl Repo {
             .map(|o| o.id().to_string())
     }
 
+    /// HEAD is `commit` or a descendant of it (local commits on top).
+    pub fn head_descends_from(&self, commit: &str) -> bool {
+        self.rev("HEAD")
+            .is_some_and(|h| h == commit || self.is_ancestor(commit, &h))
+    }
+
     fn is_ancestor(&self, ancestor: &str, of: &str) -> bool {
         self.run_git(&["merge-base", "--is-ancestor", ancestor, of])
             .is_ok_and(|o| o.success)
