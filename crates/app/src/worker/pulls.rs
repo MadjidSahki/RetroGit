@@ -127,6 +127,65 @@ impl Worker {
                     c.set_thread_resolved(t, &thread_id, resolve)
                 })
             }
+            Command::UpdatePull {
+                slug,
+                number,
+                title,
+                body,
+            } => self.pull_action(&slug, number, s::NOTE_PULL_UPDATED, |c, t, o, r| {
+                c.update_pull(t, o, r, number, &title, &body)
+            }),
+            Command::SetPeople {
+                slug,
+                number,
+                kind,
+                add,
+                remove,
+            } => self.pull_action(&slug, number, s::NOTE_PEOPLE, |c, t, o, r| match kind {
+                crate::state::PeopleKind::Reviewers => {
+                    c.set_reviewers(t, o, r, number, &add, &remove)
+                }
+                crate::state::PeopleKind::Assignees => {
+                    c.set_assignees(t, o, r, number, &add, &remove)
+                }
+            }),
+            Command::SetDraft {
+                slug,
+                number,
+                pull_id,
+                draft,
+            } => {
+                let note = if draft { s::NOTE_DRAFT } else { s::NOTE_READY };
+                self.pull_action(&slug, number, note, |c, t, _, _| {
+                    c.set_draft(t, &pull_id, draft)
+                })
+            }
+            Command::LoadAssignable { slug, query } => {
+                match self.on_github(&slug, |c, t, o, r| c.assignable_users(t, o, r, &query)) {
+                    Ok(users) => self.emit(Event::AssignableLoaded { slug, users }),
+                    Err(e) => self.github_failed(Op::Pulls, &e),
+                }
+            }
+            Command::ApplySuggestion {
+                number,
+                head_branch,
+                head_sha,
+                path,
+                start,
+                end,
+                expected,
+                replacement,
+                author,
+            } => self.apply_suggestion(
+                number,
+                &head_branch,
+                &head_sha,
+                &path,
+                (start, end),
+                &expected,
+                &replacement,
+                &author,
+            ),
             Command::SetLabels {
                 slug,
                 number,
@@ -278,6 +337,57 @@ impl Worker {
             Err(e) => self.github_failed(Op::PullAction, &e),
         }
         self.load_pull(&slug, number);
+    }
+
+    /// Apply a suggestion as a commit, only on the pull request's branch at its head.
+    #[allow(clippy::too_many_arguments)]
+    fn apply_suggestion(
+        &mut self,
+        number: u64,
+        head_branch: &str,
+        head_sha: &str,
+        path: &str,
+        (start, end): (u32, u32),
+        expected: &[String],
+        replacement: &str,
+        author: &str,
+    ) {
+        let Some(repo) = self.open_current(Op::PullAction) else {
+            return;
+        };
+        let branch = repo.current_branch().map(|b| b.name);
+        let on_it = branch
+            .as_deref()
+            .is_some_and(|b| b == head_branch || b == format!("pr/{number}"));
+        if !on_it {
+            return self.fail(
+                Op::PullAction,
+                AppError::new(Severity::Info, s::WHY_CHECKOUT_FIRST),
+            );
+        }
+        if repo.head_oid().as_deref() != Some(head_sha) {
+            return self.fail(
+                Op::PullAction,
+                AppError::new(Severity::Info, s::WHY_PULL_FIRST),
+            );
+        }
+        let message = s::SUGGESTION_COMMIT.replace("{author}", author);
+        let result = repo.apply_suggestion(
+            path,
+            start as usize,
+            end as usize,
+            expected,
+            replacement,
+            &message,
+        );
+        self.after_ref_change(&repo);
+        match result {
+            Ok(()) => self.emit(Event::PullActionDone {
+                number,
+                note: s::NOTE_SUGGESTION_APPLIED.to_string(),
+            }),
+            Err(e) => self.fail(Op::PullAction, AppError::from_git(&e)),
+        }
     }
 
     /// Same-repository pull requests: their branch, tracking `origin`. Forks: `pr/N`.

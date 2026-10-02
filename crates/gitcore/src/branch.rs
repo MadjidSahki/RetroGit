@@ -73,6 +73,11 @@ impl Repo {
         Ok(out)
     }
 
+    /// Full id of the commit HEAD points to.
+    pub fn head_oid(&self) -> Option<String> {
+        self.git().head().ok()?.target().map(|o| o.to_string())
+    }
+
     /// Commit id the current branch's upstream points to (e.g. `origin/main`), if any.
     pub fn upstream_oid(&self) -> Option<String> {
         let head = self.git().head().ok()?;

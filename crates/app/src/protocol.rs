@@ -162,6 +162,43 @@ pub enum Command {
         thread_id: String,
         resolve: bool,
     },
+    UpdatePull {
+        slug: Slug,
+        number: u64,
+        title: String,
+        body: String,
+    },
+    SetPeople {
+        slug: Slug,
+        number: u64,
+        kind: crate::state::PeopleKind,
+        add: Vec<String>,
+        remove: Vec<String>,
+    },
+    /// `pull_id`: the GraphQL id of the pull request.
+    SetDraft {
+        slug: Slug,
+        number: u64,
+        pull_id: String,
+        draft: bool,
+    },
+    LoadAssignable {
+        slug: Slug,
+        query: String,
+    },
+    /// Apply a suggestion on lines `start..=end` (new side) of `path` as a commit, if the
+    /// open repository is on the pull request's branch at `head_sha`.
+    ApplySuggestion {
+        number: u64,
+        head_branch: String,
+        head_sha: String,
+        path: String,
+        start: u32,
+        end: u32,
+        expected: Vec<String>,
+        replacement: String,
+        author: String,
+    },
     /// A line comment posted at once, outside a review.
     AddLineComment {
         slug: Slug,
@@ -340,6 +377,10 @@ pub enum Event {
     ConflictLoaded(Box<gitcore::ConflictFile>),
     /// `path` is no longer in conflict (sent after the refreshed status).
     ConflictResolved(String),
+    AssignableLoaded {
+        slug: Slug,
+        users: Vec<String>,
+    },
     /// Changes on the user's pull requests (from the watcher thread).
     PrEvents(Vec<github::PrEvent>),
     Error {

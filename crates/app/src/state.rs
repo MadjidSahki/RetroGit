@@ -3,6 +3,7 @@
 mod conflicts;
 mod notifications;
 mod pulls;
+mod pulls_more;
 mod sync;
 
 pub use conflicts::{ConflictConfirm, ConflictEditor, text_as_diff};
@@ -10,6 +11,10 @@ pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView
 pub use pulls::{
     PullDialog, PullTab, PullsView, default_merge_method, merge_defaults, merge_disabled_reason,
     prefill_title, review_events_allowed,
+};
+pub use pulls_more::{
+    LineSelection, PeopleKind, SelectionTarget, apply_disabled_reason, extend_selection,
+    selection_target,
 };
 pub use sync::{HistoryView, LOG_PAGE, PendingDialog, SyncView, Tab, branch_name_error};
 
@@ -390,7 +395,8 @@ impl AppState {
             | Event::PullFilesLoaded { .. }
             | Event::RepoMetaLoaded { .. }
             | Event::PullCreated { .. }
-            | Event::PullActionDone { .. }) => self.apply_pulls(ev),
+            | Event::PullActionDone { .. }
+            | Event::AssignableLoaded { .. }) => self.apply_pulls(ev),
             Event::PrEvents(events) => self.add_notifications(events),
             Event::Error { during, error } => {
                 self.on_error(during);

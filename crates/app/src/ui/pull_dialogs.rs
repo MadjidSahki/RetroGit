@@ -5,7 +5,7 @@ use win95::{Button95, Dialog, checkbox, combo_box, text_area, text_field};
 
 use super::Ctx;
 use crate::protocol::{Command, Slug};
-use crate::state::{PullDialog, merge_defaults, review_events_allowed};
+use crate::state::{PeopleKind, PullDialog, merge_defaults, review_events_allowed};
 use crate::strings as s;
 
 pub fn event_label(e: ReviewEvent) -> &'static str {
@@ -95,10 +95,17 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             (title, body, base, draft, labels, publish),
         ),
         PullDialog::Labels { checked } => labels(egui_ctx, cx, &slug, checked),
+        PullDialog::EditPull { title, body } => edit_pull(egui_ctx, cx, &slug, title, body),
+        PullDialog::People {
+            kind,
+            checked,
+            filter,
+        } => people(egui_ctx, cx, &slug, kind, checked, filter),
         PullDialog::LineComment {
             path,
             line,
             side,
+            start,
             quote,
             body,
         } => {
@@ -116,13 +123,25 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                 path: path.clone(),
                 line,
                 side,
-                start: None,
+                start: start.filter(|s| *s < line).map(|s| (s, side)),
+                body,
+            };
+            let lines = match start.filter(|s| *s < line) {
+                Some(first) => format!("{first}-{line}"),
+                None => line.to_string(),
+            };
+            let keep = |body: String| PullDialog::LineComment {
+                path: path.clone(),
+                line,
+                side,
+                start,
+                quote: quote.clone(),
                 body,
             };
             match text_dialog(
                 egui_ctx,
                 s::LINE_COMMENT_TITLE,
-                &format!("{path}:{line}\n{quote}"),
+                &format!("{path}:{lines}\n{quote}"),
                 &mut body,
                 choices,
             ) {
@@ -133,26 +152,14 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                         commit_id: head.unwrap_or_default(),
                         comment: comment(body.clone()),
                     },
-                    PullDialog::LineComment {
-                        path: path.clone(),
-                        line,
-                        side,
-                        quote,
-                        body,
-                    },
+                    keep(body),
                 ),
                 Some(Some(_)) => {
                     cx.state.queue_line_comment(comment(body));
                     Outcome::Close
                 }
                 Some(None) => Outcome::Close,
-                None => Outcome::Keep(PullDialog::LineComment {
-                    path,
-                    line,
-                    side,
-                    quote,
-                    body,
-                }),
+                None => Outcome::Keep(keep(body)),
             }
         }
         PullDialog::Reply { comment_id, body } => {
@@ -533,6 +540,150 @@ fn create(egui_ctx: &egui::Context, cx: &mut Ctx<'_>, slug: &Slug, f: CreateFiel
                 labels,
             },
             publish: publish && head.upstream.is_none(),
+        };
+        return Outcome::Send(cmd, keep);
+    }
+    Outcome::Keep(keep)
+}
+
+fn edit_pull(
+    egui_ctx: &egui::Context,
+    cx: &mut Ctx<'_>,
+    slug: &Slug,
+    mut title: String,
+    mut body: String,
+) -> Outcome {
+    let Some(number) = cx.state.pulls.selected else {
+        return Outcome::Close;
+    };
+    let busy = cx.state.pulls.busy;
+    let (mut save, mut cancel) = (false, false);
+    let r = Dialog::new("pull_edit", s::EDIT_PULL_TITLE)
+        .width(520.0)
+        .show(egui_ctx, |ui| {
+            ui.label(s::PULL_TITLE);
+            text_field(ui, &mut title, 500.0, false);
+            ui.label(s::PULL_DESCRIPTION);
+            text_area(ui, &mut body, 500.0, 10);
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                let ok = !title.trim().is_empty() && !busy;
+                save = ui
+                    .add(Button95::new(s::SAVE).min_size(BUTTON).enabled(ok))
+                    .clicked();
+                cancel = ui.add(Button95::new(s::CANCEL).min_size(BUTTON)).clicked();
+            });
+        });
+    if cancel || r.close_requested {
+        return Outcome::Close;
+    }
+    let keep = PullDialog::EditPull {
+        title: title.clone(),
+        body: body.clone(),
+    };
+    if save {
+        let cmd = Command::UpdatePull {
+            slug: slug.clone(),
+            number,
+            title: title.trim().to_string(),
+            body,
+        };
+        return Outcome::Send(cmd, keep);
+    }
+    Outcome::Keep(keep)
+}
+
+/// People shown in the People dialog: those checked, then the candidates matching
+/// `filter` (case-insensitive), without duplicates.
+pub fn people_rows(checked: &[String], candidates: &[String], filter: &str) -> Vec<String> {
+    let f = filter.trim().to_lowercase();
+    let mut out: Vec<String> = checked.to_vec();
+    for c in candidates {
+        if (f.is_empty() || c.to_lowercase().contains(&f))
+            && !out.iter().any(|o| o.eq_ignore_ascii_case(c))
+        {
+            out.push(c.clone());
+        }
+    }
+    out
+}
+
+fn people(
+    egui_ctx: &egui::Context,
+    cx: &mut Ctx<'_>,
+    slug: &Slug,
+    kind: PeopleKind,
+    mut checked: Vec<String>,
+    mut filter: String,
+) -> Outcome {
+    let Some(d) = cx.state.pulls.detail.clone() else {
+        return Outcome::Close;
+    };
+    let current: Vec<String> = match kind {
+        PeopleKind::Reviewers => d
+            .reviewers
+            .iter()
+            .filter(|r| r.state.is_none())
+            .map(|r| r.login.clone())
+            .collect(),
+        PeopleKind::Assignees => d.assignees.clone(),
+    };
+    let rows = people_rows(&checked, &cx.state.pulls.assignable, &filter);
+    let busy = cx.state.pulls.busy;
+    let (mut ok, mut cancel) = (false, false);
+    let r = Dialog::new(("pull_people", kind.title()), kind.title())
+        .width(360.0)
+        .show(egui_ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(s::FILTER);
+                text_field(ui, &mut filter, 250.0, false);
+            });
+            egui::ScrollArea::vertical()
+                .max_height(300.0)
+                .show(ui, |ui| {
+                    for login in &rows {
+                        let mut on = checked.iter().any(|c| c.eq_ignore_ascii_case(login));
+                        // The author cannot review their own pull request.
+                        let own = kind == PeopleKind::Reviewers
+                            && login.eq_ignore_ascii_case(&d.summary.author);
+                        ui.add_enabled_ui(!own, |ui| {
+                            if checkbox(ui, &mut on, &format!("@{login}")).changed() {
+                                if on {
+                                    checked.push(login.clone());
+                                } else {
+                                    checked.retain(|c| !c.eq_ignore_ascii_case(login));
+                                }
+                            }
+                        });
+                    }
+                });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ok = ui
+                    .add(Button95::new(s::OK).min_size(BUTTON).enabled(!busy))
+                    .clicked();
+                cancel = ui.add(Button95::new(s::CANCEL).min_size(BUTTON)).clicked();
+            });
+        });
+    if cancel || r.close_requested {
+        return Outcome::Close;
+    }
+    let keep = PullDialog::People {
+        kind,
+        checked: checked.clone(),
+        filter,
+    };
+    if ok {
+        let (add, remove) = github::diff_lists(&current, &checked);
+        if add.is_empty() && remove.is_empty() {
+            return Outcome::Close;
+        }
+        let cmd = Command::SetPeople {
+            slug: slug.clone(),
+            number: d.summary.number,
+            kind,
+            add,
+            remove,
         };
         return Outcome::Send(cmd, keep);
     }

@@ -50,6 +50,8 @@ pub enum PullDialog {
         path: String,
         line: u32,
         side: github::DiffSide,
+        /// First line of a comment on several lines (same side).
+        start: Option<u32>,
         /// The commented line, shown for context.
         quote: String,
         body: String,
@@ -57,6 +59,17 @@ pub enum PullDialog {
     Reply {
         comment_id: u64,
         body: String,
+    },
+    /// Title and description of the pull request.
+    EditPull {
+        title: String,
+        body: String,
+    },
+    /// Reviewers or assignees: who is checked, and the search filter.
+    People {
+        kind: super::PeopleKind,
+        checked: Vec<String>,
+        filter: String,
     },
 }
 
@@ -94,6 +107,10 @@ pub struct PullsView {
     pub load_selected: bool,
     /// Pull request to show once this repository is open (from a notification).
     pub open_after_switch: Option<(Slug, u64)>,
+    /// Lines selected in the Files tab (comment on a range, suggest a change).
+    pub selection: Option<super::LineSelection>,
+    /// People who can be reviewers or assignees (for the People dialog).
+    pub assignable: Vec<String>,
 }
 
 impl PullsView {
@@ -114,6 +131,7 @@ impl PullsView {
             self.file = None;
             self.file_diff = None;
             self.file_colors = crate::highlight::Colors::NotRequested;
+            self.selection = None;
             self.pending.clear();
             self.comment.clear();
             self.comment_sent = false;
@@ -314,6 +332,11 @@ impl AppState {
                     p.select(number);
                     p.stale = true;
                     p.note = Some(s::NOTE_PULL_CREATED.to_string());
+                }
+            }
+            Event::AssignableLoaded { slug, users } => {
+                if p.slug.as_ref() == Some(&slug) {
+                    p.assignable = users;
                 }
             }
             Event::PullActionDone { number, note } => {

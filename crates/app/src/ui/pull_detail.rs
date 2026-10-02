@@ -616,6 +616,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
             path,
             line,
             side,
+            start: None,
             quote,
             body: String::new(),
         });
