@@ -47,6 +47,10 @@ pub enum GitError {
     /// The lines a suggestion replaces changed since it was written.
     #[error("the lines changed since the suggestion was written")]
     SuggestionOutdated,
+    /// During an interactive rebase, a new commit message was refused (hook, signing):
+    /// the rebase is paused and continuing keeps the old message.
+    #[error("the new commit message was refused")]
+    MessageRefused { output: String },
     #[error("{0}")]
     Other(String),
 }

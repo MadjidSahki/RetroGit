@@ -142,6 +142,7 @@ fn todo_lists_are_checked_and_written() {
         action: a,
         id: id.into(),
         summary: format!("s{id}"),
+        message: format!("s{id}"),
     };
     assert!(gitcore::validate_todo(&[item(TodoAction::Squash(None), "a")]).is_err());
     assert!(gitcore::validate_todo(&[item(TodoAction::Drop, "a")]).is_err());
@@ -165,13 +166,145 @@ fn todo_lists_are_checked_and_written() {
             item(TodoAction::Squash(None), "b"),
             item(TodoAction::Pick, "c"),
             item(TodoAction::Squash(Some("Both".into())), "d"),
+            item(TodoAction::Fixup, "f"),
             item(TodoAction::Drop, "e"),
         ],
         msgs,
     );
+    // The squash message is set once its whole group is melded; drops are written out
+    // (rebase.missingCommitsCheck=error refuses missing lines).
     assert_eq!(
         text.lines.join("\n"),
-        "pick a sa\nexec git commit --amend --allow-empty -F '/m/0.txt'\nsquash b sb\npick c sc\nsquash d sd\nexec git commit --amend --allow-empty -F '/m/1.txt'"
+        "pick a sa\nexec git commit --amend --allow-empty -F '/m/0.txt'\nsquash b sb\npick c sc\nsquash d sd\nfixup f sf\nexec git commit --amend --allow-empty -F '/m/1.txt'\ndrop e se"
     );
     assert_eq!(text.messages, ["New", "Both"]);
+}
+
+#[test]
+fn the_list_carries_full_messages_and_a_reword_keeps_the_body() {
+    if !gitcore::git_available() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let (r, base) = repo(d.path());
+    std::fs::write(d.path().join("five.txt"), "5\n").unwrap();
+    git(d.path(), &["add", "-A"]);
+    git(
+        d.path(),
+        &["commit", "-q", "-m", "five", "-m", "why five matters"],
+    );
+    let items = r.rebase_list(&base).unwrap();
+    assert_eq!(items[4].summary, "five");
+    assert_eq!(items[4].message, "five\n\nwhy five matters");
+    let mut plan = items.clone();
+    plan[4].action = TodoAction::Reword(format!("FIVE{}", &items[4].message[4..]));
+    assert_eq!(r.interactive_rebase(&base, &plan).unwrap(), OpOutcome::Done);
+    assert_eq!(
+        git(d.path(), &["log", "-1", "--format=%B"]).trim_end(),
+        "FIVE\n\nwhy five matters"
+    );
+}
+
+#[test]
+fn drops_work_with_missing_commits_check_error() {
+    if !gitcore::git_available() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let (r, base) = repo(d.path());
+    git(d.path(), &["config", "rebase.missingCommitsCheck", "error"]);
+    let items = r.rebase_list(&base).unwrap();
+    let plan = with(
+        &items,
+        &[
+            TodoAction::Pick,
+            TodoAction::Drop,
+            TodoAction::Pick,
+            TodoAction::Pick,
+        ],
+    );
+    assert_eq!(r.interactive_rebase(&base, &plan).unwrap(), OpOutcome::Done);
+    assert_eq!(subjects(d.path()), ["base", "one", "three", "four"]);
+}
+
+#[test]
+fn a_paused_rebase_is_not_restarted_and_keeps_its_messages() {
+    if !gitcore::git_available() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let (r, base) = repo(d.path());
+    commit(d.path(), "one.txt", "changed\n", "touch one");
+    let items = r.rebase_list(&base).unwrap();
+    // "touch one" before "one": conflict on one.txt, then a reword pending.
+    let mut plan = items.clone();
+    plan.swap(0, 4);
+    plan[1].action = TodoAction::Reword("two, renamed".into());
+    let first = r.interactive_rebase(&base, &plan);
+    assert!(
+        r.operation_in_progress() == Some(Operation::Rebase),
+        "{first:?}"
+    );
+    let msgs = d.path().join(".git/retrogit-rebase/0.txt");
+    assert!(msgs.exists());
+    assert!(r.interactive_rebase(&base, &plan).is_err());
+    assert!(
+        msgs.exists(),
+        "the paused rebase still needs its message files"
+    );
+}
+
+#[test]
+fn untracked_files_stopping_a_rebase_midway_are_not_reported_as_nothing_changed() {
+    if !gitcore::git_available() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let (r, base) = repo(d.path());
+    commit(d.path(), "new.txt", "tracked\n", "add new");
+    std::fs::remove_file(d.path().join("new.txt")).unwrap();
+    git(d.path(), &["add", "-A"]);
+    git(d.path(), &["commit", "-q", "-m", "rm new"]);
+    std::fs::write(d.path().join("new.txt"), "untracked\n").unwrap();
+    let mut items = r.rebase_list(&base).unwrap();
+    items.swap(0, 3); // rewrite everything: "add new" is replayed and needs new.txt
+    let got = r.interactive_rebase(&base, &items);
+    assert_eq!(
+        r.operation_in_progress(),
+        Some(Operation::Rebase),
+        "{got:?}"
+    );
+    assert!(
+        !matches!(got, Err(gitcore::GitError::WouldOverwrite { .. })),
+        "{got:?}"
+    );
+}
+
+#[test]
+fn a_new_message_refused_by_a_hook_is_reported() {
+    if !gitcore::git_available() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let (r, base) = repo(d.path());
+    let hook = d.path().join(".git/hooks/commit-msg");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\ngrep -q renamed \"$1\" && exit 1\nexit 0\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let items = r.rebase_list(&base).unwrap();
+    let mut plan = items.clone();
+    plan[1].action = TodoAction::Reword("two, renamed".into());
+    let got = r.interactive_rebase(&base, &plan);
+    assert!(
+        matches!(got, Err(gitcore::GitError::MessageRefused { .. })),
+        "{got:?}"
+    );
+    assert_eq!(r.operation_in_progress(), Some(Operation::Rebase));
 }

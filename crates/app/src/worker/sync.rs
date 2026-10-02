@@ -18,6 +18,8 @@ impl Worker {
         self.load_branches();
         self.load_log(0);
         self.refresh();
+        // A pull or a switch may leave a stash behind (autostash, stash-and-reapply).
+        self.send_stashes();
     }
 
     /// Everything the History tab and toolbar need for a freshly opened repo.

@@ -19,6 +19,7 @@ pub enum GitDialog {
         mode: ResetMode,
         hard_confirmed: bool,
         drops_pushed: bool,
+        overwrites: Vec<String>,
     },
     Rebase {
         base: String,
@@ -45,7 +46,11 @@ pub enum GitDialog {
     },
     StashDrop {
         index: usize,
+        id: String,
+        message: String,
     },
+    /// Skip leaves the current commit out (and any resolution done on it).
+    ConfirmSkip,
     /// Local changes block `retry`: offer to stash them and run it again.
     StashRetry {
         retry: Box<Command>,
@@ -117,6 +122,7 @@ impl AppState {
                     mode: ResetMode::Mixed,
                     hard_confirmed: false,
                     drops_pushed: false,
+                    overwrites: Vec::new(),
                 });
                 Some(Command::LoadResetInfo(id))
             }
@@ -147,15 +153,21 @@ impl AppState {
             Event::OpBlocked { retry, files } => {
                 self.git_dialog = Some(GitDialog::StashRetry { retry, files });
             }
-            Event::ResetInfo { id, drops_pushed } => {
+            Event::ResetInfo {
+                id,
+                drops_pushed,
+                overwrites,
+            } => {
                 if let Some(GitDialog::Reset {
                     id: shown,
                     drops_pushed: d,
+                    overwrites: o,
                     ..
                 }) = self.git_dialog.as_mut()
                     && *shown == id
                 {
                     *d = drops_pushed;
+                    *o = overwrites;
                 }
             }
             Event::RebaseListLoaded {

@@ -489,6 +489,8 @@ pub const RESET_SOFT: &str = "Soft: keep the changes, staged";
 pub const RESET_MIXED: &str = "Mixed: keep the changes, unstaged";
 pub const RESET_HARD: &str = "Hard: throw the changes away";
 pub const RESET_HARD_UNTRACKED: &str = "Untracked files are kept.";
+pub const RESET_HARD_REPLACES: &str =
+    "These untracked files exist in that commit and will be replaced:";
 pub const RESET_HARD_CONFIRM: &str = "I understand my local changes are lost";
 pub const RESET_DROPS_PUSHED: &str =
     "Warning: some commits removed from the branch are already pushed; they stay on the server.";
@@ -536,3 +538,12 @@ pub const STASH_RETRY_MESSAGE: &str = "RetroGit: local changes put aside";
 pub const STASH_RETRY_TITLE: &str = "Local changes in the way";
 pub const STASH_RETRY_QUESTION: &str = "Your local changes would be overwritten. Stash them (they stay in the Stashes tab) and try again?";
 pub const STASH_AND_RETRY: &str = "Stash and retry";
+pub const ERR_REBASE_MESSAGE_REFUSED: &str = "The new commit message was refused (hook or signing). The rebase is paused: Continue keeps the old message, Abort cancels the rebase.";
+pub const ERR_STASH_LIST_CHANGED: &str =
+    "The stash list changed meanwhile: nothing was done. Check the list and try again.";
+pub const ERR_REBASE_NOT_ANCESTOR: &str =
+    "This commit is not in the current branch: pick one of its commits to rebase from.";
+pub const TAG_TARGET: &str = "On: {commit}";
+pub const SKIP_TITLE: &str = "Skip this commit";
+pub const SKIP_CONFIRM: &str =
+    "The commit being applied is left out, with any conflict resolution done on it. Skip it?";

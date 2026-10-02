@@ -153,3 +153,18 @@ fn local_changes_in_the_way_are_reported_as_would_overwrite() {
         "dirty again\n"
     );
 }
+
+#[test]
+fn untracked_files_a_hard_reset_would_replace_are_listed() {
+    let Some(d) = tmp() else { return };
+    let r = init(d.path());
+    let with_notes = commit(d.path(), "notes.txt", "committed\n", "notes");
+    std::fs::remove_file(d.path().join("notes.txt")).unwrap();
+    git(d.path(), &["add", "-A"]);
+    git(d.path(), &["commit", "-q", "-m", "rm notes"]);
+    std::fs::write(d.path().join("notes.txt"), "my precious untracked\n").unwrap();
+    std::fs::write(d.path().join("other.txt"), "kept\n").unwrap();
+    assert_eq!(r.reset_overwrites_untracked(&with_notes), ["notes.txt"]);
+    let head = git(d.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    assert!(r.reset_overwrites_untracked(&head).is_empty());
+}

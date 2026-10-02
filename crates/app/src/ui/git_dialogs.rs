@@ -10,6 +10,17 @@ use crate::strings as s;
 
 const BUTTON: egui::Vec2 = egui::vec2(110.0, 23.0);
 
+/// What the action menu of a rebase line offers (a reword starts from the whole message).
+pub fn action_choices(item: &gitcore::TodoItem) -> [TodoAction; 5] {
+    [
+        TodoAction::Pick,
+        TodoAction::Reword(item.message.clone()),
+        TodoAction::Squash(None),
+        TodoAction::Fixup,
+        TodoAction::Drop,
+    ]
+}
+
 /// Label of an action in the rebase list.
 pub fn action_label(a: &TodoAction) -> &'static str {
     match a {
@@ -33,7 +44,16 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             mode,
             hard_confirmed,
             drops_pushed,
-        } => reset(egui_ctx, cx, id, mode, hard_confirmed, drops_pushed),
+            overwrites,
+        } => reset(
+            egui_ctx,
+            cx,
+            id,
+            mode,
+            hard_confirmed,
+            drops_pushed,
+            overwrites,
+        ),
         GitDialog::Rebase {
             base,
             items,
@@ -64,18 +84,27 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                 None => Some(GitDialog::StashRetry { retry, files }),
             }
         }
-        GitDialog::StashDrop { index } => {
-            match confirm(
-                egui_ctx,
-                s::STASH_DROP_TITLE,
-                &s::STASH_DROP_CONFIRM.replace("{n}", &index.to_string()),
-            ) {
+        GitDialog::ConfirmSkip => {
+            match confirm_with(egui_ctx, s::SKIP_TITLE, s::SKIP_CONFIRM, s::SKIP) {
                 Some(true) => {
-                    cx.worker.send(Command::StashDrop(index));
+                    cx.worker.send(Command::SkipOperation);
                     None
                 }
                 Some(false) => None,
-                None => Some(GitDialog::StashDrop { index }),
+                None => Some(GitDialog::ConfirmSkip),
+            }
+        }
+        GitDialog::StashDrop { index, id, message } => {
+            let question = s::STASH_DROP_CONFIRM
+                .replace("{n}", &index.to_string())
+                .replace("{message}", &message);
+            match confirm(egui_ctx, s::STASH_DROP_TITLE, &question) {
+                Some(true) => {
+                    cx.worker.send(Command::StashDrop { index, id });
+                    None
+                }
+                Some(false) => None,
+                None => Some(GitDialog::StashDrop { index, id, message }),
             }
         }
     };
@@ -160,6 +189,7 @@ fn reset(
     mut mode: ResetMode,
     mut hard_confirmed: bool,
     drops_pushed: bool,
+    overwrites: Vec<String>,
 ) -> Option<GitDialog> {
     let (mut ok, mut cancel) = (false, false);
     let short: String = id.chars().take(7).collect();
@@ -177,7 +207,14 @@ fn reset(
                 }
             }
             if mode == ResetMode::Hard {
-                ui.label(egui::RichText::new(s::RESET_HARD_UNTRACKED).color(win95::theme::GRAY));
+                if overwrites.is_empty() {
+                    ui.label(
+                        egui::RichText::new(s::RESET_HARD_UNTRACKED).color(win95::theme::GRAY),
+                    );
+                } else {
+                    let list = format!("{}\n{}", s::RESET_HARD_REPLACES, overwrites.join("\n"));
+                    ui.label(egui::RichText::new(list).color(egui::Color32::from_rgb(0xA0, 0, 0)));
+                }
                 checkbox(ui, &mut hard_confirmed, s::RESET_HARD_CONFIRM);
             }
             if drops_pushed {
@@ -207,6 +244,7 @@ fn reset(
         mode,
         hard_confirmed,
         drops_pushed,
+        overwrites,
     })
 }
 
@@ -236,13 +274,7 @@ fn rebase(
                                 action_label(&item.action),
                                 90.0,
                                 |ui| {
-                                    for a in [
-                                        TodoAction::Pick,
-                                        TodoAction::Reword(item.summary.clone()),
-                                        TodoAction::Squash(None),
-                                        TodoAction::Fixup,
-                                        TodoAction::Drop,
-                                    ] {
+                                    for a in action_choices(item) {
                                         if ui.selectable_label(false, action_label(&a)).clicked() {
                                             picked = Some(a);
                                         }
@@ -273,7 +305,7 @@ fn rebase(
                             TodoAction::Reword(m) => {
                                 ui.horizontal(|ui| {
                                     ui.add_space(100.0);
-                                    text_field(ui, m, 480.0, false);
+                                    text_area(ui, m, 480.0, 3);
                                 });
                             }
                             TodoAction::Squash(m) => {
@@ -341,6 +373,12 @@ fn create_tag(
     let r = Dialog::new("create_tag", s::CREATE_TAG_TITLE)
         .width(420.0)
         .show(egui_ctx, |ui| {
+            let target = if id == "HEAD" {
+                id.clone()
+            } else {
+                id.chars().take(7).collect()
+            };
+            ui.label(s::TAG_TARGET.replace("{commit}", &target));
             ui.label(s::TAG_NAME);
             text_field(ui, &mut name, 400.0, false);
             checkbox(ui, &mut annotated, s::TAG_ANNOTATED);
@@ -461,15 +499,8 @@ fn tags(
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if ui.add(Button95::new(s::NEW_TAG).min_size(BUTTON)).clicked() {
-                    let head = cx
-                        .state
-                        .history
-                        .entries
-                        .first()
-                        .map(|e| e.id.clone())
-                        .unwrap_or_else(|| "HEAD".into());
                     next = Some(GitDialog::CreateTag {
-                        id: head,
+                        id: "HEAD".into(),
                         name: String::new(),
                         message: String::new(),
                         annotated: true,

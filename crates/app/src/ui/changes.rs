@@ -100,7 +100,7 @@ fn operation_banner(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                         .add(Button95::new(s::SKIP).min_size(egui::vec2(70.0, 20.0)))
                         .clicked()
                     {
-                        cx.worker.send(Command::SkipOperation);
+                        cx.state.git_dialog = Some(crate::state::GitDialog::ConfirmSkip);
                     }
                 }
             });

@@ -78,6 +78,7 @@ fn item(id: &str, action: TodoAction) -> TodoItem {
         action,
         id: id.into(),
         summary: format!("commit {id}"),
+        message: format!("commit {id}"),
     }
 }
 
@@ -113,6 +114,7 @@ fn hard_reset_needs_its_confirmation() {
         mode: gitcore::ResetMode::Hard,
         hard_confirmed: false,
         drops_pushed: true,
+        overwrites: Vec::new(),
     });
     let mut h = harness(w);
     h.run();
@@ -176,4 +178,70 @@ fn the_stash_and_retry_dialog_lists_the_files_in_the_way() {
     h.get_by_label(s::STASH_AND_RETRY).click();
     h.run();
     assert!(h.state().state.git_dialog.is_none());
+}
+
+#[test]
+fn a_hard_reset_names_the_untracked_files_it_replaces() {
+    let mut w = world();
+    w.state.git_dialog = Some(GitDialog::Reset {
+        id: "abc".into(),
+        mode: gitcore::ResetMode::Hard,
+        hard_confirmed: false,
+        drops_pushed: false,
+        overwrites: vec!["notes.txt".into()],
+    });
+    let mut h = harness(w);
+    h.run();
+    assert!(h.query_by_label_contains("notes.txt").is_some());
+    assert!(
+        h.query_by_label(s::RESET_HARD_UNTRACKED).is_none(),
+        "not 'kept'"
+    );
+}
+
+#[test]
+fn new_tag_from_the_tags_window_targets_head() {
+    let mut w = world();
+    w.state.history.entries = vec![gitcore::LogEntry {
+        id: "fetched0tip".into(),
+        short_id: "fetched".into(),
+        parents: Vec::new(),
+        author: "a".into(),
+        email: "a@b".into(),
+        time: 0,
+        summary: "origin/main tip".into(),
+        refs: Vec::new(),
+    }];
+    w.state.git_dialog = Some(GitDialog::Tags {
+        filter: String::new(),
+        selected: None,
+    });
+    let mut h = harness(w);
+    h.run();
+    h.get_by_label(s::NEW_TAG).click();
+    h.run();
+    assert!(
+        matches!(&h.state().state.git_dialog, Some(GitDialog::CreateTag { id, .. }) if id == "HEAD")
+    );
+    assert!(
+        h.query_by_label_contains("On: HEAD").is_some(),
+        "target shown"
+    );
+}
+
+#[test]
+fn skip_asks_before_dropping_the_commit() {
+    let mut w = world();
+    w.state.apply(Event::OperationChanged(Some(
+        gitcore::Operation::CherryPick,
+    )));
+    let mut h = harness(w);
+    h.run();
+    h.get_by_label(s::SKIP).click();
+    h.run();
+    assert!(matches!(
+        h.state().state.git_dialog,
+        Some(GitDialog::ConfirmSkip)
+    ));
+    assert!(h.query_by_label_contains("left out").is_some());
 }

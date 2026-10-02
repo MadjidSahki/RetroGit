@@ -23,6 +23,8 @@ pub struct TodoItem {
     /// Full commit id.
     pub id: String,
     pub summary: String,
+    /// The whole message (subject and body), to start a reword from.
+    pub message: String,
 }
 
 /// Why the list cannot be run: something to meld into is needed above each squash or
@@ -64,30 +66,41 @@ fn quote(path: &Path) -> String {
 }
 
 /// The todo list for `items`: a new message is set by an `exec git commit --amend` right
-/// after its commit (or after the squash that ends a group).
+/// after its commit, or after the last squash / fixup of its group. Dropped commits are
+/// written as `drop` (`rebase.missingCommitsCheck` may refuse missing lines).
 pub fn todo_text(items: &[TodoItem], dir: &Path) -> TodoText {
     let mut lines = Vec::new();
     let mut messages: Vec<String> = Vec::new();
-    let mut amend = |lines: &mut Vec<String>, msg: &str| {
+    // Message of the squash group being built, written when the group ends.
+    let mut pending: Option<String> = None;
+    let mut amend = |lines: &mut Vec<String>, msg: String| {
         let file = dir.join(format!("{}.txt", messages.len()));
-        messages.push(msg.to_string());
+        messages.push(msg);
         lines.push(format!(
             "exec git commit --amend --allow-empty -F {}",
             quote(&file)
         ));
     };
     for i in items {
-        let (verb, msg) = match &i.action {
-            TodoAction::Pick => ("pick", None),
-            TodoAction::Reword(m) => ("pick", Some(m.as_str())),
-            TodoAction::Squash(m) => ("squash", m.as_deref()),
-            TodoAction::Fixup => ("fixup", None),
-            TodoAction::Drop => continue,
-        };
-        lines.push(format!("{verb} {} {}", i.id, i.summary));
-        if let Some(m) = msg {
+        let melds = matches!(i.action, TodoAction::Squash(_) | TodoAction::Fixup);
+        if !melds && let Some(m) = pending.take() {
             amend(&mut lines, m);
         }
+        let verb = match &i.action {
+            TodoAction::Pick | TodoAction::Reword(_) => "pick",
+            TodoAction::Squash(_) => "squash",
+            TodoAction::Fixup => "fixup",
+            TodoAction::Drop => "drop",
+        };
+        lines.push(format!("{verb} {} {}", i.id, i.summary));
+        match &i.action {
+            TodoAction::Reword(m) => amend(&mut lines, m.clone()),
+            TodoAction::Squash(Some(m)) => pending = Some(m.clone()),
+            _ => {}
+        }
+    }
+    if let Some(m) = pending {
+        amend(&mut lines, m);
     }
     TodoText { lines, messages }
 }
@@ -97,11 +110,23 @@ impl Repo {
     /// range are not supported.
     pub fn rebase_list(&self, base: &str) -> Result<Vec<TodoItem>, GitError> {
         let range = format!("{base}..HEAD");
-        let out = self.git_ok(&["log", "--reverse", "--format=%H%x00%P%x00%s", &range])?;
+        // One record per commit (\x1e), fields separated by \0; the body may span lines.
+        let out = self.git_ok(&[
+            "log",
+            "--reverse",
+            "--format=%H%x00%P%x00%s%x00%B%x1e",
+            &range,
+        ])?;
         let mut items = Vec::new();
-        for line in out.stdout.lines().filter(|l| !l.is_empty()) {
-            let mut parts = line.split('\0');
-            let (id, parents, summary) = (
+        for record in out
+            .stdout
+            .split('\x1e')
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+        {
+            let mut parts = record.split('\0');
+            let (id, parents, summary, message) = (
+                parts.next().unwrap_or_default(),
                 parts.next().unwrap_or_default(),
                 parts.next().unwrap_or_default(),
                 parts.next().unwrap_or_default(),
@@ -116,6 +141,7 @@ impl Repo {
                 action: TodoAction::Pick,
                 id: id.to_string(),
                 summary: summary.to_string(),
+                message: message.trim_end().to_string(),
             });
         }
         Ok(items)
@@ -129,6 +155,12 @@ impl Repo {
         items: &[TodoItem],
     ) -> Result<OpOutcome, GitError> {
         validate_todo(items).map_err(|e| GitError::Unsupported(e.to_string()))?;
+        if self.operation_in_progress().is_some() {
+            // Its message files are still needed: never touch them.
+            return Err(GitError::Unsupported(
+                "finish or abort the operation in progress first".into(),
+            ));
+        }
         let dir = self.git().path().join("retrogit-rebase");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).map_err(|e| GitError::Other(e.to_string()))?;
@@ -140,8 +172,9 @@ impl Repo {
         let todo = dir.join("todo");
         std::fs::write(&todo, text.lines.join("\n") + "\n")
             .map_err(|e| GitError::Other(e.to_string()))?;
-        let editor = format!("sequence.editor=cp {}", quote(&todo));
-        let out = self.run_git(&["-c", &editor, "rebase", "-i", base])?;
+        // The environment variable wins over any user setting (config or environment).
+        let editor = format!("cp {}", quote(&todo));
+        let out = self.run_git_env(&["rebase", "-i", base], &[("GIT_SEQUENCE_EDITOR", &editor)])?;
         self.outcome(out, Operation::Rebase)
     }
 }

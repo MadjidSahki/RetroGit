@@ -135,9 +135,19 @@ pub enum Command {
         message: String,
         untracked: bool,
     },
-    StashApply(usize),
-    StashPop(usize),
-    StashDrop(usize),
+    /// Stash actions name the stash by index and id: refused if the list changed.
+    StashApply {
+        index: usize,
+        id: String,
+    },
+    StashPop {
+        index: usize,
+        id: String,
+    },
+    StashDrop {
+        index: usize,
+        id: String,
+    },
     LoadStashFiles(usize),
     LoadStashFileDiff {
         index: usize,
@@ -445,6 +455,8 @@ pub enum Event {
     ResetInfo {
         id: String,
         drops_pushed: bool,
+        /// Untracked files a hard reset would replace.
+        overwrites: Vec<String>,
     },
     /// `pushed`: how many of `items` are already on the upstream.
     RebaseListLoaded {
@@ -577,6 +589,9 @@ impl AppError {
                 AppError::new(Severity::Error, s::ERR_SIGNING_REQUIRES_GIT)
             }
             GitError::GitMissing => AppError::new(Severity::Warning, s::ERR_GIT_MISSING),
+            GitError::MessageRefused { output } => {
+                AppError::new(Severity::Warning, s::ERR_REBASE_MESSAGE_REFUSED).with_detail(output)
+            }
             GitError::SuggestionOutdated => {
                 AppError::new(Severity::Warning, s::ERR_SUGGESTION_OUTDATED)
             }

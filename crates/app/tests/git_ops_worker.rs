@@ -188,7 +188,8 @@ fn stashes_and_tags_are_listed_after_each_change() {
     assert!(
         matches!(evs.last(), Some(Event::StashFilesLoaded { index: 0, files }) if files[0].path == "a.txt")
     );
-    w.send(Command::StashPop(0));
+    let id = git(&dir, &["rev-parse", "stash@{0}"]).trim().to_string();
+    w.send(Command::StashPop { index: 0, id });
     let evs = until(&w, |e| matches!(e, Event::StashesLoaded(_)));
     assert!(matches!(evs.last(), Some(Event::StashesLoaded(l)) if l.is_empty()));
     assert_eq!(
@@ -236,5 +237,57 @@ fn an_operation_blocked_by_local_changes_offers_stash_and_retry() {
         git(&dir, &["stash", "list"]).lines().count(),
         1,
         "changes kept in a stash"
+    );
+}
+
+#[test]
+fn stash_actions_refuse_a_stash_list_that_changed() {
+    let Some((_d, dir)) = repo() else { return };
+    std::fs::write(dir.join("a.txt"), "first\n").unwrap();
+    git(&dir, &["stash", "push", "-q", "-m", "first"]);
+    let first = git(&dir, &["rev-parse", "stash@{0}"]).trim().to_string();
+    let w = start(&dir);
+    // Another stash arrives (terminal, pull autostash): `first` is now stash@{1}.
+    std::fs::write(dir.join("a.txt"), "second\n").unwrap();
+    git(&dir, &["stash", "push", "-q", "-m", "second"]);
+    w.send(Command::StashDrop {
+        index: 0,
+        id: first.clone(),
+    });
+    let evs = until(&w, |e| matches!(e, Event::Error { .. }));
+    assert!(
+        matches!(evs.last(), Some(Event::Error { error, .. }) if error.message == retrogit::strings::ERR_STASH_LIST_CHANGED)
+    );
+    assert_eq!(
+        git(&dir, &["stash", "list"]).lines().count(),
+        2,
+        "nothing dropped"
+    );
+    until(&w, |e| matches!(e, Event::StashesLoaded(l) if l.len() == 2));
+    // History operations reload the stash list too.
+    let head = git(&dir, &["rev-parse", "HEAD"]).trim().to_string();
+    w.send(Command::Reset {
+        id: head,
+        mode: gitcore::ResetMode::Mixed,
+    });
+    until(&w, |e| matches!(e, Event::StashesLoaded(_)));
+}
+
+#[test]
+fn a_rebase_from_a_commit_of_another_branch_is_refused() {
+    let Some((_d, dir)) = repo() else { return };
+    git(&dir, &["switch", "-q", "-c", "other"]);
+    let elsewhere = commit(&dir, "b.txt", "b\n", "elsewhere");
+    git(&dir, &["switch", "-q", "main"]);
+    commit(&dir, "c.txt", "c\n", "mine");
+    let w = start(&dir);
+    w.send(Command::LoadRebaseList(Some(elsewhere)));
+    let evs = until(&w, |e| {
+        matches!(e, Event::Error { .. } | Event::RebaseListLoaded { .. })
+    });
+    assert!(
+        matches!(evs.last(), Some(Event::Error { error, .. }) if error.message == retrogit::strings::ERR_REBASE_NOT_ANCESTOR),
+        "{:?}",
+        evs.last()
     );
 }

@@ -308,9 +308,9 @@ impl Worker {
             | Command::SkipOperation
             | Command::LoadStashes
             | Command::StashSave { .. }
-            | Command::StashApply(_)
-            | Command::StashPop(_)
-            | Command::StashDrop(_)
+            | Command::StashApply { .. }
+            | Command::StashPop { .. }
+            | Command::StashDrop { .. }
             | Command::LoadStashFiles(_)
             | Command::LoadStashFileDiff { .. }
             | Command::LoadTags

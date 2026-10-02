@@ -32,7 +32,12 @@ impl Worker {
             Command::LoadResetInfo(id) => {
                 if let Some(r) = self.open_current(Op::History) {
                     let drops_pushed = r.reset_drops_pushed(&id);
-                    self.emit(Event::ResetInfo { id, drops_pushed });
+                    let overwrites = r.reset_overwrites_untracked(&id);
+                    self.emit(Event::ResetInfo {
+                        id,
+                        drops_pushed,
+                        overwrites,
+                    });
                 }
             }
             Command::LoadRebaseList(base) => self.load_rebase_list(base),
@@ -59,12 +64,15 @@ impl Worker {
                 }
                 self.after_stash(&r);
             }
-            Command::StashApply(i) => self.stash_op(i, false),
-            Command::StashPop(i) => self.stash_op(i, true),
-            Command::StashDrop(i) => {
+            Command::StashApply { index, id } => self.stash_op(index, &id, false),
+            Command::StashPop { index, id } => self.stash_op(index, &id, true),
+            Command::StashDrop { index: i, id } => {
                 let Some(r) = self.open_current(Op::Changes) else {
                     return;
                 };
+                if !self.stash_is(&r, i, &id) {
+                    return;
+                }
                 match r.stash_drop(i) {
                     Ok(id) => self.note(&s::NOTE_STASH_DROPPED.replace("{id}", &id)),
                     Err(e) => self.fail(Op::Changes, AppError::from_git(&e)),
@@ -180,6 +188,16 @@ impl Worker {
         let Some(repo) = self.open_current(Op::History) else {
             return;
         };
+        // A commit picked in History must be in the current branch: rebasing onto another
+        // branch (`--onto`) is not offered.
+        if let Some(b) = &base
+            && !repo.head_descends_from(b)
+        {
+            return self.fail(
+                Op::History,
+                AppError::new(Severity::Info, s::ERR_REBASE_NOT_ANCESTOR),
+            );
+        }
         let Some(base) = base.or_else(|| repo.upstream_oid()) else {
             return self.fail(
                 Op::History,
@@ -199,10 +217,29 @@ impl Worker {
         }
     }
 
-    fn stash_op(&mut self, index: usize, pop: bool) {
+    /// Whether `stash@{index}` is still `id`; if not, says so and reloads the list.
+    fn stash_is(&mut self, r: &Repo, index: usize, id: &str) -> bool {
+        let same = r
+            .stashes()
+            .map(|l| l.iter().any(|e| e.index == index && e.id == id))
+            .unwrap_or(false);
+        if !same {
+            self.fail(
+                Op::Changes,
+                AppError::new(Severity::Warning, s::ERR_STASH_LIST_CHANGED),
+            );
+            self.send_stashes();
+        }
+        same
+    }
+
+    fn stash_op(&mut self, index: usize, id: &str, pop: bool) {
         let Some(r) = self.open_current(Op::Changes) else {
             return;
         };
+        if !self.stash_is(&r, index, id) {
+            return;
+        }
         let result = if pop {
             r.stash_pop_at(index)
         } else {
@@ -225,7 +262,7 @@ impl Worker {
         self.send_stashes();
     }
 
-    fn send_stashes(&mut self) {
+    pub(super) fn send_stashes(&mut self) {
         if let Some(r) = self.open_current(Op::Changes) {
             match r.stashes() {
                 Ok(list) => self.emit(Event::StashesLoaded(list)),

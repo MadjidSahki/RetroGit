@@ -26,6 +26,15 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             });
         }
         let sel = cx.state.stashes.selected;
+        // The selected stash, by index and id (the worker checks both).
+        let entry = sel.and_then(|i| {
+            cx.state
+                .stashes
+                .list
+                .iter()
+                .find(|e| e.index == i)
+                .map(|e| (e.index, e.id.clone(), e.message.clone()))
+        });
         if ui
             .add(
                 Button95::new(s::STASH_APPLY)
@@ -33,9 +42,9 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                     .enabled(sel.is_some()),
             )
             .clicked()
-            && let Some(i) = sel
+            && let Some((index, id, _)) = entry.clone()
         {
-            cx.worker.send(Command::StashApply(i));
+            cx.worker.send(Command::StashApply { index, id });
         }
         if ui
             .add(
@@ -44,9 +53,9 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                     .enabled(sel.is_some()),
             )
             .clicked()
-            && let Some(i) = sel
+            && let Some((index, id, _)) = entry.clone()
         {
-            cx.worker.send(Command::StashPop(i));
+            cx.worker.send(Command::StashPop { index, id });
         }
         if ui
             .add(
@@ -55,9 +64,9 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                     .enabled(sel.is_some()),
             )
             .clicked()
-            && let Some(index) = sel
+            && let Some((index, id, message)) = entry.clone()
         {
-            cx.state.git_dialog = Some(GitDialog::StashDrop { index });
+            cx.state.git_dialog = Some(GitDialog::StashDrop { index, id, message });
         }
         if ui.add(Button95::new(s::REFRESH).min_size(size)).clicked() {
             cx.worker.send(Command::LoadStashes);

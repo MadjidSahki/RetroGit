@@ -1,4 +1,5 @@
 use crate::{GitError, Repo};
+use std::path::Path;
 
 /// A multi-step operation left in progress (conflicts to resolve).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +129,27 @@ impl Repo {
         self.git_ok(&["reset", "-q", flag, id]).map(|_| ())
     }
 
+    /// Untracked files that `reset --hard id` would replace (they exist in `id`'s tree).
+    pub fn reset_overwrites_untracked(&self, id: &str) -> Vec<String> {
+        let Ok(files) = self.status() else {
+            return Vec::new();
+        };
+        let repo = self.git();
+        let Some(tree) = git2::Oid::from_str(id)
+            .ok()
+            .and_then(|o| repo.find_commit(o).ok())
+            .and_then(|c| c.tree().ok())
+        else {
+            return Vec::new();
+        };
+        files
+            .into_iter()
+            .filter(|f| f.unstaged == Some(crate::Change::Untracked))
+            .filter(|f| tree.get_path(Path::new(&f.path)).is_ok())
+            .map(|f| f.path)
+            .collect()
+    }
+
     /// Done, stopped on conflicts, or empty (nothing to commit), from git's answer.
     pub(crate) fn outcome(
         &self,
@@ -138,7 +160,8 @@ impl Repo {
             return Ok(OpOutcome::Done);
         }
         let text = out.text.to_lowercase();
-        if !out.success && blocked_by_local_changes(&text) {
+        if !out.success && self.operation_in_progress().is_none() && blocked_by_local_changes(&text)
+        {
             return Err(GitError::WouldOverwrite {
                 files: crate::parse_overwritten_files(&out.text),
             });
@@ -162,6 +185,11 @@ impl Repo {
             }
             if out.success {
                 return Ok(OpOutcome::Done);
+            }
+            if text.contains("execution failed: git commit --amend") {
+                return Err(GitError::MessageRefused {
+                    output: out.text.trim().to_string(),
+                });
             }
         }
         Err(crate::classify_commit_failure(&out.text))

@@ -14,6 +14,15 @@ pub(crate) struct GitOutput {
 impl Repo {
     /// Run `git -C <workdir> <args>` without a terminal and return its output.
     pub(crate) fn run_git(&self, args: &[&str]) -> Result<GitOutput, GitError> {
+        self.run_git_env(args, &[])
+    }
+
+    /// [`Repo::run_git`] with extra environment variables (they win over the user's).
+    pub(crate) fn run_git_env(
+        &self,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Result<GitOutput, GitError> {
         if !crate::git_available() {
             return Err(GitError::GitMissing);
         }
@@ -26,6 +35,7 @@ impl Repo {
             // Messages are parsed: keep them untranslated (Git for Windows, Homebrew builds).
             .env("LC_ALL", "C")
             .env("LANGUAGE", "C")
+            .envs(env.iter().copied())
             .stdin(Stdio::null())
             .output()
             .map_err(|e| GitError::Other(format!("cannot run git: {e}")))?;

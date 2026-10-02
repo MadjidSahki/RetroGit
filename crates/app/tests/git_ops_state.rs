@@ -25,6 +25,7 @@ fn item(id: &str) -> TodoItem {
         action: TodoAction::Pick,
         id: id.into(),
         summary: id.into(),
+        message: id.into(),
     }
 }
 
@@ -75,21 +76,25 @@ fn reset_info_fills_the_open_reset_dialog() {
         mode: gitcore::ResetMode::Mixed,
         hard_confirmed: false,
         drops_pushed: false,
+        overwrites: Vec::new(),
     });
     st.apply(Event::ResetInfo {
         id: "abc".into(),
         drops_pushed: true,
+        overwrites: vec!["notes.txt".into()],
     });
     assert!(matches!(
-        st.git_dialog,
+        &st.git_dialog,
         Some(GitDialog::Reset {
             drops_pushed: true,
+            overwrites,
             ..
-        })
+        }) if overwrites == &["notes.txt"]
     ));
     st.apply(Event::ResetInfo {
         id: "other".into(),
         drops_pushed: false,
+        overwrites: Vec::new(),
     });
     assert!(
         matches!(
@@ -244,4 +249,20 @@ fn tag_names_are_checked_before_sending() {
             "{bad}"
         );
     }
+}
+
+#[test]
+fn reword_starts_from_the_whole_message() {
+    let mut i = item("x");
+    i.message = "subject\n\nbody".into();
+    let choices = retrogit::ui::git_dialogs::action_choices(&i);
+    assert!(choices.contains(&TodoAction::Reword("subject\n\nbody".into())));
+}
+
+#[test]
+fn a_refused_rebase_message_says_continue_keeps_the_old_one() {
+    let e = retrogit::protocol::AppError::from_git(&gitcore::GitError::MessageRefused {
+        output: "hook said no".into(),
+    });
+    assert_eq!(e.message, retrogit::strings::ERR_REBASE_MESSAGE_REFUSED);
 }
