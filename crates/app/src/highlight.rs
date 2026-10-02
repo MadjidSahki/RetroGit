@@ -76,6 +76,8 @@ pub struct Highlighted {
     /// The diff the colors belong to (the UI ignores results for a diff it no longer shows).
     pub diff: FileDiff,
     pub colors: Option<DiffColors>,
+    /// Computed with the dark syntax theme.
+    pub dark: bool,
 }
 
 fn syntaxes() -> &'static SyntaxSet {
@@ -84,14 +86,16 @@ fn syntaxes() -> &'static SyntaxSet {
     SET.get_or_init(two_face::syntax::extra_newlines)
 }
 
-fn theme() -> &'static Theme {
-    static THEME: OnceLock<Theme> = OnceLock::new();
-    // Light theme, readable on the white (and pale green/red) diff background.
-    THEME.get_or_init(|| {
-        two_face::theme::extra()
-            .get(two_face::theme::EmbeddedThemeName::InspiredGithub)
-            .clone()
-    })
+/// Syntax theme: light (readable on white and pale diff backgrounds) or dark.
+fn theme(dark: bool) -> &'static Theme {
+    static LIGHT: OnceLock<Theme> = OnceLock::new();
+    static DARK: OnceLock<Theme> = OnceLock::new();
+    let (cell, name) = if dark {
+        (&DARK, two_face::theme::EmbeddedThemeName::OneHalfDark)
+    } else {
+        (&LIGHT, two_face::theme::EmbeddedThemeName::InspiredGithub)
+    };
+    cell.get_or_init(|| two_face::theme::extra().get(name).clone())
 }
 
 fn syntax_for(path: &str, first_line: &str) -> Option<&'static SyntaxReference> {
@@ -122,12 +126,13 @@ pub fn language_of(path: &str, first_line: &str) -> Option<String> {
 fn highlight_lines(
     syntax: &SyntaxReference,
     lines: &[&str],
+    dark: bool,
     cancelled: &dyn Fn() -> bool,
 ) -> Option<Vec<Vec<Span>>> {
     if lines.iter().any(|l| l.len() > MAX_LINE_LEN) {
         return None;
     }
-    let mut h = HighlightLines::new(syntax, theme());
+    let mut h = HighlightLines::new(syntax, theme(dark));
     let mut out = Vec::with_capacity(lines.len());
     for line in lines {
         if cancelled() {
@@ -158,18 +163,22 @@ fn highlight_lines(
 
 /// Highlight consecutive lines of one file (each line may end with its newline).
 /// `None` when the language is unknown or the input is too large.
-pub fn highlight(path: &str, lines: &[&str]) -> Option<Vec<Vec<Span>>> {
+pub fn highlight(path: &str, lines: &[&str], dark: bool) -> Option<Vec<Vec<Span>>> {
     if lines.len() > MAX_LINES {
         return None;
     }
     let syntax = syntax_for(path, lines.first().copied().unwrap_or(""))?;
-    highlight_lines(syntax, lines, &|| false)
+    highlight_lines(syntax, lines, dark, &|| false)
 }
 
 /// Highlight a diff. The language is chosen once (path, or first line of a hunk that starts
 /// the file). Each hunk is parsed twice — old side (context + removed) and new side
 /// (context + added) — so an unclosed comment on one side cannot color the other.
-pub fn highlight_diff(diff: &FileDiff, cancelled: &dyn Fn() -> bool) -> Option<DiffColors> {
+pub fn highlight_diff(
+    diff: &FileDiff,
+    dark: bool,
+    cancelled: &dyn Fn() -> bool,
+) -> Option<DiffColors> {
     let bytes: usize = diff
         .hunks
         .iter()
@@ -199,8 +208,8 @@ pub fn highlight_diff(diff: &FileDiff, cancelled: &dyn Fn() -> bool) -> Option<D
         };
         let (old_idx, old_lines) = side(LineKind::Added);
         let (new_idx, new_lines) = side(LineKind::Removed);
-        let old = highlight_lines(syntax, &old_lines, cancelled);
-        let new = highlight_lines(syntax, &new_lines, cancelled);
+        let old = highlight_lines(syntax, &old_lines, dark, cancelled);
+        let new = highlight_lines(syntax, &new_lines, dark, cancelled);
         if cancelled() {
             return None;
         }
@@ -227,7 +236,8 @@ pub fn highlight_diff(diff: &FileDiff, cancelled: &dyn Fn() -> bool) -> Option<D
 /// older one for the same target still running is cancelled as soon as a newer one
 /// arrives; requests for other targets (the panes of the conflict editor) are all served.
 pub struct Service {
-    tx: Sender<(u64, Target, FileDiff)>,
+    tx: Sender<(u64, Target, FileDiff, bool)>,
+    dark: Arc<std::sync::atomic::AtomicBool>,
     latest: Arc<std::sync::Mutex<std::collections::HashMap<Target, u64>>>,
     next: Arc<AtomicU64>,
 }
@@ -235,7 +245,7 @@ pub struct Service {
 impl Service {
     /// `deliver` is called on the highlighting thread for each finished request.
     pub fn start(deliver: impl Fn(Highlighted) + Send + 'static) -> Service {
-        let (tx, rx) = channel::<(u64, Target, FileDiff)>();
+        let (tx, rx) = channel::<(u64, Target, FileDiff, bool)>();
         let latest: Arc<std::sync::Mutex<std::collections::HashMap<Target, u64>>> = Arc::default();
         let current = latest.clone();
         let spawned = std::thread::Builder::new()
@@ -253,17 +263,18 @@ impl Service {
                     while let Ok(more) = rx.try_recv() {
                         jobs.push(more);
                     }
-                    jobs.retain(|(id, target, _)| is_latest(*target, *id));
-                    for (id, target, diff) in jobs {
+                    jobs.retain(|(id, target, _, _)| is_latest(*target, *id));
+                    for (id, target, diff, dark) in jobs {
                         let started = std::time::Instant::now();
                         let superseded = || !is_latest(target, id);
                         let cancelled = || superseded() || started.elapsed() > TIME_BUDGET;
-                        let colors = highlight_diff(&diff, &cancelled);
+                        let colors = highlight_diff(&diff, dark, &cancelled);
                         if !superseded() {
                             deliver(Highlighted {
                                 target,
                                 diff,
                                 colors,
+                                dark,
                             });
                         }
                     }
@@ -274,6 +285,7 @@ impl Service {
         }
         Service {
             tx,
+            dark: Arc::default(),
             latest,
             next: Arc::new(AtomicU64::new(0)),
         }
@@ -284,7 +296,13 @@ impl Service {
         if let Ok(mut m) = self.latest.lock() {
             m.insert(target, id);
         }
-        let _ = self.tx.send((id, target, diff));
+        let dark = self.dark.load(Ordering::SeqCst);
+        let _ = self.tx.send((id, target, diff, dark));
+    }
+
+    /// Theme of the next requests (dark color schemes).
+    pub fn set_dark(&self, dark: bool) {
+        self.dark.store(dark, Ordering::SeqCst);
     }
 }
 
@@ -408,7 +426,7 @@ mod tests {
     #[test]
     fn spans_rebuild_each_line_exactly() {
         let lines = ["fn main() {\n", "    let x = \"hi\"; // comment\n", "}\n"];
-        let out = highlight("main.rs", &lines).unwrap();
+        let out = highlight("main.rs", &lines, false).unwrap();
         assert_eq!(out.len(), 3);
         for (spans, line) in out.iter().zip(lines) {
             let joined: String = spans.iter().map(|s| s.text.as_str()).collect();
@@ -421,11 +439,11 @@ mod tests {
 
     #[test]
     fn unknown_languages_and_huge_inputs_are_not_highlighted() {
-        assert!(highlight("x.unknownext", &["a\n"]).is_none());
+        assert!(highlight("x.unknownext", &["a\n"], false).is_none());
         let many = vec!["let a = 1;\n"; MAX_LINES + 1];
-        assert!(highlight("a.rs", &many).is_none());
+        assert!(highlight("a.rs", &many, false).is_none());
         let long = format!("{}\n", "x".repeat(MAX_LINE_LEN + 1));
-        assert!(highlight("a.rs", &[long.as_str()]).is_none());
+        assert!(highlight("a.rs", &[long.as_str()], false).is_none());
     }
 
     #[test]
@@ -584,7 +602,7 @@ mod tests {
                 hunk(9, vec![dl(LineKind::Added, "struct S;\n")]),
             ],
         );
-        let colors = highlight_diff(&d, &never).unwrap();
+        let colors = highlight_diff(&d, false, &never).unwrap();
         assert_eq!(colors.len(), 2);
         assert_eq!(colors[0].as_ref().unwrap().len(), 2);
         assert_eq!(colors[1].as_ref().unwrap().len(), 1);
@@ -611,7 +629,7 @@ mod tests {
                 ),
             ],
         );
-        let colors = highlight_diff(&d, &never).unwrap();
+        let colors = highlight_diff(&d, false, &never).unwrap();
         assert!(colors.iter().all(Option::is_some), "{colors:?}");
     }
 
@@ -625,7 +643,7 @@ mod tests {
                 hunk(50, vec![dl(LineKind::Added, &long)]),
             ],
         );
-        let colors = highlight_diff(&d, &never).unwrap();
+        let colors = highlight_diff(&d, false, &never).unwrap();
         assert!(colors[0].is_some());
         assert!(colors[1].is_none());
     }
@@ -645,10 +663,11 @@ mod tests {
                 ],
             )],
         );
-        let colors = highlight_diff(&d, &never).unwrap();
+        let colors = highlight_diff(&d, false, &never).unwrap();
         let new_side = highlight_lines(
             syntax_for("a.rs", "").unwrap(),
             &["fn a() {}\n", "let x = 1;\n", "let y = 2;\n"],
+            false,
             &never,
         )
         .unwrap();
@@ -670,14 +689,14 @@ mod tests {
             })
             .collect();
         assert!(
-            highlight_diff(&file("a.rs", vec![hunk(1, big)]), &never).is_none(),
+            highlight_diff(&file("a.rs", vec![hunk(1, big)]), false, &never).is_none(),
             "total size cap"
         );
         let d = file(
             "a.rs",
             vec![hunk(1, vec![dl(LineKind::Added, "fn a() {}\n")])],
         );
-        assert!(highlight_diff(&d, &|| true).is_none(), "cancelled");
+        assert!(highlight_diff(&d, false, &|| true).is_none(), "cancelled");
     }
 
     #[test]

@@ -44,6 +44,17 @@ impl Font {
     pub fn family(self) -> FontFamily {
         FontFamily::Name(self.name().into())
     }
+
+    /// [`Font::family`] if the fonts are loaded on `ctx` (they are from the second frame
+    /// after `install`), else the default family.
+    pub fn family_on(self, ctx: &egui::Context) -> FontFamily {
+        let family = self.family();
+        if ctx.fonts(|f| f.families().contains(&family)) {
+            family
+        } else {
+            FontFamily::Proportional
+        }
+    }
 }
 
 /// What the user chose in View > Appearance (the size is egui's zoom factor).

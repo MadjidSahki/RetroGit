@@ -199,11 +199,13 @@ fn syntax_colors_arrive_in_the_background_for_each_pane() {
         target: Target::ConflictMine,
         diff: mine.clone(),
         colors: spans(4),
+        dark: false,
     });
     st.apply(Event::ColorsLoaded {
         target: Target::ConflictResult,
         diff: result.clone(),
         colors: spans(result.line_count()),
+        dark: false,
     });
     let ed = st.changes.conflict.as_mut().unwrap();
     assert!(matches!(ed.mine_colors, Colors::Ready(_)));
@@ -215,6 +217,7 @@ fn syntax_colors_arrive_in_the_background_for_each_pane() {
         target: Target::ConflictResult,
         diff: result,
         colors: spans(13),
+        dark: false,
     });
     assert_eq!(
         st.changes.conflict.as_ref().unwrap().result_colors,

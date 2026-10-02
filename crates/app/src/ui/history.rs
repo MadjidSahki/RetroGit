@@ -272,7 +272,7 @@ fn detail(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                         .font(egui::FontId::monospace(win95::theme::FONT_SIZE)),
                 );
                 ui.label(format!(
-                    "· {} <{}> · {}",
+                    "- {} <{}> - {}",
                     d.author,
                     d.email,
                     format_epoch(d.time)

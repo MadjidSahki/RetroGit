@@ -48,11 +48,11 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let last = c
         .last_commit
         .as_ref()
-        .map(|lc| format!(" · {} \"{}\"", lc.short_id, lc.summary))
+        .map(|lc| format!(" - {} \"{}\"", lc.short_id, lc.summary))
         .unwrap_or_default();
     ui.horizontal(|ui| {
         ui.label(
-            RichText::new(format!("{} · {branch}{last}", c.name))
+            RichText::new(format!("{} - {branch}{last}", c.name))
                 .color(win95::theme::palette(ui.ctx()).link),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

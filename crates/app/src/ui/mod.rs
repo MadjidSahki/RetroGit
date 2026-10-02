@@ -2,6 +2,7 @@
 
 pub mod about;
 pub mod accounts;
+pub mod appearance;
 pub mod changes;
 pub mod clone_dialog;
 pub mod conflict_view;

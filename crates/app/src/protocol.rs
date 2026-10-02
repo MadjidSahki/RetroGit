@@ -405,10 +405,12 @@ pub enum Event {
     },
     NotMerged(String),
     /// Syntax colors computed in the background for `diff`.
+    /// `dark`: computed with the dark syntax theme (dropped if the scheme changed since).
     ColorsLoaded {
         target: crate::highlight::Target,
         diff: FileDiff,
         colors: Option<crate::highlight::DiffColors>,
+        dark: bool,
     },
     // --- Sub-project 4 ---
     PullsLoaded {

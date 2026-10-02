@@ -34,6 +34,53 @@ pub struct Config {
     pub accounts: Vec<String>,
     /// Account of each repository (`owner/repo`, lowercase): chosen or learned.
     pub repo_accounts: std::collections::BTreeMap<String, github::RepoAccount>,
+    /// View > Appearance.
+    pub appearance: AppearanceConfig,
+}
+
+/// Saved appearance, by name (unknown names fall back to the defaults).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppearanceConfig {
+    pub scheme: String,
+    pub font: String,
+    /// Interface zoom (1.0 = 100 %).
+    pub zoom: f32,
+}
+
+pub const MIN_ZOOM: f32 = 0.8;
+pub const MAX_ZOOM: f32 = 2.0;
+
+impl Default for AppearanceConfig {
+    fn default() -> Self {
+        AppearanceConfig::from_choice(win95::theme::Appearance::default(), 1.0)
+    }
+}
+
+impl AppearanceConfig {
+    pub fn from_choice(a: win95::theme::Appearance, zoom: f32) -> AppearanceConfig {
+        AppearanceConfig {
+            scheme: a.scheme.name().to_string(),
+            font: a.font.name().to_string(),
+            zoom,
+        }
+    }
+
+    pub fn appearance(&self) -> win95::theme::Appearance {
+        win95::theme::Appearance {
+            scheme: win95::Scheme::from_name(&self.scheme).unwrap_or_default(),
+            font: win95::theme::Font::from_name(&self.font).unwrap_or_default(),
+        }
+    }
+
+    /// The zoom, kept within 80-200 % (100 % if it is not a number).
+    pub fn zoom(&self) -> f32 {
+        if self.zoom.is_finite() {
+            self.zoom.clamp(MIN_ZOOM, MAX_ZOOM)
+        } else {
+            1.0
+        }
+    }
 }
 
 impl Config {

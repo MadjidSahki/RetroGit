@@ -213,6 +213,10 @@ fn menu(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             {
                 cx.worker.send(Command::OpenRepo(path));
             }
+            ui.separator();
+            if ui.button(s::APPEARANCE_MENU).clicked() {
+                cx.state.open_appearance();
+            }
         });
         ui.menu_button(s::MENU_HELP, |ui| {
             if ui.button(s::ABOUT_MENU).clicked() {

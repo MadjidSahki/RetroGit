@@ -706,12 +706,14 @@ mod highlight_cache {
             target: Target::Changes,
             diff: diff("a.rs", false),
             colors: Some(vec![]),
+            dark: false,
         });
         assert_eq!(s.changes.diff_colors, Colors::Ready(vec![]));
         s.apply(Event::ColorsLoaded {
             target: Target::Changes,
             diff: diff("old.rs", false),
             colors: None,
+            dark: false,
         });
         assert_eq!(
             s.changes.diff_colors,
@@ -740,6 +742,7 @@ mod highlight_cache {
             target: Target::History,
             diff: diff("a.rs", false),
             colors: None,
+            dark: false,
         });
         assert_eq!(s.history.detail_colors, Colors::Plain);
         s.select_commit("c2");
