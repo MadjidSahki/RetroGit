@@ -153,3 +153,34 @@ fn a_suggestion_already_applied_says_so_and_commits_nothing() {
     assert_eq!(git(d.path(), &["rev-parse", "HEAD"]), before, "no commit");
     assert!(git(d.path(), &["status", "--porcelain"]).is_empty());
 }
+
+#[test]
+fn applying_a_suggestion_twice_says_it_is_already_applied() {
+    if !gitcore::git_available() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let r = repo(d.path(), b"a\nb\nc\n");
+    let expected = lines(&["b"]);
+    r.apply_suggestion("a.rs", 2, 2, &expected, "B1\nB2\n", "s")
+        .unwrap();
+    let before = git(d.path(), &["rev-parse", "HEAD"]);
+    // The lines now read as the suggestion (even when it changed their count).
+    assert_eq!(
+        r.apply_suggestion("a.rs", 2, 2, &expected, "B1\nB2\n", "s"),
+        Err(GitError::SuggestionApplied)
+    );
+    assert_eq!(git(d.path(), &["rev-parse", "HEAD"]), before, "no commit");
+    // Lines changed by someone else: still outdated.
+    std::fs::write(d.path().join("a.rs"), "a\nX\nc\n").unwrap();
+    git(d.path(), &["commit", "-qam", "other"]);
+    assert_eq!(
+        r.apply_suggestion("a.rs", 2, 2, &expected, "B1\nB2\n", "s"),
+        Err(GitError::SuggestionOutdated)
+    );
+    // A suggestion deleting the lines never reads as applied by itself.
+    assert_eq!(
+        r.apply_suggestion("a.rs", 2, 2, &expected, "", "s"),
+        Err(GitError::SuggestionOutdated)
+    );
+}

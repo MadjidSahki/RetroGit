@@ -398,3 +398,67 @@ fn a_failed_swap_puts_the_current_file_back() {
     .unwrap();
     assert_eq!(std::fs::read_to_string(&current).unwrap(), "new");
 }
+
+#[test]
+fn cancel_is_noticed_while_the_server_has_not_answered_yet() {
+    // A server that accepts the connection but never sends its headers.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for conn in listener.incoming().take(4).flatten() {
+            held.push(conn);
+        }
+        std::thread::sleep(Duration::from_secs(3));
+    });
+    let file = "RetroGit-windows-x64-setup.exe";
+    let r = Release {
+        version: "0.1.99".into(),
+        tag: "v0.1.99".into(),
+        notes: String::new(),
+        url: String::new(),
+        assets: vec![
+            Asset {
+                name: file.into(),
+                url: format!("{base}/dl/{file}"),
+                size: 4,
+            },
+            Asset {
+                name: "SHA256SUMS.txt".into(),
+                url: format!("{base}/dl/sums"),
+                size: 99,
+            },
+        ],
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&cancel);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(200));
+        flag.store(true, Ordering::SeqCst);
+    });
+    let started = Instant::now();
+    let err = download_verified(
+        &Fetcher::new(local_only),
+        &r,
+        &InstallKind::WindowsInstalled,
+        dir.path(),
+        &cancel,
+        |_, _| {},
+    )
+    .unwrap_err();
+    assert_eq!(err, retrogit::strings::UPDATE_CANCELLED);
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "cancelled after {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn the_stall_message_reads_well_inside_the_failure_sentence() {
+    let shown =
+        retrogit::strings::UPDATE_FAILED.replace("{why}", retrogit::strings::ERR_UPDATE_STALLED);
+    assert!(!shown.contains(".."), "{shown}");
+    assert!(shown.contains("failed: the download"), "{shown}");
+}

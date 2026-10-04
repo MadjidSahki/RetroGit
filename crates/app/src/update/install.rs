@@ -45,6 +45,34 @@ impl Fetcher {
         Fetcher::new(allowed_url)
     }
 
+    /// GET `url` on a helper thread: Cancel is noticed while connecting or waiting for the
+    /// headers (the thread is abandoned then; it ends with its own time limits).
+    fn call(
+        &self,
+        url: &str,
+        cancel: &AtomicBool,
+    ) -> Result<ureq::http::Response<ureq::Body>, String> {
+        let (tx, rx) = sync_channel(1);
+        let agent = self.agent.clone();
+        let target = url.to_string();
+        std::thread::Builder::new()
+            .name("retrogit-update-request".into())
+            .spawn(move || {
+                let _ = tx.send(agent.get(&target).call().map_err(|e| e.to_string()));
+            })
+            .map_err(|e| e.to_string())?;
+        loop {
+            if cancel.load(Ordering::SeqCst) {
+                return Err(s::UPDATE_CANCELLED.into());
+            }
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(resp) => return resp,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return Err(s::ERR_UPDATE_STALLED.into()),
+            }
+        }
+    }
+
     /// Stream `url` (redirects followed by hand) into `sink`, `max` bytes at most.
     fn get(
         &self,
@@ -62,7 +90,7 @@ impl Fetcher {
             if cancel.load(Ordering::SeqCst) {
                 return Err(s::UPDATE_CANCELLED.into());
             }
-            let resp = self.agent.get(&url).call().map_err(|e| e.to_string())?;
+            let resp = self.call(&url, cancel)?;
             let status = resp.status().as_u16();
             if (300..400).contains(&status) {
                 let location = resp
