@@ -30,6 +30,12 @@ pub enum NotificationTarget {
     Browser(String),
 }
 
+struct Target<'a> {
+    repo: &'a str,
+    number: u64,
+    url: &'a str,
+}
+
 /// `"owner/repo"` => `(owner, repo)`.
 pub fn split_repo(full: &str) -> Option<Slug> {
     let (o, r) = full.split_once('/')?;
@@ -58,8 +64,40 @@ impl AppState {
         e: &PrEvent,
         slug_of: impl Fn(&Path) -> Option<Slug>,
     ) -> NotificationTarget {
-        let Some(slug) = split_repo(&e.repo) else {
-            return NotificationTarget::Browser(e.url.clone());
+        self.pull_target(&e.repo, e.number, &e.url, slug_of)
+    }
+
+    /// A clicked notification (macOS) or `retrogit://` link (Windows) to open.
+    pub fn open_link(&mut self, link: &str) {
+        self.links.push(link.to_string());
+    }
+
+    /// Links to open, oldest first (opened by the UI, which can reach the browser).
+    pub fn take_links(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.links)
+    }
+
+    /// Where a `retrogit://pull` link leads (`None`: not a pull request link).
+    pub fn link_target(
+        &self,
+        link: &str,
+        slug_of: impl Fn(&Path) -> Option<Slug>,
+    ) -> Option<NotificationTarget> {
+        let l = crate::notify::parse_pull_link(link)?;
+        let url = format!("https://github.com/{}/pull/{}", l.repo, l.number);
+        Some(self.pull_target(&l.repo, l.number, &url, slug_of))
+    }
+
+    fn pull_target(
+        &self,
+        repo: &str,
+        number: u64,
+        url: &str,
+        slug_of: impl Fn(&Path) -> Option<Slug>,
+    ) -> NotificationTarget {
+        let e = Target { repo, number, url };
+        let Some(slug) = split_repo(e.repo) else {
+            return NotificationTarget::Browser(e.url.to_string());
         };
         let same =
             |s: &Slug| s.0.eq_ignore_ascii_case(&slug.0) && s.1.eq_ignore_ascii_case(&slug.1);
@@ -71,7 +109,7 @@ impl AppState {
                 return NotificationTarget::Local(r.path, e.number);
             }
         }
-        NotificationTarget::Browser(e.url.clone())
+        NotificationTarget::Browser(e.url.to_string())
     }
 
     /// Show pull request `number` of the open repository (loads it).

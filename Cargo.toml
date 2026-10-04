@@ -28,6 +28,10 @@ notify = "8"
 trash = "5"
 getrandom = "0.3"
 syntect = { version = "5.3", default-features = false, features = ["regex-fancy"] }
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDictionary", "NSBundle", "NSError", "NSObject", "NSSet", "NSArray"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "bitflags", "UNUserNotificationCenter", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotification", "UNNotificationSound", "UNNotificationTrigger"] }
+block2 = "0.6"
 two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
 tauri-winrt-notification = "0.8"
 mockito = "1"

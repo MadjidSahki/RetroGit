@@ -9,6 +9,8 @@ pub enum Launch {
     Gui { open: Option<PathBuf> },
     /// From the installed `retrogit` command: `--cli <cwd> [path]`.
     Cli { target: PathBuf },
+    /// A clicked notification (`retrogit://...`, Windows): open its pull request.
+    Link { link: String },
 }
 
 /// Parse `std::env::args()` (unknown arguments, such as macOS `-psn_...`, are ignored).
@@ -28,6 +30,11 @@ pub fn parse(args: &[String]) -> Launch {
                     None => cwd,
                 };
                 return Launch::Cli { target };
+            }
+            link if link.starts_with("retrogit://") => {
+                return Launch::Link {
+                    link: link.to_string(),
+                };
             }
             _ => {}
         }

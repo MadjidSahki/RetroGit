@@ -2,6 +2,83 @@
 
 use github::{PrEvent, PrEventKind};
 
+/// The pull request a notification is about: what a click opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullLink {
+    /// `owner/repo`.
+    pub repo: String,
+    pub number: u64,
+    /// Account that was notified.
+    pub account: String,
+}
+
+fn encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+fn decode(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' {
+            let hex = std::str::from_utf8(b.get(i + 1..i + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// `retrogit://pull?repo=<o%2Fr>&number=<n>&account=<login>`.
+pub fn pull_link(l: &PullLink) -> String {
+    format!(
+        "retrogit://pull?repo={}&number={}&account={}",
+        encode(&l.repo),
+        l.number,
+        encode(&l.account)
+    )
+}
+
+pub fn parse_pull_link(url: &str) -> Option<PullLink> {
+    let query = url.strip_prefix("retrogit://pull?")?;
+    let (mut repo, mut number, mut account) = (None, None, String::new());
+    for pair in query.split('&') {
+        let (k, v) = pair.split_once('=')?;
+        match k {
+            "repo" => repo = Some(decode(v)?),
+            "number" => number = v.parse().ok(),
+            "account" => account = decode(v)?,
+            _ => {}
+        }
+    }
+    let repo = repo.filter(|r| r.contains('/'))?;
+    Some(PullLink {
+        repo,
+        number: number?,
+        account,
+    })
+}
+
+/// The link of a notification for `e`.
+pub fn event_link(e: &PrEvent) -> String {
+    pull_link(&PullLink {
+        repo: e.repo.clone(),
+        number: e.number,
+        account: e.account.clone(),
+    })
+}
+
 use crate::strings as s;
 
 /// Title and body of the notification for `e`; the title names the account when several
@@ -45,19 +122,26 @@ pub fn applescript_string(text: &str) -> String {
     out
 }
 
-/// Show a system notification without blocking the caller. Failures are only logged
-/// (notifications disabled for the app, no notification service).
-pub fn show(title: &str, body: &str) {
+/// Show a system notification without blocking the caller; a click opens `link` where the
+/// system supports it. Failures are only logged (notifications disabled, no service).
+pub fn show(title: &str, body: &str, link: Option<String>) {
     let (title, body) = (title.to_string(), body.to_string());
     std::thread::spawn(move || {
-        if let Err(e) = show_now(&title, &body) {
+        if let Err(e) = show_now(&title, &body, link.as_deref()) {
             log::info!("system notification not shown: {e}");
         }
     });
 }
 
 #[cfg(target_os = "macos")]
-fn show_now(title: &str, body: &str) -> Result<(), String> {
+pub mod macos;
+
+#[cfg(target_os = "macos")]
+fn show_now(title: &str, body: &str, link: Option<&str>) -> Result<(), String> {
+    // Inside RetroGit.app: native, with the app's name and a click back to it.
+    if macos::native() {
+        return macos::send(title, body, link);
+    }
     // `display notification` works from a bare executable (no app bundle needed).
     let script = format!(
         "display notification {} with title {}",
@@ -79,7 +163,7 @@ fn show_now(title: &str, body: &str) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn show_now(title: &str, body: &str) -> Result<(), String> {
+fn show_now(title: &str, body: &str, _link: Option<&str>) -> Result<(), String> {
     use tauri_winrt_notification::Toast;
     // Without an installer there is no registered app id: PowerShell's is used.
     Toast::new(Toast::POWERSHELL_APP_ID)
@@ -90,7 +174,7 @@ fn show_now(title: &str, body: &str) -> Result<(), String> {
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
-fn show_now(_title: &str, _body: &str) -> Result<(), String> {
+fn show_now(_title: &str, _body: &str, _link: Option<&str>) -> Result<(), String> {
     Err("not supported on this platform".into())
 }
 

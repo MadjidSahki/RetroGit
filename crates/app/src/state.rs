@@ -216,6 +216,9 @@ pub struct AppState {
     pub stashes: StashesView,
     // --- Sub-project 6e ---
     pub explore: ExploreView,
+    // --- Sub-project 6f ---
+    /// Clicked notification links waiting to be opened by the UI.
+    pub links: Vec<String>,
     pub tags: Vec<gitcore::Tag>,
     /// The Stashes tab asked for the list once (since the repository was opened).
     pub stashes_loaded: bool,
@@ -257,6 +260,7 @@ impl AppState {
             git_dialog: None,
             stashes: StashesView::default(),
             explore: ExploreView::default(),
+            links: Vec::new(),
             tags: Vec::new(),
             stashes_loaded: false,
             accounts: Vec::new(),

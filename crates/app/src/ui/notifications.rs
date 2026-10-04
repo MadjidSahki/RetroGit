@@ -80,16 +80,35 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
         return;
     };
     cx.state.notifications.open = false;
-    let target = cx.state.notification_target(&e, |path| {
-        gitcore::Repo::open(path).ok().and_then(|r| r.github_slug())
-    });
+    let target = cx.state.notification_target(&e, slug_of);
+    open_target(egui_ctx, cx, &e.repo, target);
+}
+
+fn slug_of(path: &std::path::Path) -> Option<crate::protocol::Slug> {
+    gitcore::Repo::open(path).ok().and_then(|r| r.github_slug())
+}
+
+fn open_target(egui_ctx: &egui::Context, cx: &mut Ctx<'_>, repo: &str, target: NotificationTarget) {
     match target {
         NotificationTarget::Current(number) => cx.state.show_pull(number),
         NotificationTarget::Local(path, number) => {
-            cx.state.pulls.open_after_switch = split_repo(&e.repo).map(|slug| (slug, number));
+            cx.state.pulls.open_after_switch = split_repo(repo).map(|slug| (slug, number));
             cx.worker.send(Command::OpenRepo(path));
         }
         NotificationTarget::Browser(url) => egui_ctx.open_url(egui::OpenUrl::new_tab(url)),
+    }
+}
+
+/// Open the pull requests of clicked notifications (links left by the system).
+pub fn open_links(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
+    for link in cx.state.take_links() {
+        match (
+            cx.state.link_target(&link, slug_of),
+            crate::notify::parse_pull_link(&link),
+        ) {
+            (Some(target), Some(l)) => open_target(egui_ctx, cx, &l.repo, target),
+            _ => log::info!("ignored notification link {link}"),
+        }
     }
 }
 

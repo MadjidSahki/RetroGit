@@ -290,3 +290,77 @@ fn the_pull_request_opens_once_its_repository_is_open() {
     st.show_pull(9);
     assert_eq!(st.pulls.selected, Some(9));
 }
+
+#[test]
+fn notification_links_survive_any_repository_name() {
+    use retrogit::notify::{PullLink, parse_pull_link, pull_link};
+    let l = PullLink {
+        repo: "o-1/r.dot_x".into(),
+        number: 42,
+        account: "me & you".into(),
+    };
+    let url = pull_link(&l);
+    assert!(url.starts_with("retrogit://pull?"), "{url}");
+    assert!(!url.contains(' ') && !url.contains('&'.to_string().repeat(2).as_str()));
+    assert_eq!(parse_pull_link(&url), Some(l.clone()));
+    assert_eq!(
+        parse_pull_link(&pull_link(&PullLink {
+            repo: "a/b".into(),
+            number: 1,
+            account: String::new()
+        }))
+        .unwrap()
+        .repo,
+        "a/b"
+    );
+    for bad in [
+        "https://x",
+        "retrogit://pull?repo=o/r",
+        "retrogit://pull?repo=o/r&number=x",
+        "retrogit://other?number=1",
+    ] {
+        assert_eq!(parse_pull_link(bad), None, "{bad}");
+    }
+    let e = event("o/r", 7);
+    assert_eq!(
+        parse_pull_link(&retrogit::notify::event_link(&e)),
+        Some(PullLink {
+            repo: "o/r".into(),
+            number: 7,
+            account: e.account.clone()
+        })
+    );
+}
+
+#[test]
+fn a_clicked_link_opens_its_pull_request() {
+    let mut st = AppState::new(Config::default());
+    let here = std::env::temp_dir();
+    let a = here.join("a").display().to_string();
+    opened(&mut st, &a, "https://github.com/o/a.git");
+    let link = retrogit::notify::event_link(&event("o/a", 3));
+    st.open_link(&link);
+    assert_eq!(st.take_links(), [link.as_str()]);
+    assert!(st.take_links().is_empty());
+    let target = st.link_target(&link, |_| None);
+    assert_eq!(target, Some(NotificationTarget::Current(3)));
+    assert_eq!(
+        st.link_target(&retrogit::notify::event_link(&event("x/y", 5)), |_| None),
+        Some(NotificationTarget::Browser(
+            "https://github.com/x/y/pull/5".into()
+        ))
+    );
+    assert_eq!(st.link_target("retrogit://nope", |_| None), None);
+}
+
+#[test]
+fn a_link_on_the_command_line_opens_the_gui() {
+    let link = "retrogit://pull?repo=o%2Fr&number=7&account=me";
+    let args: Vec<String> = ["retrogit", link].iter().map(|s| s.to_string()).collect();
+    assert_eq!(
+        retrogit::cli::parse(&args),
+        retrogit::cli::Launch::Link {
+            link: link.to_string()
+        }
+    );
+}
