@@ -7,7 +7,7 @@ use std::sync::Arc;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use gitcore::{Head, RepoSummary};
-use github::{AccountStatus, Client, MemoryAccounts, RepoInfo, TokenProvider, User};
+use github::{AccountStatus, AccountStore, Client, MemoryAccounts, RepoInfo, TokenProvider, User};
 use retrogit::config::Config;
 use retrogit::protocol::Event;
 use retrogit::state::AppState;
@@ -21,6 +21,7 @@ struct World {
     worker: WorkerHandle,
     highlighter: retrogit::highlight::Service,
     notices: std::sync::mpsc::Sender<retrogit::protocol::AppError>,
+    store: Arc<MemoryAccounts>,
 }
 
 fn status(login: &str, valid: bool) -> AccountStatus {
@@ -33,10 +34,11 @@ fn status(login: &str, valid: bool) -> AccountStatus {
 
 fn world() -> World {
     let server = mockito::Server::new();
+    let store = Arc::new(MemoryAccounts::with("perso", "gho_perso"));
     let worker = spawn(
         WorkerDeps {
             client: Client::with_bases(&server.url(), &server.url()),
-            store: Arc::new(MemoryAccounts::default()),
+            store: store.clone(),
             client_id: String::new(),
             commit_backend: gitcore::CommitBackend::Git2,
             tokens: TokenProvider::without_gh(),
@@ -60,6 +62,7 @@ fn world() -> World {
         worker,
         highlighter: retrogit::highlight::Service::start(|_| {}),
         notices,
+        store,
     }
 }
 
@@ -206,4 +209,36 @@ fn the_clone_window_shows_accounts_and_takes_a_url() {
         h.query_by_label_contains("tool").is_some(),
         "destination from the URL"
     );
+}
+
+#[test]
+fn removing_an_account_asks_first() {
+    let mut w = world();
+    w.state.accounts_dialog = true;
+    let store = w.store.clone();
+    let mut h = harness(w);
+    h.run();
+    let question = s::remove_account_question("perso");
+    assert!(h.query_by_label(&question).is_none());
+    h.get_all_by_label(s::REMOVE).next().unwrap().click();
+    h.run();
+    assert!(h.query_by_label(&question).is_some(), "asks first");
+    assert_eq!(h.state().state.accounts_remove.as_deref(), Some("perso"));
+    h.get_by_label(s::CANCEL).click();
+    h.run();
+    assert!(h.query_by_label(&question).is_none(), "cancelled");
+    assert_eq!(h.state().state.accounts_remove, None);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(store.load("perso").unwrap().is_some(), "kept");
+
+    h.get_all_by_label(s::REMOVE).next().unwrap().click();
+    h.run();
+    h.get_by_label(s::OK).click();
+    h.run();
+    assert!(h.query_by_label(&question).is_none());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while store.load("perso").unwrap().is_some() {
+        assert!(std::time::Instant::now() < deadline, "removed after OK");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 }

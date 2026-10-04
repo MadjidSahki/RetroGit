@@ -429,19 +429,7 @@ fn conversation(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug, d: &PrDetail) 
             }
             // Every line thread, also shown under its line in Files when it can be placed.
             for t in &d.threads {
-                let line = t
-                    .line
-                    .or(t.original_line)
-                    .map(|l| format!(":{l}"))
-                    .unwrap_or_default();
-                let tag = if t.outdated {
-                    format!(" ({})", s::OUTDATED)
-                } else if t.resolved {
-                    format!(" ({})", s::RESOLVED)
-                } else {
-                    String::new()
-                };
-                let title = format!("{}{line}{tag}", t.path);
+                let title = thread_title(t);
                 let body = t
                     .comments
                     .iter()
@@ -560,6 +548,37 @@ pub enum FileRow {
     SuggestionOld(usize, usize, usize),
     SuggestionNew(usize, usize, usize),
     SuggestionApply(usize, usize),
+}
+
+/// Title of a thread in the Conversation tab: `path:N` or `path lines a-b`, ` (old)`
+/// before the line on the old side, then outdated (no longer placed) or resolved.
+pub fn thread_title(t: &github::ReviewThread) -> String {
+    let side = if t.side == github::DiffSide::Left {
+        format!(" ({})", s::OLD_SIDE)
+    } else {
+        String::new()
+    };
+    let line = match thread_range(t).filter(|(a, b)| a < b) {
+        Some((a, b)) => format!(
+            " {}",
+            s::LINES_RANGE
+                .replace("{a}", &a.to_string())
+                .replace("{b}", &b.to_string())
+        ),
+        None => t
+            .line
+            .or(t.original_line)
+            .map(|l| format!(":{l}"))
+            .unwrap_or_default(),
+    };
+    let tag = if t.outdated && t.line.is_none() {
+        format!(" ({})", s::OUTDATED)
+    } else if t.resolved {
+        format!(" ({})", s::RESOLVED)
+    } else {
+        String::new()
+    };
+    format!("{}{side}{line}{tag}", t.path)
 }
 
 /// Lines `start..=end` (first..last) a thread is about.

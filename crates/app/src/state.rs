@@ -206,6 +206,8 @@ pub struct AppState {
     pub accounts: Vec<github::AccountStatus>,
     /// File > Accounts... is open.
     pub accounts_dialog: bool,
+    /// Removing this account, waiting for the user to confirm.
+    pub accounts_remove: Option<String>,
     /// Repository > Account... is open.
     pub repo_account_dialog: bool,
     /// Account of the open repository, once the worker said (`Some(None)`: none).
@@ -275,6 +277,7 @@ impl AppState {
             repo_switch: None,
             accounts: Vec::new(),
             accounts_dialog: false,
+            accounts_remove: None,
             repo_account_dialog: false,
             repo_account: None,
         }

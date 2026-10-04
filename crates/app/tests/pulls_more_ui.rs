@@ -321,3 +321,59 @@ fn hovering_a_multi_line_pending_comment_shows_all_of_it() {
     assert!(h.query_by_label_contains("second line here").is_some());
     assert_eq!(retrogit::ui::pull_detail::comment_hover("one line\n"), None);
 }
+
+fn titled(line: Option<u32>, start: Option<u32>, side: DiffSide) -> ReviewThread {
+    ReviewThread {
+        id: "T".into(),
+        can_resolve: false,
+        can_unresolve: false,
+        path: "src/a.rs".into(),
+        line,
+        original_line: Some(9),
+        side,
+        start_line: start,
+        start_side: start.map(|_| side),
+        outdated: false,
+        resolved: false,
+        comments: Vec::new(),
+    }
+}
+
+#[test]
+fn conversation_titles_show_line_ranges_old_side_and_outdated() {
+    use retrogit::ui::pull_detail::thread_title;
+    assert_eq!(
+        thread_title(&titled(Some(3), None, DiffSide::Right)),
+        "src/a.rs:3"
+    );
+    assert_eq!(
+        thread_title(&titled(Some(3), Some(3), DiffSide::Right)),
+        "src/a.rs:3",
+        "a range of one line"
+    );
+    assert_eq!(
+        thread_title(&titled(Some(5), Some(2), DiffSide::Right)),
+        "src/a.rs lines 2-5"
+    );
+    assert_eq!(
+        thread_title(&titled(Some(4), None, DiffSide::Left)),
+        "src/a.rs (old):4"
+    );
+    assert_eq!(
+        thread_title(&titled(Some(5), Some(2), DiffSide::Left)),
+        "src/a.rs (old) lines 2-5"
+    );
+    let mut gone = titled(None, None, DiffSide::Right);
+    gone.outdated = true;
+    assert_eq!(thread_title(&gone), "src/a.rs:9 (outdated)");
+    let mut moved = titled(Some(3), None, DiffSide::Right);
+    moved.outdated = true;
+    assert_eq!(
+        thread_title(&moved),
+        "src/a.rs:3",
+        "still placed: not outdated"
+    );
+    let mut done = titled(Some(3), None, DiffSide::Right);
+    done.resolved = true;
+    assert_eq!(thread_title(&done), "src/a.rs:3 (resolved)");
+}
