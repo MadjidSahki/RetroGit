@@ -12,6 +12,15 @@ pub trait TokenStore: Send + Sync {
     fn clear(&self) -> Result<(), TokenStoreError>;
 }
 
+/// The token read from an older item is the user's, whatever re-saving it did: a failure
+/// is only logged (the migration is tried again at the next start).
+pub fn keep_after_migration(token: String, resaved: Result<(), TokenStoreError>) -> String {
+    if let Err(e) = resaved {
+        log::warn!("token kept, but not moved to the security tool yet: {e}");
+    }
+    token
+}
+
 /// Comment set on the Keychain items RetroGit writes through `/usr/bin/security`.
 pub const SECURITY_MARKER: &str = "retrogit-security";
 
@@ -110,13 +119,25 @@ mod mac {
             let token = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
             if comment.as_deref() != Some(SECURITY_MARKER) {
                 // Written by an older RetroGit: re-create it through the tool.
-                self.mac_save(&token)?;
+                return Ok(Some(super::keep_after_migration(
+                    token.clone(),
+                    self.mac_save(&token),
+                )));
             }
             Ok(Some(token))
         }
 
         pub(super) fn mac_save(&self, token: &str) -> Result<(), TokenStoreError> {
-            self.mac_clear()?;
+            // Our own items are updated in place (`-U`); an older one is replaced, so that it
+            // belongs to the tool. A failed add after that delete is tried once more.
+            let ours = self.comment()?.flatten().as_deref() == Some(SECURITY_MARKER);
+            if !ours {
+                self.mac_clear()?;
+            }
+            self.add(token).or_else(|_| self.add(token))
+        }
+
+        fn add(&self, token: &str) -> Result<(), TokenStoreError> {
             let mut child = Command::new(SECURITY)
                 .arg("-i")
                 .stdin(Stdio::piped())

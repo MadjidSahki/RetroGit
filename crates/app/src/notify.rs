@@ -51,7 +51,13 @@ pub fn pull_link(l: &PullLink) -> String {
 }
 
 pub fn parse_pull_link(url: &str) -> Option<PullLink> {
-    let query = url.strip_prefix("retrogit://pull?")?;
+    // Scheme and host in any case; Windows may add a `/` before the query.
+    let head = url.get(..15)?;
+    if !head.eq_ignore_ascii_case("retrogit://pull") {
+        return None;
+    }
+    let rest = &url[15..];
+    let query = rest.strip_prefix("/?").or_else(|| rest.strip_prefix('?'))?;
     let (mut repo, mut number, mut account) = (None, None, String::new());
     for pair in query.split('&') {
         let (k, v) = pair.split_once('=')?;

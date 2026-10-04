@@ -21,3 +21,12 @@ fn version_numbers_compare_as_numbers() {
     assert_eq!(parse_version("0.1"), None);
     assert_eq!(parse_version("x.y.z"), None);
 }
+
+#[test]
+fn the_windows_numeric_version_carries_the_release_number() {
+    assert_eq!(
+        retrogit::version::numeric_version("0.1.42"),
+        Some(0x0000_0001_002A_0000)
+    );
+    assert_eq!(retrogit::version::numeric_version("1.2"), None);
+}

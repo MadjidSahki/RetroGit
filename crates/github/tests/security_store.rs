@@ -87,3 +87,11 @@ fn real_keychain_round_trip_and_migration() {
     store.clear().unwrap();
     assert_eq!(store.load().unwrap(), None);
 }
+
+#[test]
+fn a_token_read_during_migration_is_kept_even_if_re_saving_fails() {
+    use github::keep_after_migration;
+    let failed = Err(github::TokenStoreError("keychain locked".into()));
+    assert_eq!(keep_after_migration("gho_t".into(), failed), "gho_t");
+    assert_eq!(keep_after_migration("gho_t".into(), Ok(())), "gho_t");
+}

@@ -1,5 +1,10 @@
 //! Windows: the icon and version information of retrogit.exe.
 
+#[cfg(windows)]
+#[allow(dead_code)]
+#[path = "src/version.rs"]
+mod version;
+
 fn main() {
     println!("cargo:rerun-if-env-changed=RETROGIT_VERSION");
     println!("cargo:rerun-if-changed=assets/RetroGit.ico");
@@ -18,6 +23,11 @@ fn windows_resources() {
         .set("ProductVersion", &version)
         .set("FileVersion", &version)
         .set("OriginalFilename", "retrogit.exe");
+    // The numeric fields (Explorer's "File version") default to Cargo's version.
+    if let Some(n) = version::numeric_version(&version) {
+        res.set_version_info(winresource::VersionInfo::FILEVERSION, n)
+            .set_version_info(winresource::VersionInfo::PRODUCTVERSION, n);
+    }
     if let Err(e) = res.compile() {
         // A missing resource compiler must not break the build: the exe has no icon then.
         println!("cargo:warning=no Windows resources: {e}");

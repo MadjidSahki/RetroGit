@@ -11,3 +11,10 @@ pub fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
     let version = (next()?, next()?, next()?);
     parts.next().is_none().then_some(version)
 }
+
+/// Windows' numeric file version (`major.minor.patch.0` in 16-bit parts).
+pub fn numeric_version(v: &str) -> Option<u64> {
+    let (a, b, c) = parse_version(v)?;
+    let part = |x: u32| u64::from(x.min(0xFFFF));
+    Some(part(a) << 48 | part(b) << 32 | part(c) << 16)
+}

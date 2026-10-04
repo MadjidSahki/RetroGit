@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+log.workspace = true
 ureq.workspace = true
 keyring.workspace = true
 serde.workspace = true

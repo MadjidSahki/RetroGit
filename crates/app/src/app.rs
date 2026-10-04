@@ -165,11 +165,9 @@ impl RetroGitApp {
     /// A folder to open, or a `retrogit://` notification link (from the command line or the
     /// instance channel).
     fn open_requested(&mut self, path: PathBuf) {
-        let text = path.to_string_lossy();
-        if text.starts_with("retrogit://") {
-            self.state.open_link(&text);
-        } else {
-            self.worker.send(Command::OpenRepo(path));
+        match crate::cli::route(path) {
+            crate::cli::Requested::Link(link) => self.state.open_link(&link),
+            crate::cli::Requested::Folder(path) => self.worker.send(Command::OpenRepo(path)),
         }
     }
 

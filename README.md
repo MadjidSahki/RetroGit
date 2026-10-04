@@ -52,7 +52,8 @@ gradient title bar and a pixel font.
   **Repository → Account…**.
 - Tokens live in the macOS Keychain / Windows Credential Manager — never on disk, never in logs.
   On macOS they are stored through Apple's `security` tool, like the GitHub CLI: updates do
-  not ask for your Keychain password again.
+  not ask for your Keychain password again — and, as for `gh` and `git`, other programs you
+  run can read them through that tool.
 - One list of the repositories of all your accounts: filter, then clone with progress and cancel.
 - SSO-aware, and works with organizations that restrict OAuth apps (see [below](#sign-in-to-github)).
 
@@ -146,6 +147,8 @@ Download the latest build from the [Releases](../../releases) page:
   adds it to the Start menu and to *Installed apps* (to uninstall it).
 - Or unzip the **portable** `retrogit.exe` anywhere.
 - The files are not code-signed: if SmartScreen appears, click **More info** → **Run anyway**.
+- The installer is checked automatically on every build; notifications on Windows have not
+  been tried by hand yet — feedback welcome.
 
 [Git](https://git-scm.com/) should be installed: RetroGit uses it for commits, branches and
 network operations, so your hooks, signing, SSH keys and credential helpers keep working.
