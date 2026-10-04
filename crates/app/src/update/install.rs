@@ -11,6 +11,7 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 use super::{InstallKind, Release, SUMS, allowed_url, asset_for, parse_sums};
+use crate::strings as s;
 
 /// Larger downloads are refused.
 pub const MAX_DOWNLOAD: u64 = 200 * 1024 * 1024;
@@ -46,10 +47,10 @@ impl Fetcher {
         let mut url = url.to_string();
         for _ in 0..5 {
             if !(self.allow)(&url) {
-                return Err(format!("refused download from {url}"));
+                return Err(s::ERR_UPDATE_REFUSED_HOST.replace("{url}", &url));
             }
             if cancel.load(Ordering::SeqCst) {
-                return Err("cancelled".into());
+                return Err(s::UPDATE_CANCELLED.into());
             }
             let mut resp = self.agent.get(&url).call().map_err(|e| e.to_string())?;
             let status = resp.status().as_u16();
@@ -63,7 +64,7 @@ impl Fetcher {
                 continue;
             }
             if status != 200 {
-                return Err(format!("download failed: HTTP {status}"));
+                return Err(s::ERR_UPDATE_HTTP.replace("{status}", &status.to_string()));
             }
             let total = resp
                 .headers()
@@ -71,14 +72,14 @@ impl Fetcher {
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<u64>().ok());
             if total.is_some_and(|t| t > max) {
-                return Err("download too large".into());
+                return Err(s::ERR_UPDATE_TOO_LARGE.into());
             }
             let mut reader = resp.body_mut().with_config().limit(max + 1).reader();
             let mut buf = vec![0u8; 64 * 1024];
             let mut done = 0u64;
             loop {
                 if cancel.load(Ordering::SeqCst) {
-                    return Err("cancelled".into());
+                    return Err(s::UPDATE_CANCELLED.into());
                 }
                 let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
                 if n == 0 {
@@ -86,14 +87,14 @@ impl Fetcher {
                 }
                 done += n as u64;
                 if done > max {
-                    return Err("download too large".into());
+                    return Err(s::ERR_UPDATE_TOO_LARGE.into());
                 }
                 sink(&buf[..n])?;
                 progress(done, total);
             }
             return Ok(());
         }
-        Err("too many redirects".into())
+        Err(s::ERR_UPDATE_REDIRECTS.into())
     }
 }
 
@@ -107,11 +108,11 @@ pub fn download_verified(
     cancel: &AtomicBool,
     progress: impl FnMut(u64, Option<u64>),
 ) -> Result<PathBuf, String> {
-    let name = asset_for(kind).ok_or("this copy of RetroGit cannot update itself")?;
+    let name = asset_for(kind).ok_or(s::ERR_UPDATE_CANNOT)?;
     let asset = release
         .asset(name)
-        .ok_or_else(|| format!("the release has no {name}"))?;
-    let sums_asset = release.asset(SUMS).ok_or("the release has no checksums")?;
+        .ok_or_else(|| s::ERR_UPDATE_NO_FILE.replace("{name}", name))?;
+    let sums_asset = release.asset(SUMS).ok_or(s::ERR_UPDATE_NO_SUMS)?;
     let mut sums_text = Vec::new();
     fetcher.get(
         &sums_asset.url,
@@ -126,7 +127,7 @@ pub fn download_verified(
     let sums = parse_sums(&String::from_utf8_lossy(&sums_text));
     let expected = sums
         .get(name)
-        .ok_or_else(|| format!("no checksum for {name}"))?
+        .ok_or_else(|| s::ERR_UPDATE_NO_SUM.replace("{name}", name))?
         .clone();
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = dir.join(name);
@@ -149,7 +150,7 @@ pub fn download_verified(
             .map(|b| format!("{b:02x}"))
             .collect();
         if got != expected {
-            return Err(format!("checksum mismatch for {name}"));
+            return Err(s::ERR_UPDATE_CHECKSUM.replace("{name}", name));
         }
         Ok(())
     })();
@@ -262,32 +263,34 @@ fn run(cmd: &mut Command) -> Result<(), String> {
     }
 }
 
-fn step(s: &Step, relaunch: bool) -> Result<(), String> {
-    match s {
+fn step(st: &Step) -> Result<(), String> {
+    match st {
         Step::Unzip { zip, into } | Step::ExpandZip { zip, into } => {
             let _ = std::fs::remove_dir_all(into);
             std::fs::create_dir_all(into).map_err(|e| e.to_string())?;
-            if matches!(s, Step::Unzip { .. }) {
+            if matches!(st, Step::Unzip { .. }) {
                 run(Command::new("ditto").arg("-x").arg("-k").arg(zip).arg(into))
             } else {
-                let script = format!(
-                    "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
-                    zip.display().to_string().replace('\'', "''"),
-                    into.display().to_string().replace('\'', "''")
-                );
-                run(Command::new("powershell").args([
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    &script,
-                ]))
+                // Paths through the environment: no quoting to get wrong (curly quotes...).
+                let script =
+                    "Expand-Archive -LiteralPath $env:RG_ZIP -DestinationPath $env:RG_INTO -Force";
+                let mut cmd = Command::new("powershell");
+                cmd.args(["-NoProfile", "-NonInteractive", "-Command", script])
+                    .env("RG_ZIP", zip)
+                    .env("RG_INTO", into);
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
+                    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+                }
+                run(&mut cmd)
             }
         }
         Step::CheckApp { app, version } => {
             run(Command::new("codesign")
                 .args(["--verify", "--deep", "--strict"])
                 .arg(app))
-            .map_err(|e| format!("the new app's signature does not hold: {e}"))?;
+            .map_err(|e| s::ERR_UPDATE_SIGNATURE.replace("{why}", &e))?;
             let plist = app.join("Contents/Info.plist");
             let out = Command::new("/usr/libexec/PlistBuddy")
                 .args(["-c", "Print CFBundleVersion"])
@@ -298,7 +301,9 @@ fn step(s: &Step, relaunch: bool) -> Result<(), String> {
             if got == *version {
                 Ok(())
             } else {
-                Err(format!("the downloaded app is {got}, not {version}"))
+                Err(s::ERR_UPDATE_VERSION
+                    .replace("{got}", &got)
+                    .replace("{want}", version))
             }
         }
         Step::RemoveQuarantine(app) => run(Command::new("xattr").arg("-cr").arg(app)),
@@ -320,31 +325,41 @@ fn step(s: &Step, relaunch: bool) -> Result<(), String> {
             let _ = std::fs::remove_dir_all(dir);
             Ok(())
         }
-        Step::Relaunch(argv) if relaunch => {
-            let (prog, args) = argv.split_first().ok_or("nothing to start")?;
-            Command::new(prog)
-                .args(args)
-                .spawn()
-                .map(|_| ())
-                .map_err(|e| e.to_string())
-        }
+        // Started by the app once Git is idle (see `start`).
         Step::Relaunch(_) => Ok(()),
     }
 }
 
-/// Run `steps` in order; on failure, work folders are removed and nothing is restarted.
-pub fn run_plan(steps: &[Step], relaunch: bool) -> Result<(), String> {
-    for s in steps {
-        if let Err(e) = step(s, relaunch) {
-            for s in steps {
-                if let Step::Unzip { into, .. } | Step::ExpandZip { into, .. } = s {
+/// Run `steps` in order and return the command that starts the new version (left to the
+/// app: it waits for Git to be idle). On failure, work folders are removed.
+pub fn run_plan(steps: &[Step]) -> Result<Option<Vec<String>>, String> {
+    let mut relaunch = None;
+    for st in steps {
+        if let Step::Relaunch(argv) = st {
+            relaunch = Some(argv.clone());
+        }
+        if let Err(e) = step(st) {
+            for st in steps {
+                if let Step::Unzip { into, .. } | Step::ExpandZip { into, .. } = st {
                     let _ = std::fs::remove_dir_all(into);
                 }
             }
             return Err(e);
         }
     }
-    Ok(())
+    Ok(relaunch)
+}
+
+/// Start the new version: `open` waits for macOS to launch the app (an error is seen);
+/// a Windows program is started detached.
+pub fn start(argv: &[String]) -> Result<(), String> {
+    let (prog, args) = argv.split_first().ok_or(s::ERR_UPDATE_CANNOT)?;
+    let mut cmd = Command::new(prog);
+    cmd.args(args);
+    if prog == "open" {
+        return run(&mut cmd);
+    }
+    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// At start: what an earlier update left (the `.old` copy, the work folder).
@@ -378,12 +393,14 @@ pub fn can_replace(kind: &InstallKind) -> bool {
 }
 
 /// Download, check and put in place `release`, then start it (on the calling thread).
+/// Returns the command that starts the new version (`None`: nothing to start).
 pub fn install(
     kind: &InstallKind,
     release: &Release,
     cancel: &AtomicBool,
     progress: impl FnMut(u64, Option<u64>),
-) -> Result<(), String> {
+    downloaded: impl FnOnce(),
+) -> Result<Option<Vec<String>>, String> {
     let download = std::env::temp_dir().join(format!("RetroGit-update-{}", std::process::id()));
     let result = (|| {
         let file = download_verified(
@@ -394,8 +411,9 @@ pub fn install(
             cancel,
             progress,
         )?;
+        downloaded();
         let work = work_dir(kind).unwrap_or_else(|| download.join("work"));
-        run_plan(&replace_plan(kind, &file, &work, &release.version), true)
+        run_plan(&replace_plan(kind, &file, &work, &release.version))
     })();
     // The Windows installer still reads its file: it lives in the temporary folder.
     if !(result.is_ok() && *kind == InstallKind::WindowsInstalled) {

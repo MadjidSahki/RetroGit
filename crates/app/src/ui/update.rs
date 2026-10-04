@@ -75,12 +75,21 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             if u.waiting {
                 ui.label(s::UPDATE_WAITS);
             }
+            if let Some(note) = &u.notice {
+                ui.label(note);
+            }
             if u.installing {
+                if u.downloaded {
+                    ui.label(s::UPDATE_INSTALLING);
+                    return;
+                }
                 let (done, total) = u.progress.unwrap_or((0, None));
                 let mb = |b: u64| format!("{:.1}", b as f64 / (1024.0 * 1024.0));
                 let text = match total {
-                    Some(t) => format!("{} / {} MB", mb(done), mb(t)),
-                    None => format!("{} MB", mb(done)),
+                    Some(t) => s::UPDATE_SIZE
+                        .replace("{done}", &mb(done))
+                        .replace("{total}", &mb(t)),
+                    None => s::UPDATE_SIZE_UNKNOWN.replace("{done}", &mb(done)),
                 };
                 ui.add(win95::ProgressBar95::new(
                     total.map(|t| done as f32 / t.max(1) as f32),
@@ -90,6 +99,10 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                 if ui.add(Button95::new(s::CANCEL).min_size(BUTTON)).clicked() {
                     cancel = true;
                 }
+                return;
+            }
+            if cx.state.update.relaunch.is_some() {
+                ui.label(s::UPDATE_WAITS);
                 return;
             }
             ui.add_space(6.0);
@@ -121,7 +134,7 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
         cx.state.update.cancel_requested = true;
     }
     if later || (resp.close_requested && !cx.state.update.installing) {
-        cx.state.update.open = false;
+        cx.state.close_update_window();
     }
     if skip {
         cx.state.skip_update();

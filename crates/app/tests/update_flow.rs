@@ -175,7 +175,7 @@ fn installing_shows_progress_then_quits_or_says_why_not() {
     st.update.install_requested = true;
     assert!(st.take_install(false));
     assert!(st.update.error.is_none(), "a new try clears the error");
-    st.update_finished(Ok(()));
+    st.update_finished(Ok(None));
     assert!(
         st.update.quit,
         "the new version was started: this one quits"
@@ -194,4 +194,60 @@ fn the_window_shows_the_download_and_cancel() {
     h.get_by_label(s::CANCEL).click();
     h.run();
     assert!(h.state().state.update.cancel_requested);
+}
+
+#[test]
+fn skipping_or_closing_while_waiting_cancels_the_install() {
+    let mut st = AppState::new(Config::default());
+    st.update_checked("0.1.39", Ok(release("0.1.42")), true);
+    st.update.install_requested = true;
+    assert!(!st.take_install(true));
+    assert!(st.update.waiting);
+    st.skip_update();
+    assert!(!st.update.waiting && !st.update.install_requested);
+    assert!(!st.take_install(false), "nothing to install any more");
+    assert!(!st.update.installing);
+    // Later while waiting: nothing installs behind the user's back.
+    st.update_checked("0.1.39", Ok(release("0.1.43")), true);
+    st.update.install_requested = true;
+    assert!(!st.take_install(true));
+    st.close_update_window();
+    assert!(!st.take_install(false));
+}
+
+#[test]
+fn the_new_version_starts_only_once_git_is_idle_and_this_copy_quits_only_if_it_did() {
+    let mut st = AppState::new(Config::default());
+    st.update_checked("0.1.39", Ok(release("0.1.42")), true);
+    st.update.install_requested = true;
+    assert!(st.take_install(false));
+    st.update_finished(Ok(Some(vec![
+        "open".into(),
+        "-n".into(),
+        "/A/RetroGit.app".into(),
+    ])));
+    assert!(!st.update.quit, "not before the new version runs");
+    assert_eq!(st.take_relaunch(true), None, "a push is running: wait");
+    assert_eq!(st.take_relaunch(false).unwrap()[0], "open");
+    st.relaunched(Err("open failed".into()));
+    assert!(!st.update.quit, "nothing runs: stay");
+    assert!(st.update.error.as_deref().unwrap().contains("open failed"));
+    st.relaunched(Ok(()));
+    assert!(st.update.quit);
+}
+
+#[test]
+fn a_cancelled_download_is_not_a_failure() {
+    let mut st = AppState::new(Config::default());
+    st.update_checked("0.1.39", Ok(release("0.1.42")), true);
+    st.update.install_requested = true;
+    assert!(st.take_install(false));
+    st.update_downloaded();
+    assert!(
+        st.update.downloaded,
+        "past the download: no Cancel any more"
+    );
+    st.update_finished(Err(s::UPDATE_CANCELLED.to_string()));
+    assert_eq!(st.update.error, None);
+    assert_eq!(st.update.notice.as_deref(), Some(s::UPDATE_CANCELLED));
 }

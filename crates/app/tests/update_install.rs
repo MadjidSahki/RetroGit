@@ -92,6 +92,10 @@ fn the_download_is_checked_against_the_published_checksum() {
     )
     .unwrap_err();
     assert!(err.contains("checksum"), "{err}");
+    assert!(
+        err.starts_with(&retrogit::strings::ERR_UPDATE_CHECKSUM.replace("{name}", file)),
+        "{err}"
+    );
     assert_eq!(std::fs::read_dir(dir2.path()).unwrap().count(), 0);
 }
 
@@ -247,12 +251,17 @@ fn a_mac_app_is_replaced_in_place_or_left_untouched() {
     // Wrong version announced: stopped before touching the installed app.
     let work = installed_dir.join(".RetroGit-update");
     let wrong = replace_plan(&kind, &new_zip, &work, "0.1.100");
-    assert!(run_plan(&wrong, false).is_err());
+    assert!(run_plan(&wrong).is_err());
     assert_eq!(bundle_version(&app), "0.1.98");
     assert!(!work.exists(), "work folder cleaned");
     // Right one: replaced, nothing left beside it.
     let plan = replace_plan(&kind, &new_zip, &work, "0.1.99");
-    run_plan(&plan, false).unwrap();
+    let relaunch = run_plan(&plan).unwrap();
+    assert_eq!(
+        relaunch.unwrap()[0],
+        "open",
+        "the restart is left to the app"
+    );
     assert_eq!(bundle_version(&app), "0.1.99");
     let names: Vec<String> = std::fs::read_dir(&installed_dir)
         .unwrap()
@@ -271,17 +280,14 @@ fn a_failed_swap_puts_the_current_file_back() {
         new: missing,
         current: current.clone(),
     }];
-    assert!(run_plan(&steps, false).is_err());
+    assert!(run_plan(&steps).is_err());
     assert_eq!(std::fs::read_to_string(&current).unwrap(), "old");
     let new = d.path().join("new.exe");
     std::fs::write(&new, "new").unwrap();
-    run_plan(
-        &[Step::Swap {
-            new,
-            current: current.clone(),
-        }],
-        false,
-    )
+    run_plan(&[Step::Swap {
+        new,
+        current: current.clone(),
+    }])
     .unwrap();
     assert_eq!(std::fs::read_to_string(&current).unwrap(), "new");
 }

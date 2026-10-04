@@ -31,6 +31,12 @@ pub struct UpdateView {
     pub quit: bool,
     /// This copy's folder can be written (set at start).
     pub can_replace: bool,
+    /// The download is checked: the replacement runs (no Cancel any more).
+    pub downloaded: bool,
+    /// Command starting the new version, run once Git is idle.
+    pub relaunch: Option<Vec<String>>,
+    /// Neutral note (a cancelled download).
+    pub notice: Option<String>,
 }
 
 impl Default for UpdateView {
@@ -49,6 +55,9 @@ impl Default for UpdateView {
             error: None,
             quit: false,
             can_replace: false,
+            downloaded: false,
+            relaunch: None,
+            notice: None,
         }
     }
 }
@@ -100,6 +109,10 @@ impl AppState {
     /// not running a Git operation).
     pub fn take_install(&mut self, worker_busy: bool) -> bool {
         let u = &mut self.update;
+        if u.available.is_none() {
+            u.install_requested = false;
+            u.waiting = false;
+        }
         if !u.install_requested || u.installing {
             return false;
         }
@@ -112,25 +125,60 @@ impl AppState {
         u.installing = true;
         u.cancel_requested = false;
         u.error = None;
+        u.notice = None;
         u.progress = None;
+        u.downloaded = false;
         true
+    }
+
+    pub fn update_downloaded(&mut self) {
+        self.update.downloaded = true;
+    }
+
+    /// Later, or the window's close box: nothing installs behind the user's back.
+    pub fn close_update_window(&mut self) {
+        let u = &mut self.update;
+        u.open = false;
+        u.install_requested = false;
+        u.waiting = false;
+    }
+
+    /// The command starting the new version, once Git is idle (a push is not cut off).
+    pub fn take_relaunch(&mut self, worker_busy: bool) -> Option<Vec<String>> {
+        if worker_busy {
+            return None;
+        }
+        self.update.relaunch.take()
+    }
+
+    /// The new version was started (this one quits) or could not be.
+    pub fn relaunched(&mut self, result: Result<(), String>) {
+        match result {
+            Ok(()) => self.update.quit = true,
+            Err(why) => self.update.error = Some(s::ERR_UPDATE_RELAUNCH.replace("{why}", &why)),
+        }
     }
 
     pub fn update_progress(&mut self, done: u64, total: Option<u64>) {
         self.update.progress = Some((done, total));
     }
 
-    pub fn update_finished(&mut self, result: Result<(), String>) {
+    pub fn update_finished(&mut self, result: Result<Option<Vec<String>>, String>) {
         let u = &mut self.update;
         u.installing = false;
         u.progress = None;
+        u.downloaded = false;
         match result {
-            Ok(()) => u.quit = true,
+            Ok(Some(argv)) => u.relaunch = Some(argv),
+            Ok(None) => u.quit = true,
+            Err(e) if e == s::UPDATE_CANCELLED => u.notice = Some(e),
             Err(e) => u.error = Some(e),
         }
     }
 
     pub fn skip_update(&mut self) {
+        self.update.install_requested = false;
+        self.update.waiting = false;
         if let Some(r) = self.update.available.take() {
             self.config.updates.skipped = Some(r.version);
             self.config_dirty = true;

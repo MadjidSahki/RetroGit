@@ -11,7 +11,8 @@ use crate::worker::WorkerHandle;
 
 enum InstallMsg {
     Progress(u64, Option<u64>),
-    Done(Result<(), String>),
+    Downloaded,
+    Done(Result<Option<Vec<String>>, String>),
 }
 
 pub struct RetroGitApp {
@@ -223,10 +224,19 @@ impl RetroGitApp {
             std::thread::spawn(move || {
                 let progress_tx = tx.clone();
                 let progress_wake = wake.clone();
-                let result = crate::update::install(&kind, &release, &stop, |done, total| {
-                    let _ = progress_tx.send(InstallMsg::Progress(done, total));
-                    progress_wake.request_repaint();
-                });
+                let downloaded_tx = tx.clone();
+                let result = crate::update::install(
+                    &kind,
+                    &release,
+                    &stop,
+                    |done, total| {
+                        let _ = progress_tx.send(InstallMsg::Progress(done, total));
+                        progress_wake.request_repaint();
+                    },
+                    move || {
+                        let _ = downloaded_tx.send(InstallMsg::Downloaded);
+                    },
+                );
                 let _ = tx.send(InstallMsg::Done(result));
                 wake.request_repaint();
             });
@@ -244,6 +254,7 @@ impl RetroGitApp {
             for m in msgs {
                 match m {
                     InstallMsg::Progress(done, total) => self.state.update_progress(done, total),
+                    InstallMsg::Downloaded => self.state.update_downloaded(),
                     InstallMsg::Done(result) => {
                         if let Err(e) = &result {
                             log::warn!("update failed: {e}");
@@ -253,6 +264,16 @@ impl RetroGitApp {
                         break;
                     }
                 }
+            }
+        }
+        if self.state.update.relaunch.is_some() {
+            if let Some(argv) = self.state.take_relaunch(self.worker.is_busy()) {
+                // Saved first: the new copy reads the settings at start.
+                self.save_config();
+                let result = crate::update::start(&argv);
+                self.state.relaunched(result);
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(500));
             }
         }
         if self.state.update.quit {
