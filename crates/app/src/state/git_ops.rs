@@ -13,6 +13,13 @@ pub enum GitDialog {
     RevertMerge {
         id: String,
         parent: u32,
+        parents: u32,
+    },
+    /// Cherry-pick of a merge: which parent its changes are taken against.
+    CherryPickMerge {
+        id: String,
+        parent: u32,
+        parents: u32,
     },
     Reset {
         id: String,
@@ -124,10 +131,23 @@ impl AppState {
         e: &gitcore::LogEntry,
     ) -> Option<Command> {
         let id = e.id.clone();
+        let parents = u32::try_from(e.parents.len()).unwrap_or(u32::MAX);
         match action {
-            HistoryAction::CherryPick => Some(Command::CherryPick(id)),
-            HistoryAction::Revert if e.parents.len() > 1 => {
-                self.git_dialog = Some(GitDialog::RevertMerge { id, parent: 1 });
+            HistoryAction::CherryPick if parents > 1 => {
+                self.git_dialog = Some(GitDialog::CherryPickMerge {
+                    id,
+                    parent: 1,
+                    parents,
+                });
+                None
+            }
+            HistoryAction::CherryPick => Some(Command::CherryPick { id, mainline: None }),
+            HistoryAction::Revert if parents > 1 => {
+                self.git_dialog = Some(GitDialog::RevertMerge {
+                    id,
+                    parent: 1,
+                    parents,
+                });
                 None
             }
             HistoryAction::Revert => Some(Command::Revert { id, mainline: None }),
@@ -161,12 +181,20 @@ impl AppState {
 
     pub(super) fn apply_git_ops(&mut self, event: Event) {
         match event {
-            Event::OpFinished { outcome, note } => match outcome {
+            Event::OpFinished {
+                outcome,
+                note,
+                stash_kept,
+            } => match outcome {
                 OpOutcome::Done => self.sync.note = Some(note),
                 OpOutcome::Conflicts => {
                     self.tab = Tab::Changes;
-                    self.messages
-                        .push_back(AppError::new(Severity::Info, s::INFO_CONFLICTS));
+                    let info = if stash_kept {
+                        s::INFO_STASH_CONFLICTS
+                    } else {
+                        s::INFO_CONFLICTS
+                    };
+                    self.messages.push_back(AppError::new(Severity::Info, info));
                 }
                 OpOutcome::Empty => {}
             },

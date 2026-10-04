@@ -4,10 +4,11 @@ use std::path::PathBuf;
 
 use gitcore::{
     Change, Choice, ConflictFile, ConflictKind, FileStatus, Head, Operation, Pane, RepoSummary,
+    Side,
 };
 use retrogit::config::Config;
-use retrogit::protocol::Event;
-use retrogit::state::{AppState, ConflictConfirm};
+use retrogit::protocol::{Command, Event};
+use retrogit::state::{AppState, ConflictConfirm, DiscardTarget};
 use retrogit::strings as s;
 
 const MARKED: &str = "a\n<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> x\nb\n<<<<<<< HEAD\nm2\n=======\nt2\n>>>>>>> x\n";
@@ -144,14 +145,71 @@ fn leaving_an_edited_file_asks_first() {
     assert!(!st.changes.open_conflict("b.rs"), "asks");
     assert_eq!(
         st.changes.conflict.as_ref().unwrap().confirm,
-        Some(ConflictConfirm::Discard(Some("b.rs".into())))
+        Some(ConflictConfirm::Discard(DiscardTarget::Conflict(
+            "b.rs".into()
+        )))
     );
-    assert_eq!(st.changes.discard_conflict_edits().as_deref(), Some("b.rs"));
+    assert_eq!(
+        st.changes.discard_conflict_edits(),
+        Some(Command::LoadConflict("b.rs".into()))
+    );
     assert!(st.changes.conflict.is_none());
     assert_eq!(st.changes.conflict_path.as_deref(), Some("b.rs"));
     st.apply(Event::ConflictLoaded(Box::new(file("b.rs", MARKED))));
     st.changes.close_conflict();
     assert!(st.changes.conflict.is_none(), "unedited: closes at once");
+}
+
+#[test]
+fn the_file_clicked_while_editing_opens_after_discarding_the_edits() {
+    let mut st = state();
+    open(&mut st, "a.rs");
+    st.changes.conflict.as_mut().unwrap().edit("typed\n".into());
+    assert_eq!(
+        st.changes.select_file("notes.txt", Side::Staged),
+        None,
+        "asks first"
+    );
+    assert_eq!(
+        st.changes.conflict.as_ref().unwrap().confirm,
+        Some(ConflictConfirm::Discard(DiscardTarget::File {
+            path: "notes.txt".into(),
+            side: Side::Staged
+        }))
+    );
+    assert!(st.changes.shown.is_none());
+    assert_eq!(
+        st.changes.discard_conflict_edits(),
+        Some(Command::LoadDiff {
+            path: "notes.txt".into(),
+            side: Side::Staged
+        })
+    );
+    assert!(st.changes.conflict.is_none());
+    assert!(st.changes.conflict_path.is_none());
+    assert_eq!(
+        st.changes.shown,
+        Some(("notes.txt".to_string(), Side::Staged))
+    );
+    // Without edits the file opens at once, and Close discards to nothing.
+    open(&mut st, "b.rs");
+    assert_eq!(
+        st.changes.select_file("x.txt", Side::Unstaged),
+        Some(Command::LoadDiff {
+            path: "x.txt".into(),
+            side: Side::Unstaged
+        })
+    );
+    assert!(st.changes.conflict.is_none());
+    open(&mut st, "b.rs");
+    st.changes.conflict.as_mut().unwrap().edit("typed\n".into());
+    st.changes.close_conflict();
+    assert_eq!(
+        st.changes.conflict.as_ref().unwrap().confirm,
+        Some(ConflictConfirm::Discard(DiscardTarget::Close))
+    );
+    assert_eq!(st.changes.discard_conflict_edits(), None);
+    assert!(st.changes.conflict.is_none());
 }
 
 #[test]

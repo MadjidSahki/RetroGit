@@ -9,7 +9,7 @@ mod verify;
 pub use check::{Checker, fetch_latest};
 pub use install::{
     Fetcher, MAX_DOWNLOAD, Step, can_replace, cleanup, download_verified, install, old_path,
-    replace_plan, run_plan, start, work_dir,
+    remove_with_retries, replace_plan, resolve_location, run_plan, start, work_dir,
 };
 pub use kind::{InstallKind, asset_for, install_kind};
 pub use release::{Asset, Release, newer, parse_release};

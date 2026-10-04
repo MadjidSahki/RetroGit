@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicBool;
 
 use crate::net::NetAuth;
 use crate::remote::retry_without_token;
-use crate::{GitError, Repo};
+use crate::{GitError, NetProgress, Repo};
 
 /// `(owner, repo)` of a github.com remote URL (HTTPS, `git@github.com:`, `ssh://`).
 pub fn parse_github_slug(url: &str) -> Option<(String, String)> {
@@ -54,10 +54,17 @@ impl Repo {
             .is_some_and(|up| up == id || self.is_ancestor(id, &up))
     }
 
-    /// Whether moving the current branch to `id` drops commits already pushed.
+    /// Whether moving the current branch to `id` drops commits already pushed: the pushed
+    /// commits still on the branch end at the merge base of HEAD and its upstream.
     pub fn reset_drops_pushed(&self, id: &str) -> bool {
         self.upstream_oid()
-            .is_some_and(|up| up != id && !self.is_ancestor(&up, id))
+            .and_then(|up| self.merge_base(&self.rev("HEAD")?, &up))
+            .is_some_and(|base| base != id && !self.is_ancestor(&base, id))
+    }
+
+    fn merge_base(&self, a: &str, b: &str) -> Option<String> {
+        let (a, b) = (git2::Oid::from_str(a).ok()?, git2::Oid::from_str(b).ok()?);
+        self.git().merge_base(a, b).ok().map(|o| o.to_string())
     }
 
     /// Whether `ancestor` is `id` or one of its ancestors.
@@ -92,35 +99,38 @@ impl Repo {
     /// Fetch the head of pull request `number` (works for forks: `refs/pull/N/head`) into
     /// the local branch `pr/N`, without switching to it. An existing `pr/N` moves forward;
     /// after a force-push it follows the pull request only if it has no commits of its own.
-    /// Returns the branch name.
+    /// Returns the branch name, and whether commits of its own kept it from moving to
+    /// the pull request's latest commit.
     pub fn fetch_pull(
         &self,
         number: u64,
         auth: &NetAuth,
+        mut progress: impl FnMut(NetProgress),
         cancel: &AtomicBool,
-    ) -> Result<String, GitError> {
+    ) -> Result<(String, bool), GitError> {
         let branch = format!("pr/{number}");
         let fetched = format!("refs/retrogit/pull/{number}");
         let before = self.rev(&fetched);
         let spec = format!("+refs/pull/{number}/head:{fetched}");
         let args = ["fetch", "--no-tags", "--progress", "origin", spec.as_str()];
-        retry_without_token(auth, |a| self.run_net(a, &args, |_| {}, cancel))?;
+        retry_without_token(auth, |a| self.run_net(a, &args, &mut progress, cancel))?;
         let new = self
             .rev(&fetched)
             .ok_or_else(|| GitError::Other(format!("pull request #{number} was not fetched")))?;
         let local_ref = format!("refs/heads/{branch}");
         let Some(local) = self.rev(&local_ref) else {
             self.git_ok(&["branch", &branch, &new])?;
-            return Ok(branch);
+            return Ok((branch, false));
         };
         if local == new {
-            return Ok(branch);
+            return Ok((branch, false));
         }
         let forward = self.is_ancestor(&local, &new);
         let untouched = before.as_deref() == Some(local.as_str());
         if !forward && !untouched {
-            // Local commits on pr/N: never drop them.
-            return Ok(branch);
+            // Local commits on pr/N: never drop them. Behind unless the pull request's
+            // head is already part of them.
+            return Ok((branch, !self.is_ancestor(&new, &local)));
         }
         let checked_out = self.current_branch().is_some_and(|b| b.name == branch);
         if !checked_out {
@@ -131,7 +141,7 @@ impl Repo {
             // Force-pushed pull request, no local work: follow it, keeping local changes.
             self.git_ok(&["reset", "--keep", &new])?;
         }
-        Ok(branch)
+        Ok((branch, false))
     }
 }
 

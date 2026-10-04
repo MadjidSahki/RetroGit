@@ -4,7 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use retrogit::update::{
-    InstallKind, allowed_url, asset_for, install_kind, newer, parse_release, parse_sums, sha256_hex,
+    InstallKind, allowed_url, asset_for, install_kind, newer, parse_release, parse_sums,
+    remove_with_retries, resolve_location, sha256_hex,
 };
 
 const RELEASE: &str = r###"{
@@ -155,4 +156,71 @@ fn only_github_download_hosts_are_allowed() {
     ] {
         assert!(!allowed_url(bad), "{bad}");
     }
+}
+
+#[test]
+fn redirect_locations_are_resolved_against_the_current_url() {
+    let base = "https://github.com/MadjidSahki/RetroGit/releases/download/v1/x.zip?a=1#f";
+    // Absolute: unchanged.
+    assert_eq!(
+        resolve_location(base, "https://objects.githubusercontent.com/a?b=c"),
+        "https://objects.githubusercontent.com/a?b=c"
+    );
+    // Same scheme, other host (still checked by allowed_url).
+    assert_eq!(
+        resolve_location(base, "//evil.example/x.zip"),
+        "https://evil.example/x.zip"
+    );
+    // Same host.
+    assert_eq!(
+        resolve_location("http://127.0.0.1:8080/dl/f?x=1", "/storage/f"),
+        "http://127.0.0.1:8080/storage/f"
+    );
+    assert_eq!(
+        resolve_location(base, "/storage/y.zip"),
+        "https://github.com/storage/y.zip"
+    );
+    // Relative to the current folder.
+    assert_eq!(
+        resolve_location(base, "y.zip"),
+        "https://github.com/MadjidSahki/RetroGit/releases/download/v1/y.zip"
+    );
+    assert_eq!(
+        resolve_location("https://github.com", "y.zip"),
+        "https://github.com/y.zip"
+    );
+}
+
+#[test]
+fn removing_the_old_exe_is_retried_until_it_works_or_time_is_up() {
+    let p = Path::new("retrogit.old.exe");
+    let tick = std::time::Duration::from_millis(1);
+    // Busy three times (the old copy still runs), then removed.
+    let mut calls = 0;
+    let done = remove_with_retries(p, 10, tick, |_| {
+        calls += 1;
+        if calls <= 3 {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        } else {
+            Ok(())
+        }
+    });
+    assert!(done);
+    assert_eq!(calls, 4);
+    // Still busy after every attempt: given up.
+    let mut calls = 0;
+    let done = remove_with_retries(p, 5, tick, |_| {
+        calls += 1;
+        Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+    });
+    assert!(!done);
+    assert_eq!(calls, 5);
+    // Already gone: nothing more to do.
+    let mut calls = 0;
+    let done = remove_with_retries(p, 5, tick, |_| {
+        calls += 1;
+        Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+    });
+    assert!(done);
+    assert_eq!(calls, 1);
 }

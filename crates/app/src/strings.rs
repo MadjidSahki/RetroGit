@@ -207,6 +207,7 @@ pub const ERR_ACCESS_DENIED: &str = "GitHub refused access to this repository wi
 pub const ERR_GIT_MISSING: &str = "Install Git to use this feature.";
 pub const ERR_NET_AUTH_HELP: &str = "Git could not authenticate. For SSH remotes, add your key to ssh-agent (ssh-add). For HTTPS remotes outside github.com, configure a credential helper.";
 pub const INFO_CONFLICTS: &str = "There are conflicts. Resolve them in your editor, stage the files, then commit (or continue the rebase).";
+pub const INFO_STASH_CONFLICTS: &str = "The stash was applied with conflicts. Resolve them, then stage the files (no commit needed). The stash was kept: drop it when done.";
 pub const INFO_CLONE_CANCELLED: &str = "Clone cancelled.";
 
 // --- Sub-project 4: pull requests ---
@@ -425,6 +426,7 @@ pub const CONFIRM_WHOLE_SIDE: &str =
     "Keep {kept} for the whole file, dropping the changes of {dropped}?";
 pub const CONFLICT_DELETED_IN: &str =
     "This file was deleted in {deleted} and changed in {changed}.";
+pub const CONFIRM_DELETE_FILE: &str = "Delete {path}, dropping the changes of {changed}?";
 pub const CONFIRM_ABORT_EDITS: &str =
     "Abort the whole operation? Your edits to this file and every resolution so far are lost.";
 pub const ERR_SUGGESTION_OUTDATED: &str =
@@ -442,6 +444,24 @@ pub const NOTE_READY: &str = "Ready for review";
 pub const NOTE_DRAFT: &str = "Converted to draft";
 pub const NOTE_SUGGESTION_APPLIED: &str = "Suggestion applied - push to publish";
 pub const SUGGESTION_COMMIT: &str = "Apply suggestion from @{author}";
+pub const SUGGESTION_ALREADY_APPLIED: &str = "This suggestion is already applied.";
+
+/// Commit message of a suggestion: its author is credited as co-author, unless it is
+/// `viewer` (the repository's account) or has no GitHub user id (a bot).
+pub fn suggestion_commit(author: &str, author_id: Option<u64>, viewer: Option<&str>) -> String {
+    let subject = SUGGESTION_COMMIT.replace("{author}", author);
+    match author_id {
+        Some(id) if !viewer.is_some_and(|v| v.eq_ignore_ascii_case(author)) => format!(
+            "{subject}\n\nCo-authored-by: {author} <{id}+{author}@users.noreply.github.com>"
+        ),
+        _ => subject,
+    }
+}
+
+/// Checkout of a pull request whose local branch has commits of its own.
+pub fn pr_branch_behind(branch: &str) -> String {
+    format!("{branch} has local commits: it was not moved to the pull request's latest commit.")
+}
 pub const EDIT_PULL_TITLE: &str = "Edit pull request";
 pub const SAVE: &str = "Save";
 pub const EDIT_PULL: &str = "Edit";
@@ -515,6 +535,30 @@ pub const REVERT_MERGE_HELP: &str = "This is a merge commit: choose the side to 
 pub const KEEP_PARENT_1: &str = "Keep parent 1 (the branch merged into)";
 pub const KEEP_PARENT_2: &str = "Keep parent 2 (the branch that was merged)";
 pub const REVERT: &str = "Revert";
+pub const CHERRY_PICK_MERGE_TITLE: &str = "Cherry-pick a merge";
+pub const CHERRY_PICK_MERGE_HELP: &str =
+    "This is a merge commit: choose the parent to compare it with; the difference is copied.";
+pub const PICK_PARENT_1: &str = "Compare with parent 1 (the branch merged into)";
+pub const PICK_PARENT_2: &str = "Compare with parent 2 (the branch that was merged)";
+pub const CHERRY_PICK: &str = "Cherry-pick";
+
+/// Revert of a merge: label of parent `n` (1-based).
+pub fn keep_parent(n: u32) -> String {
+    match n {
+        1 => KEEP_PARENT_1.to_string(),
+        2 => KEEP_PARENT_2.to_string(),
+        n => format!("Keep parent {n} (a branch that was merged)"),
+    }
+}
+
+/// Cherry-pick of a merge: label of parent `n` (1-based).
+pub fn pick_parent(n: u32) -> String {
+    match n {
+        1 => PICK_PARENT_1.to_string(),
+        2 => PICK_PARENT_2.to_string(),
+        n => format!("Compare with parent {n} (a branch that was merged)"),
+    }
+}
 pub const CREATE_TAG_TITLE: &str = "Create tag";
 pub const TAG_NAME: &str = "Name:";
 pub const TAG_ANNOTATED: &str = "Annotated (with a message)";
@@ -551,6 +595,12 @@ pub const MENU_CREATE_TAG: &str = "Create tag here...";
 pub const MENU_REBASE_UPSTREAM: &str = "Interactive rebase (unpushed commits)...";
 pub const STASH_RETRY_MESSAGE: &str = "RetroGit: local changes put aside";
 pub const STASH_RETRY_TITLE: &str = "Local changes in the way";
+pub const ERR_NOTHING_TO_STASH: &str = "These files block the operation but cannot be stashed (ignored, skip-worktree or a case clash):";
+
+/// `ERR_NOTHING_TO_STASH` followed by the files in the way.
+pub fn nothing_to_stash(files: &[String]) -> String {
+    format!("{ERR_NOTHING_TO_STASH} {}", files.join(", "))
+}
 pub const STASH_RETRY_QUESTION: &str = "Your local changes would be overwritten. Stash them (they stay in the Stashes tab) and try again?";
 pub const STASH_AND_RETRY: &str = "Stash and retry";
 pub const ERR_REBASE_MESSAGE_REFUSED: &str = "The new commit message was refused (hook or signing). The rebase is paused: Continue keeps the old message, Abort cancels the rebase.";
@@ -655,6 +705,7 @@ pub const ERR_UPDATE_TOO_LARGE: &str = "the download is too large";
 pub const ERR_UPDATE_REFUSED_HOST: &str = "refused to download from {url}";
 pub const ERR_UPDATE_HTTP: &str = "the download failed (HTTP {status})";
 pub const ERR_UPDATE_REDIRECTS: &str = "too many redirects";
+pub const ERR_UPDATE_STALLED: &str = "the download stopped receiving data";
 pub const ERR_UPDATE_CANNOT: &str = "this copy of RetroGit cannot update itself";
 pub const ERR_UPDATE_NO_FILE: &str = "the release has no {name}";
 pub const ERR_UPDATE_NO_SUMS: &str = "the release has no checksums";

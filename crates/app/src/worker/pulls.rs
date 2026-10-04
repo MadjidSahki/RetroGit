@@ -186,6 +186,7 @@ impl Worker {
                 expected,
                 replacement,
                 author,
+                author_id,
             } => self.apply_suggestion(
                 number,
                 &head_branch,
@@ -194,7 +195,7 @@ impl Worker {
                 (start, end),
                 &expected,
                 &replacement,
-                &author,
+                (&author, author_id),
             ),
             Command::SetLabels {
                 slug,
@@ -360,7 +361,7 @@ impl Worker {
         (start, end): (u32, u32),
         expected: &[String],
         replacement: &str,
-        author: &str,
+        (author, author_id): (&str, Option<u64>),
     ) {
         let Some(repo) = self.open_current(Op::PullAction) else {
             return;
@@ -382,7 +383,11 @@ impl Worker {
                 AppError::new(Severity::Info, s::WHY_PULL_FIRST),
             );
         }
-        let message = s::SUGGESTION_COMMIT.replace("{author}", author);
+        let viewer = repo
+            .github_slug()
+            .and_then(|slug| self.account_for(&slug))
+            .map(|a| a.login);
+        let message = s::suggestion_commit(author, author_id, viewer.as_deref());
         let result = repo.apply_suggestion(
             path,
             start as usize,
@@ -402,59 +407,76 @@ impl Worker {
     }
 
     /// Same-repository pull requests: their branch, tracking `origin`. Forks: `pr/N`.
+    /// The fetch shows progress and can be cancelled like Fetch.
     fn checkout_pull(&mut self, number: u64, head: Option<String>) {
-        let Some(repo) = self.open_current(Op::PullAction) else {
-            return;
-        };
-        let auth = self.repo_net_auth();
-        let never = std::sync::atomic::AtomicBool::new(false);
-        let target = match head {
-            Some(branch) => repo.fetch(&auth, |_| {}, &never).map(|()| {
-                let local = repo
+        let Some((repo, fetched)) = self.network(SyncOp::Fetch, false, |r, a, p, c| match &head {
+            Some(branch) => r.fetch(a, p, c).map(|()| {
+                let local = r
                     .branches()
                     .unwrap_or_default()
                     .iter()
-                    .any(|b| !b.remote && b.name == branch);
-                if local {
-                    branch
+                    .any(|b| !b.remote && b.name == *branch);
+                let name = if local {
+                    branch.clone()
                 } else {
                     format!("origin/{branch}")
-                }
+                };
+                (name, false)
             }),
-            None => repo.fetch_pull(number, &auth, &never),
+            None => r.fetch_pull(number, a, p, c),
+        }) else {
+            return;
         };
         drop(repo);
-        match target {
-            Ok(name) => {
-                // Local changes in the way: the usual "stash and switch" dialog appears.
-                self.switch_branch(&name, false);
-                let branch = name.trim_start_matches("origin/");
-                let repo = self.open_current(Op::PullAction);
-                let switched = repo
-                    .as_ref()
-                    .and_then(|r| r.current_branch())
-                    .is_some_and(|b| b.name == branch);
-                // A branch checked out before may be behind the pull request: follow
-                // `origin` when the local branch has no commits of its own.
-                if switched
-                    && !name.starts_with("origin/")
-                    && !branch.starts_with("pr/")
-                    && let Some(r) = &repo
-                {
-                    match r.fast_forward(&format!("origin/{branch}")) {
-                        Ok(true) => self.after_ref_change(r),
-                        Ok(false) => {}
-                        Err(e) => self.fail(Op::PullAction, AppError::from_git(&e)),
-                    }
+        let (name, mut behind) = match fetched {
+            Ok(target) => target,
+            Err(e) => return self.net_failed(SyncOp::Fetch, false, &e),
+        };
+        self.emit(Event::SyncFinished {
+            op: SyncOp::Fetch,
+            ok: true,
+        });
+        // Local changes in the way: the usual "stash and switch" dialog appears.
+        self.switch_branch(&name, false);
+        let branch = name.trim_start_matches("origin/");
+        let repo = self.open_current(Op::PullAction);
+        let switched = repo
+            .as_ref()
+            .and_then(|r| r.current_branch())
+            .is_some_and(|b| b.name == branch);
+        // A branch checked out before may be behind the pull request: follow `origin`
+        // when the local branch has no commits of its own.
+        if switched
+            && !name.starts_with("origin/")
+            && !branch.starts_with("pr/")
+            && let Some(r) = &repo
+        {
+            let upstream = format!("origin/{branch}");
+            match r.fast_forward(&upstream) {
+                Ok(true) => self.after_ref_change(r),
+                // Not moved while origin has commits HEAD lacks: local commits.
+                Ok(false) => {
+                    let exists = r
+                        .branches()
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|b| b.remote && b.name == upstream);
+                    behind = exists && !r.head_descends_from(&upstream);
                 }
-                if switched {
-                    self.emit(Event::PullActionDone {
-                        number,
-                        note: format!("{} {branch}", s::NOTE_CHECKED_OUT),
-                    });
-                }
+                Err(e) => self.fail(Op::PullAction, AppError::from_git(&e)),
             }
-            Err(e) => self.fail(Op::PullAction, AppError::from_git(&e)),
+        }
+        if switched {
+            if behind {
+                self.fail(
+                    Op::PullAction,
+                    AppError::new(Severity::Warning, &s::pr_branch_behind(branch)),
+                );
+            }
+            self.emit(Event::PullActionDone {
+                number,
+                note: format!("{} {branch}", s::NOTE_CHECKED_OUT),
+            });
         }
     }
 }

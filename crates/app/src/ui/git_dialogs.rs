@@ -38,7 +38,16 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
     };
     // `Some(d)`: keep the dialog (possibly changed); `None`: close it.
     let keep: Option<GitDialog> = match dialog {
-        GitDialog::RevertMerge { id, parent } => revert_merge(egui_ctx, cx, id, parent),
+        GitDialog::RevertMerge {
+            id,
+            parent,
+            parents,
+        } => merge_parent(egui_ctx, cx, false, id, parent, parents),
+        GitDialog::CherryPickMerge {
+            id,
+            parent,
+            parents,
+        } => merge_parent(egui_ctx, cx, true, id, parent, parents),
         GitDialog::Reset {
             id,
             mode,
@@ -86,7 +95,7 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                 s::STASH_AND_RETRY,
             ) {
                 Some(true) => {
-                    cx.worker.send(Command::StashAndRetry(retry));
+                    cx.worker.send(Command::StashAndRetry { retry, files });
                     None
                 }
                 Some(false) => None,
@@ -151,22 +160,40 @@ fn confirm_with(egui_ctx: &egui::Context, title: &str, question: &str, ok: &str)
     result
 }
 
-fn revert_merge(
+/// Revert (`cherry_pick: false`) or cherry-pick of a merge: which parent to use.
+fn merge_parent(
     egui_ctx: &egui::Context,
     cx: &mut Ctx<'_>,
+    cherry_pick: bool,
     id: String,
     mut parent: u32,
+    parents: u32,
 ) -> Option<GitDialog> {
+    let (dialog_id, title, help, button) = if cherry_pick {
+        (
+            "cherry_pick_merge",
+            s::CHERRY_PICK_MERGE_TITLE,
+            s::CHERRY_PICK_MERGE_HELP,
+            s::CHERRY_PICK,
+        )
+    } else {
+        (
+            "revert_merge",
+            s::REVERT_MERGE_TITLE,
+            s::REVERT_MERGE_HELP,
+            s::REVERT,
+        )
+    };
     let (mut ok, mut cancel) = (false, false);
-    let r = Dialog::new("revert_merge", s::REVERT_MERGE_TITLE)
+    let r = Dialog::new(dialog_id, title)
         .width(420.0)
         .show(egui_ctx, |ui| {
-            ui.add(egui::Label::new(s::REVERT_MERGE_HELP).wrap());
-            for p in [1, 2] {
-                let label = if p == 1 {
-                    s::KEEP_PARENT_1
+            ui.add(egui::Label::new(help).wrap());
+            for p in 1..=parents {
+                let label = if cherry_pick {
+                    s::pick_parent(p)
                 } else {
-                    s::KEEP_PARENT_2
+                    s::keep_parent(p)
                 };
                 if ui.selectable_label(parent == p, label).clicked() {
                     parent = p;
@@ -174,21 +201,35 @@ fn revert_merge(
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ok = ui.add(Button95::new(s::REVERT).min_size(BUTTON)).clicked();
+                ok = ui.add(Button95::new(button).min_size(BUTTON)).clicked();
                 cancel = ui.add(Button95::new(s::CANCEL).min_size(BUTTON)).clicked();
             });
         });
     if cancel || r.close_requested {
         return None;
     }
+    let mainline = Some(parent);
     if ok {
-        cx.worker.send(Command::Revert {
-            id,
-            mainline: Some(parent),
+        cx.worker.send(if cherry_pick {
+            Command::CherryPick { id, mainline }
+        } else {
+            Command::Revert { id, mainline }
         });
         return None;
     }
-    Some(GitDialog::RevertMerge { id, parent })
+    Some(if cherry_pick {
+        GitDialog::CherryPickMerge {
+            id,
+            parent,
+            parents,
+        }
+    } else {
+        GitDialog::RevertMerge {
+            id,
+            parent,
+            parents,
+        }
+    })
 }
 
 fn reset(
@@ -443,6 +484,7 @@ fn delete_tag(
     back_to_tags: bool,
 ) -> Option<GitDialog> {
     let (mut ok, mut cancel) = (false, false);
+    let idle = cx.state.sync.running.is_none();
     let r = Dialog::new("delete_tag", s::DELETE_TAG_TITLE)
         .width(380.0)
         .show(egui_ctx, |ui| {
@@ -450,7 +492,9 @@ fn delete_tag(
             checkbox(ui, &mut remote, s::DELETE_TAG_REMOTE);
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ok = ui.add(Button95::new(s::DELETE).min_size(BUTTON)).clicked();
+                ok = ui
+                    .add(Button95::new(s::DELETE).min_size(BUTTON).enabled(idle))
+                    .clicked();
                 cancel = ui.add(Button95::new(s::CANCEL).min_size(BUTTON)).clicked();
             });
         });
@@ -548,8 +592,14 @@ fn tags(
                     });
                 }
                 let has = selected.is_some();
+                // One network operation at a time (Cancel is in the progress window).
+                let idle = cx.state.sync.running.is_none();
                 if ui
-                    .add(Button95::new(s::DELETE).min_size(BUTTON).enabled(has))
+                    .add(
+                        Button95::new(s::DELETE)
+                            .min_size(BUTTON)
+                            .enabled(has && idle),
+                    )
                     .clicked()
                     && let Some(name) = selected.clone()
                 {
@@ -560,14 +610,22 @@ fn tags(
                     });
                 }
                 if ui
-                    .add(Button95::new(s::PUSH_TAG).min_size(BUTTON).enabled(has))
+                    .add(
+                        Button95::new(s::PUSH_TAG)
+                            .min_size(BUTTON)
+                            .enabled(has && idle),
+                    )
                     .clicked()
                 {
                     cx.worker.send(Command::PushTags(selected.clone()));
                     status = Some(s::PUSHING_TAGS.to_string());
                 }
                 if ui
-                    .add(Button95::new(s::PUSH_ALL_TAGS).min_size(BUTTON))
+                    .add(
+                        Button95::new(s::PUSH_ALL_TAGS)
+                            .min_size(BUTTON)
+                            .enabled(idle),
+                    )
                     .clicked()
                 {
                     cx.worker.send(Command::PushTags(None));

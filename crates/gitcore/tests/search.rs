@@ -147,6 +147,20 @@ fn the_refs_to_explore() {
 }
 
 #[test]
+fn tags_to_something_else_than_a_commit_are_not_explored() {
+    let Some((d, r)) = repo() else { return };
+    commit_as(d.path(), "Ada", "a.txt", "a\n", "one");
+    git(
+        d.path(),
+        &["tag", "-a", "-m", "t", "treetag", "HEAD^{tree}"],
+    );
+    git(d.path(), &["tag", "-a", "-m", "v", "v1"]);
+    git(d.path(), &["tag", "v2"]);
+    let names: Vec<String> = r.explore_refs().into_iter().map(|x| x.name).collect();
+    assert_eq!(names, ["HEAD", "main", "v1", "v2"]);
+}
+
+#[test]
 fn grep_output_is_parsed() {
     let id = "a".repeat(40);
     let out = format!("{id}:src/x.rs\x002\x00  let x = 1;\r\n{id}:a:b.txt\x0010\x00t\n");

@@ -36,15 +36,31 @@ fn a_finished_operation_notes_it_and_conflicts_lead_to_changes() {
     st.apply(Event::OpFinished {
         outcome: OpOutcome::Done,
         note: s::NOTE_CHERRY_PICKED.into(),
+        stash_kept: false,
     });
     assert_eq!(st.sync.note.as_deref(), Some(s::NOTE_CHERRY_PICKED));
     assert_eq!(st.tab, Tab::History);
     st.apply(Event::OpFinished {
         outcome: OpOutcome::Conflicts,
         note: s::NOTE_CHERRY_PICKED.into(),
+        stash_kept: false,
     });
     assert_eq!(st.tab, Tab::Changes);
     assert_eq!(st.messages.back().unwrap().message, s::INFO_CONFLICTS);
+}
+
+#[test]
+fn a_stash_applied_with_conflicts_says_it_was_kept() {
+    let mut st = state();
+    st.tab = Tab::History;
+    st.apply(Event::OpFinished {
+        outcome: OpOutcome::Conflicts,
+        note: s::NOTE_STASH_APPLIED.into(),
+        stash_kept: true,
+    });
+    assert_eq!(st.tab, Tab::Changes);
+    assert_eq!(st.messages.back().unwrap().message, s::INFO_STASH_CONFLICTS);
+    assert_eq!(st.messages.len(), 1);
 }
 
 #[test]
@@ -159,6 +175,33 @@ fn log_entry(parents: usize) -> gitcore::LogEntry {
 }
 
 #[test]
+fn merges_offer_every_parent_for_revert_and_cherry_pick() {
+    use retrogit::state::{GitDialog, HistoryAction};
+    let mut st = retrogit::state::AppState::new(retrogit::config::Config::default());
+    assert!(
+        st.history_action(HistoryAction::Revert, &log_entry(3))
+            .is_none()
+    );
+    assert!(matches!(
+        st.git_dialog.take(),
+        Some(GitDialog::RevertMerge {
+            parent: 1,
+            parents: 3,
+            ..
+        })
+    ));
+    assert!(
+        st.history_action(HistoryAction::CherryPick, &log_entry(2))
+            .is_none(),
+        "a merge asks for the parent first"
+    );
+    assert!(matches!(
+        st.git_dialog,
+        Some(GitDialog::CherryPickMerge { ref id, parent: 1, parents: 2 }) if id == "c0ffee"
+    ));
+}
+
+#[test]
 fn history_menu_actions_open_dialogs_or_send_commands() {
     use retrogit::protocol::Command;
     use retrogit::state::{GitDialog, HistoryAction};
@@ -166,7 +209,7 @@ fn history_menu_actions_open_dialogs_or_send_commands() {
     let plain = log_entry(1);
     assert!(matches!(
         st.history_action(HistoryAction::CherryPick, &plain),
-        Some(Command::CherryPick(id)) if id == "c0ffee"
+        Some(Command::CherryPick { id, mainline: None }) if id == "c0ffee"
     ));
     assert!(matches!(
         st.history_action(HistoryAction::Revert, &plain),
@@ -216,12 +259,18 @@ fn a_blocked_operation_opens_the_stash_and_retry_dialog() {
     use retrogit::state::GitDialog;
     let mut st = retrogit::state::AppState::new(retrogit::config::Config::default());
     st.apply(Event::OpBlocked {
-        retry: Box::new(Command::CherryPick("x".into())),
+        retry: Box::new(Command::CherryPick {
+            id: "x".into(),
+            mainline: None,
+        }),
         files: vec!["a.txt".into()],
     });
     assert!(matches!(
         &st.git_dialog,
-        Some(GitDialog::StashRetry { retry, files }) if **retry == Command::CherryPick("x".into()) && files == &["a.txt"]
+        Some(GitDialog::StashRetry { retry, files }) if **retry == Command::CherryPick {
+            id: "x".into(),
+            mainline: None,
+        } && files == &["a.txt"]
     ));
 }
 

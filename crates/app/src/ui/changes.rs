@@ -220,22 +220,10 @@ fn request_discard_files(cx: &mut Ctx<'_>, files: &[FileStatus]) {
 }
 
 fn select_file(cx: &mut Ctx<'_>, path: &str, side: Side) {
-    let c = &mut cx.state.changes;
-    if c.conflict_path.is_some() {
-        c.close_conflict();
-        if c.conflict_path.is_some() {
-            return; // edited: the user is asked first
-        }
+    // With an edited conflict, the user is asked first (the file opens on OK).
+    if let Some(cmd) = cx.state.changes.select_file(path, side) {
+        cx.worker.send(cmd);
     }
-    if c.shown.as_ref() != Some(&(path.to_string(), side)) {
-        c.shown = Some((path.to_string(), side));
-        c.diff = None;
-        c.selected_lines.clear();
-    }
-    cx.worker.send(Command::LoadDiff {
-        path: path.to_string(),
-        side,
-    });
 }
 
 const FILE_COLUMNS: &[Column] = &[Column {

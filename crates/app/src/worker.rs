@@ -61,9 +61,12 @@ impl WorkerHandle {
         match cmd {
             Command::StartDeviceFlow => self.cancel_flow.store(false, Ordering::SeqCst),
             Command::Clone { .. } => self.cancel_clone.store(false, Ordering::SeqCst),
-            Command::Fetch { .. } | Command::Pull(_) | Command::Push(_) => {
-                self.cancel_net.store(false, Ordering::SeqCst)
-            }
+            Command::Fetch { .. }
+            | Command::Pull(_)
+            | Command::Push(_)
+            | Command::PushTags(_)
+            | Command::DeleteTag { .. }
+            | Command::CheckoutPull { .. } => self.cancel_net.store(false, Ordering::SeqCst),
             // At most one refresh of each kind waiting in the queue; a refs refresh also
             // refreshes the status.
             Command::RefreshRefs if self.refs_pending.swap(true, Ordering::SeqCst) => return,
@@ -345,7 +348,7 @@ impl Worker {
             Command::ForcePush => self.force_push(),
             Command::AbortOperation => self.abort_operation(),
             Command::ContinueRebase => self.continue_rebase(),
-            op @ (Command::CherryPick(_)
+            op @ (Command::CherryPick { .. }
             | Command::Revert { .. }
             | Command::Reset { .. }
             | Command::LoadResetInfo(_)
@@ -364,7 +367,7 @@ impl Worker {
             | Command::CreateTag { .. }
             | Command::DeleteTag { .. }
             | Command::PushTags(_)
-            | Command::StashAndRetry(_)) => self.handle_git_ops(op),
+            | Command::StashAndRetry { .. }) => self.handle_git_ops(op),
             pr @ (Command::LoadPulls { .. }
             | Command::LoadPull { .. }
             | Command::RefreshPull { .. }

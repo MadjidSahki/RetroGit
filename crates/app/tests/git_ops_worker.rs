@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use github::{Client, MemoryAccounts, TokenProvider};
-use retrogit::protocol::{Command, Event};
+use retrogit::protocol::{Command, Event, SyncOp};
 use retrogit::worker::{WorkerDeps, WorkerHandle, spawn};
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -92,7 +92,10 @@ fn cherry_pick_revert_and_reset_reload_the_history() {
     let fix = commit(&dir, "b.txt", "b\n", "the fix");
     git(&dir, &["switch", "-q", "main"]);
     let w = start(&dir);
-    w.send(Command::CherryPick(fix));
+    w.send(Command::CherryPick {
+        id: fix,
+        mainline: None,
+    });
     let evs = until(&w, |e| matches!(e, Event::OpFinished { .. }));
     assert!(
         evs.iter().any(|e| matches!(e, Event::LogLoaded { .. })),
@@ -122,7 +125,10 @@ fn a_cherry_pick_that_conflicts_says_so() {
     git(&dir, &["switch", "-q", "main"]);
     commit(&dir, "a.txt", "mine\n", "mine");
     let w = start(&dir);
-    w.send(Command::CherryPick(theirs));
+    w.send(Command::CherryPick {
+        id: theirs,
+        mainline: None,
+    });
     let evs = until(&w, |e| matches!(e, Event::OpFinished { .. }));
     assert!(matches!(
         evs.last(),
@@ -220,7 +226,10 @@ fn an_operation_blocked_by_local_changes_offers_stash_and_retry() {
     git(&dir, &["switch", "-q", "main"]);
     std::fs::write(dir.join("a.txt"), "dirty\n").unwrap();
     let w = start(&dir);
-    let pick = Command::CherryPick(theirs);
+    let pick = Command::CherryPick {
+        id: theirs,
+        mainline: None,
+    };
     w.send(pick.clone());
     let evs = until(&w, |e| matches!(e, Event::OpBlocked { .. }));
     match evs.last() {
@@ -230,7 +239,10 @@ fn an_operation_blocked_by_local_changes_offers_stash_and_retry() {
         }
         other => panic!("{other:?}"),
     }
-    w.send(Command::StashAndRetry(Box::new(pick)));
+    w.send(Command::StashAndRetry {
+        retry: Box::new(pick),
+        files: vec!["a.txt".into()],
+    });
     until(&w, |e| matches!(e, Event::OpFinished { .. }));
     assert_eq!(git(&dir, &["log", "-1", "--format=%s"]), "theirs\n");
     assert_eq!(
@@ -238,6 +250,133 @@ fn an_operation_blocked_by_local_changes_offers_stash_and_retry() {
         1,
         "changes kept in a stash"
     );
+}
+
+/// Events until the next error, then whatever follows within half a second.
+fn until_error(w: &WorkerHandle) -> Vec<Event> {
+    let mut evs = until(w, |e| matches!(e, Event::Error { .. }));
+    while let Ok(ev) = w.events.recv_timeout(Duration::from_millis(500)) {
+        evs.push(ev);
+    }
+    evs
+}
+
+#[test]
+fn stash_and_retry_with_nothing_stashable_says_so_and_does_not_ask_again() {
+    let Some((_d, dir)) = repo() else { return };
+    git(&dir, &["switch", "-q", "-c", "other"]);
+    let theirs = commit(&dir, "a.txt", "theirs\n", "theirs");
+    git(&dir, &["switch", "-q", "main"]);
+    // A skip-worktree file blocks the cherry-pick but `git stash` does not see it.
+    git(&dir, &["update-index", "--skip-worktree", "a.txt"]);
+    std::fs::write(dir.join("a.txt"), "dirty\n").unwrap();
+    let w = start(&dir);
+    let pick = Command::CherryPick {
+        id: theirs,
+        mainline: None,
+    };
+    w.send(pick.clone());
+    let evs = until(&w, |e| matches!(e, Event::OpBlocked { .. }));
+    let Some(Event::OpBlocked { files, .. }) = evs.last() else {
+        panic!("{evs:?}")
+    };
+    assert_eq!(files, &["a.txt"]);
+    w.send(Command::StashAndRetry {
+        retry: Box::new(pick),
+        files: files.clone(),
+    });
+    let evs = until_error(&w);
+    assert!(
+        !evs.iter().any(|e| matches!(e, Event::OpBlocked { .. })),
+        "{evs:?}"
+    );
+    let Some(Event::Error { error, .. }) = evs.iter().find(|e| matches!(e, Event::Error { .. }))
+    else {
+        unreachable!()
+    };
+    assert!(
+        error
+            .message
+            .starts_with(retrogit::strings::ERR_NOTHING_TO_STASH),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.message,
+        retrogit::strings::nothing_to_stash(&["a.txt".into()])
+    );
+    assert_eq!(git(&dir, &["log", "-1", "--format=%s"]), "base\n");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("a.txt")).unwrap(),
+        "dirty\n"
+    );
+}
+
+#[test]
+fn stash_and_retry_blocked_again_gives_an_error_and_keeps_the_stash() {
+    let Some((_d, dir)) = repo() else { return };
+    commit(&dir, "b.txt", "b\n", "add b");
+    git(&dir, &["switch", "-q", "-c", "other"]);
+    std::fs::write(dir.join("a.txt"), "theirs\n").unwrap();
+    let theirs = commit(&dir, "b.txt", "theirs\n", "theirs");
+    git(&dir, &["switch", "-q", "main"]);
+    // a.txt can be stashed, b.txt (skip-worktree) cannot.
+    std::fs::write(dir.join("a.txt"), "dirty\n").unwrap();
+    git(&dir, &["update-index", "--skip-worktree", "b.txt"]);
+    std::fs::write(dir.join("b.txt"), "dirty\n").unwrap();
+    let w = start(&dir);
+    let pick = Command::CherryPick {
+        id: theirs,
+        mainline: None,
+    };
+    w.send(pick.clone());
+    let evs = until(&w, |e| matches!(e, Event::OpBlocked { .. }));
+    let Some(Event::OpBlocked { files, .. }) = evs.last() else {
+        panic!("{evs:?}")
+    };
+    w.send(Command::StashAndRetry {
+        retry: Box::new(pick),
+        files: files.clone(),
+    });
+    let evs = until_error(&w);
+    assert!(
+        !evs.iter().any(|e| matches!(e, Event::OpBlocked { .. })),
+        "{evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(e, Event::Error { error, .. }
+            if error.message == retrogit::strings::ERR_WOULD_OVERWRITE)),
+        "{evs:?}"
+    );
+    assert_eq!(
+        git(&dir, &["stash", "list"]).lines().count(),
+        1,
+        "stash kept"
+    );
+    assert_eq!(git(&dir, &["log", "-1", "--format=%s"]), "add b\n");
+}
+
+#[test]
+fn a_stash_popped_with_conflicts_is_reported_as_kept() {
+    let Some((_d, dir)) = repo() else { return };
+    std::fs::write(dir.join("a.txt"), "stashed\n").unwrap();
+    git(&dir, &["stash", "push", "-q", "-m", "wip"]);
+    commit(&dir, "a.txt", "committed\n", "change a");
+    let id = git(&dir, &["rev-parse", "stash@{0}"]).trim().to_string();
+    let w = start(&dir);
+    w.send(Command::StashPop { index: 0, id });
+    let evs = until(&w, |e| matches!(e, Event::OpFinished { .. }));
+    assert!(
+        matches!(
+            evs.last(),
+            Some(Event::OpFinished {
+                outcome: gitcore::OpOutcome::Conflicts,
+                stash_kept: true,
+                ..
+            })
+        ),
+        "{evs:?}"
+    );
+    assert_eq!(git(&dir, &["stash", "list"]).lines().count(), 1);
 }
 
 #[test]
@@ -308,4 +447,92 @@ fn pushing_a_tag_reports_in_the_tags_window() {
         evs.last()
     );
     assert!(git(&bare, &["tag"]).contains("v1"));
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            Event::SyncStarted {
+                op: SyncOp::Push,
+                background: false
+            }
+        )),
+        "progress shown: {evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            Event::SyncFinished {
+                op: SyncOp::Push,
+                ok: true
+            }
+        )),
+        "{evs:?}"
+    );
+}
+
+/// A server that refuses to delete a ref it does not have, with git's own message.
+fn refuse_deleting_missing_refs(bare: &Path) {
+    let hooks = bare.join("hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    let hook = hooks.join("pre-receive");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\nwhile read old new ref; do\n  case \"$old$new\" in\n    *[!0]*) ;;\n    *) echo \"error: unable to delete '$ref': remote ref does not exist\" >&2; exit 1 ;;\n  esac\ndone\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    git(bare, &["config", "core.hooksPath", hooks.to_str().unwrap()]);
+}
+
+#[test]
+fn deleting_on_origin_a_tag_never_pushed_deletes_it_locally() {
+    let Some((d, dir)) = repo() else { return };
+    let bare = d.path().join("origin.git");
+    git(d.path(), &["init", "-q", "--bare", bare.to_str().unwrap()]);
+    refuse_deleting_missing_refs(&bare);
+    git(&dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git(&dir, &["tag", "v1"]);
+    git(&dir, &["tag", "v2"]);
+    let w = start(&dir);
+    w.send(Command::DeleteTag {
+        name: "v1".into(),
+        remote: true,
+    });
+    let evs = until(&w, |e| matches!(e, Event::TagsLoaded(_)));
+    assert!(
+        matches!(evs.last(), Some(Event::TagsLoaded(t)) if t.len() == 1 && t[0].name == "v2"),
+        "{evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            Event::SyncStarted {
+                op: SyncOp::Push,
+                ..
+            }
+        )),
+        "{evs:?}"
+    );
+    // A real failure keeps the local tag.
+    git(
+        &dir,
+        &["remote", "set-url", "origin", "/nowhere/origin.git"],
+    );
+    w.send(Command::DeleteTag {
+        name: "v2".into(),
+        remote: true,
+    });
+    let evs = until(&w, |e| matches!(e, Event::TagsLoaded(_)));
+    assert!(
+        evs.iter().any(|e| matches!(e, Event::Error { .. })),
+        "{evs:?}"
+    );
+    assert!(
+        matches!(evs.last(), Some(Event::TagsLoaded(t)) if t.len() == 1),
+        "{evs:?}"
+    );
+    assert!(git(&dir, &["tag"]).contains("v2"));
 }

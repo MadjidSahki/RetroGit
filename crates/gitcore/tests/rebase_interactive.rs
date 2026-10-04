@@ -116,6 +116,67 @@ fn a_conflict_stops_the_rebase_until_continued() {
     assert_eq!(subjects(dir), ["base", "first", "second"], "abort restores");
 }
 
+/// base, then `first` and `second` both changing f.txt; the plan replays them reversed.
+fn conflicting(dir: &Path) -> (Repo, String, Vec<TodoItem>) {
+    git(dir, &["-c", "init.defaultBranch=main", "init", "-q"]);
+    configure(dir);
+    commit(dir, "f.txt", "base\n", "base");
+    let base = git(dir, &["rev-parse", "HEAD"]).trim().to_string();
+    commit(dir, "f.txt", "first\n", "first");
+    commit(dir, "f.txt", "second\n", "second");
+    let r = Repo::open(dir).unwrap();
+    let mut plan = r.rebase_list(&base).unwrap();
+    plan.reverse();
+    plan[0].action = TodoAction::Reword("second, renamed".into());
+    (r, base, plan)
+}
+
+#[test]
+fn the_message_files_are_removed_once_the_rebase_is_done() {
+    if !gitcore::git_available() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let (r, base) = repo(d.path());
+    let mut plan = r.rebase_list(&base).unwrap();
+    plan[0].action = TodoAction::Reword("ONE".into());
+    assert_eq!(r.interactive_rebase(&base, &plan).unwrap(), OpOutcome::Done);
+    assert!(!d.path().join(".git/retrogit-rebase").exists());
+
+    let d = tempfile::tempdir().unwrap();
+    let (r, base, plan) = conflicting(d.path());
+    let msgs = d.path().join(".git/retrogit-rebase");
+    let mut outcome = r.interactive_rebase(&base, &plan).unwrap();
+    let mut rounds = 0;
+    while outcome == OpOutcome::Conflicts && rounds < 5 {
+        assert!(msgs.exists(), "kept while paused");
+        std::fs::write(d.path().join("f.txt"), "resolved\n").unwrap();
+        git(d.path(), &["add", "-A"]);
+        outcome = r.continue_operation().unwrap();
+        rounds += 1;
+    }
+    assert_eq!(outcome, OpOutcome::Done);
+    assert_eq!(r.operation_in_progress(), None);
+    assert!(!msgs.exists(), "removed after the last continue");
+}
+
+#[test]
+fn the_message_files_are_removed_when_the_rebase_is_aborted() {
+    if !gitcore::git_available() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let (r, base, plan) = conflicting(d.path());
+    let msgs = d.path().join(".git/retrogit-rebase");
+    assert_eq!(
+        r.interactive_rebase(&base, &plan).unwrap(),
+        OpOutcome::Conflicts
+    );
+    assert!(msgs.exists());
+    r.abort_operation().unwrap();
+    assert!(!msgs.exists());
+}
+
 #[test]
 fn merges_in_the_range_are_refused() {
     if !gitcore::git_available() {

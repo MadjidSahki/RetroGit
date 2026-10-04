@@ -55,10 +55,21 @@ pub fn replace_lines(
     Some(out)
 }
 
+/// The lines from `start` (1-based) already read as `replacement` (applied before).
+fn reads_as(content: &str, start: usize, replacement: &str) -> bool {
+    let body = |l: &str| l.trim_end_matches(['\n', '\r']).to_string();
+    let wanted: Vec<String> = replacement.split_inclusive('\n').map(body).collect();
+    let lines: Vec<String> = content.split_inclusive('\n').map(body).collect();
+    !wanted.is_empty()
+        && start > 0
+        && lines.get(start - 1..start - 1 + wanted.len()) == Some(&wanted[..])
+}
+
 impl Repo {
     /// Replace lines `start..=end` of `path` by `replacement` and commit with `message`
     /// (through `git`: hooks and signing apply). Refused when the lines are no longer
-    /// `expected` (`SuggestionOutdated`), or when there are local changes (the commit must
+    /// `expected` (`SuggestionOutdated`), already read as the suggestion, or were replaced by it before (`SuggestionApplied`:
+    /// nothing written), or when there are local changes (the commit must
     /// hold the suggestion only). A refused commit puts the file back.
     pub fn apply_suggestion(
         &self,
@@ -78,8 +89,16 @@ impl Repo {
         let file = self.workdir()?.join(path);
         let content = std::fs::read_to_string(&file)
             .map_err(|e| GitError::Other(format!("cannot read {path}: {e}")))?;
-        let new = replace_lines(&content, start, end, expected, replacement)
-            .ok_or(GitError::SuggestionOutdated)?;
+        let Some(new) = replace_lines(&content, start, end, expected, replacement) else {
+            return Err(if reads_as(&content, start, replacement) {
+                GitError::SuggestionApplied
+            } else {
+                GitError::SuggestionOutdated
+            });
+        };
+        if new == content {
+            return Err(GitError::SuggestionApplied);
+        }
         std::fs::write(&file, &new)
             .map_err(|e| GitError::Other(format!("cannot write {path}: {e}")))?;
         let committed = self

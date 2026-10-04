@@ -88,6 +88,7 @@ fn world(draft: bool) -> World {
         comments: vec![ThreadComment {
             id: 1,
             author: "carol".into(),
+            author_id: Some(43),
             body: "Simpler:\n```suggestion\nlet bc = 5;\n```".into(),
             at: String::new(),
         }],

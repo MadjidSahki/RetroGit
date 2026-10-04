@@ -111,7 +111,10 @@ pub enum Command {
     AbortOperation,
     ContinueRebase,
     // --- Sub-project 6c ---
-    CherryPick(String),
+    CherryPick {
+        id: String,
+        mainline: Option<u32>,
+    },
     /// `mainline`: parent to keep when reverting a merge (1-based).
     Revert {
         id: String,
@@ -169,7 +172,11 @@ pub enum Command {
     /// One tag, or all (`None`).
     PushTags(Option<String>),
     /// Stash the local changes (untracked included), then run the blocked command again.
-    StashAndRetry(Box<Command>),
+    /// `files`: those git said were in the way (shown if nothing could be stashed).
+    StashAndRetry {
+        retry: Box<Command>,
+        files: Vec<String>,
+    },
     // --- Sub-project 6a: conflicts of the open repository. ---
     LoadConflict(String),
     /// Write `content` as the resolution of `path` and mark it resolved.
@@ -265,6 +272,8 @@ pub enum Command {
         expected: Vec<String>,
         replacement: String,
         author: String,
+        /// The author's GitHub user id (`None` for bots): credited as co-author.
+        author_id: Option<u64>,
     },
     /// A line comment posted at once, outside a review.
     AddLineComment {
@@ -451,9 +460,11 @@ pub enum Event {
     /// `path` is no longer in conflict (sent after the refreshed status).
     ConflictResolved(String),
     /// A history operation finished: done, stopped on conflicts, or empty.
+    /// `stash_kept`: a stash applied with conflicts (it was kept).
     OpFinished {
         outcome: gitcore::OpOutcome,
         note: String,
+        stash_kept: bool,
     },
     /// Local changes prevent `retry` from starting (nothing was changed).
     /// Answer of the explore service for the repository at `repo`.
@@ -609,6 +620,9 @@ impl AppError {
             GitError::GitMissing => AppError::new(Severity::Warning, s::ERR_GIT_MISSING),
             GitError::MessageRefused { output } => {
                 AppError::new(Severity::Warning, s::ERR_REBASE_MESSAGE_REFUSED).with_detail(output)
+            }
+            GitError::SuggestionApplied => {
+                AppError::new(Severity::Info, s::SUGGESTION_ALREADY_APPLIED)
             }
             GitError::SuggestionOutdated => {
                 AppError::new(Severity::Warning, s::ERR_SUGGESTION_OUTDATED)

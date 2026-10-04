@@ -2,6 +2,7 @@
 
 use std::sync::atomic::AtomicBool;
 
+use crate::NetProgress;
 use crate::net::NetAuth;
 use crate::remote::retry_without_token;
 use crate::{GitError, Repo};
@@ -70,32 +71,44 @@ impl Repo {
         &self,
         auth: &NetAuth,
         refspec: &str,
+        mut progress: impl FnMut(NetProgress),
         cancel: &AtomicBool,
     ) -> Result<(), GitError> {
         let args = ["push", "--progress", "origin", refspec];
-        retry_without_token(auth, |a| self.run_net(a, &args, |_| {}, cancel)).map(|_| ())
+        retry_without_token(auth, |a| self.run_net(a, &args, &mut progress, cancel)).map(|_| ())
     }
 
     pub fn push_tag(
         &self,
         auth: &NetAuth,
         name: &str,
+        progress: impl FnMut(NetProgress),
         cancel: &AtomicBool,
     ) -> Result<(), GitError> {
-        self.push_refspec(auth, &format!("refs/tags/{name}"), cancel)
+        self.push_refspec(auth, &format!("refs/tags/{name}"), progress, cancel)
     }
 
-    pub fn push_tags(&self, auth: &NetAuth, cancel: &AtomicBool) -> Result<(), GitError> {
+    pub fn push_tags(
+        &self,
+        auth: &NetAuth,
+        mut progress: impl FnMut(NetProgress),
+        cancel: &AtomicBool,
+    ) -> Result<(), GitError> {
         let args = ["push", "--progress", "--tags", "origin"];
-        retry_without_token(auth, |a| self.run_net(a, &args, |_| {}, cancel)).map(|_| ())
+        retry_without_token(auth, |a| self.run_net(a, &args, &mut progress, cancel)).map(|_| ())
     }
 
     pub fn delete_remote_tag(
         &self,
         auth: &NetAuth,
         name: &str,
+        progress: impl FnMut(NetProgress),
         cancel: &AtomicBool,
     ) -> Result<(), GitError> {
-        self.push_refspec(auth, &format!(":refs/tags/{name}"), cancel)
+        // A tag never pushed is already gone from origin: nothing to do.
+        match self.push_refspec(auth, &format!(":refs/tags/{name}"), progress, cancel) {
+            Err(GitError::Other(out)) if out.contains("remote ref does not exist") => Ok(()),
+            other => other,
+        }
     }
 }

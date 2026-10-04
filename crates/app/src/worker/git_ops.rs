@@ -4,27 +4,40 @@
 use gitcore::{GitError, OpOutcome, Repo};
 
 use super::Worker;
-use crate::protocol::{AppError, Command, Event, Op, Severity};
+use crate::protocol::{AppError, Command, Event, Op, Severity, SyncOp};
 use crate::strings as s;
 
 impl Worker {
     pub(super) fn handle_git_ops(&mut self, cmd: Command) {
+        self.git_op(cmd, true);
+    }
+
+    /// `offer`: local changes in the way open the Stash and retry dialog (otherwise they are
+    /// an error: the retry after a stash must not ask again).
+    fn git_op(&mut self, cmd: Command, offer: bool) {
         match cmd {
-            Command::CherryPick(ref id) => {
-                self.history_op(s::NOTE_CHERRY_PICKED, &cmd, |r| r.cherry_pick(id))
+            Command::CherryPick { ref id, mainline } => {
+                self.history_op(s::NOTE_CHERRY_PICKED, &cmd, offer, |r| {
+                    r.cherry_pick(id, mainline)
+                })
             }
             Command::Revert { ref id, mainline } => {
-                self.history_op(s::NOTE_REVERTED, &cmd, |r| r.revert(id, mainline))
+                self.history_op(s::NOTE_REVERTED, &cmd, offer, |r| r.revert(id, mainline))
             }
-            Command::Reset { ref id, mode } => self.history_op(s::NOTE_RESET, &cmd, |r| {
+            Command::Reset { ref id, mode } => self.history_op(s::NOTE_RESET, &cmd, offer, |r| {
                 r.reset(id, mode).map(|()| OpOutcome::Done)
             }),
-            Command::StashAndRetry(retry) => {
+            Command::StashAndRetry { retry, files } => {
                 let Some(r) = self.open_current(Op::Changes) else {
                     return;
                 };
                 match r.stash_save(s::STASH_RETRY_MESSAGE, true) {
-                    Ok(_) => self.handle_git_ops(*retry),
+                    Ok(true) => self.git_op(*retry, false),
+                    // Ignored or skip-worktree files, case clashes: the same block again.
+                    Ok(false) => self.fail(
+                        Op::Changes,
+                        AppError::new(Severity::Info, &s::nothing_to_stash(&files)),
+                    ),
                     Err(e) => self.fail(Op::Changes, AppError::from_git(&e)),
                 }
                 self.send_stashes();
@@ -44,11 +57,15 @@ impl Worker {
             Command::InteractiveRebase {
                 ref base,
                 ref items,
-            } => self.history_op(s::NOTE_REBASED, &cmd, |r| r.interactive_rebase(base, items)),
+            } => self.history_op(s::NOTE_REBASED, &cmd, offer, |r| {
+                r.interactive_rebase(base, items)
+            }),
             Command::ContinueOperation => {
-                self.history_op(s::NOTE_CONTINUED, &cmd, Repo::continue_operation)
+                self.history_op(s::NOTE_CONTINUED, &cmd, offer, Repo::continue_operation)
             }
-            Command::SkipOperation => self.history_op(s::NOTE_SKIPPED, &cmd, Repo::skip_operation),
+            Command::SkipOperation => {
+                self.history_op(s::NOTE_SKIPPED, &cmd, offer, Repo::skip_operation)
+            }
             Command::LoadStashes => self.send_stashes(),
             Command::StashSave { message, untracked } => {
                 let Some(r) = self.open_current(Op::Changes) else {
@@ -115,18 +132,30 @@ impl Worker {
                 }
             }
             Command::DeleteTag { name, remote } => {
-                let Some(r) = self.open_current(Op::History) else {
-                    return;
-                };
-                let auth = self.repo_net_auth();
-                let never = std::sync::atomic::AtomicBool::new(false);
-                let result = (if remote {
-                    r.delete_remote_tag(&auth, &name, &never)
+                let r = if remote {
+                    let Some((r, result)) = self.network(SyncOp::Push, false, |r, a, p, c| {
+                        r.delete_remote_tag(a, &name, p, c)
+                    }) else {
+                        return;
+                    };
+                    // Origin refused or the network failed: the local tag is kept.
+                    if let Err(e) = result {
+                        self.tag_net_failed(&e);
+                        self.send_tags();
+                        return;
+                    }
+                    self.emit(Event::SyncFinished {
+                        op: SyncOp::Push,
+                        ok: true,
+                    });
+                    r
                 } else {
-                    Ok(())
-                })
-                .and_then(|()| r.delete_tag(&name));
-                match result {
+                    let Some(r) = self.open_current(Op::History) else {
+                        return;
+                    };
+                    r
+                };
+                match r.delete_tag(&name) {
                     Ok(()) => {
                         self.note(s::NOTE_TAG_DELETED);
                         self.emit(Event::TagsStatus(
@@ -142,17 +171,20 @@ impl Worker {
                 self.send_tags();
             }
             Command::PushTags(name) => {
-                let Some(r) = self.open_current(Op::Sync) else {
+                let Some((_r, result)) =
+                    self.network(SyncOp::Push, false, |r, a, p, c| match &name {
+                        Some(n) => r.push_tag(a, n, p, c),
+                        None => r.push_tags(a, p, c),
+                    })
+                else {
                     return;
-                };
-                let auth = self.repo_net_auth();
-                let never = std::sync::atomic::AtomicBool::new(false);
-                let result = match &name {
-                    Some(n) => r.push_tag(&auth, n, &never),
-                    None => r.push_tags(&auth, &never),
                 };
                 match result {
                     Ok(()) => {
+                        self.emit(Event::SyncFinished {
+                            op: SyncOp::Push,
+                            ok: true,
+                        });
                         self.note(s::NOTE_TAGS_PUSHED);
                         let text = match &name {
                             Some(n) => s::TAG_PUSHED_STATUS.replace("{name}", n),
@@ -160,28 +192,38 @@ impl Worker {
                         };
                         self.emit(Event::TagsStatus(text));
                     }
-                    Err(e) => {
-                        self.emit(Event::TagsStatus(s::TAG_ACTION_FAILED.into()));
-                        self.fail(Op::Sync, AppError::from_git(&e));
-                    }
+                    Err(e) => self.tag_net_failed(&e),
                 }
             }
             _ => {}
         }
     }
 
+    /// A tag push or remote delete failed (or was cancelled): say so in the Tags window too.
+    fn tag_net_failed(&mut self, e: &GitError) {
+        let status = match e {
+            GitError::Cancelled => s::CANCELLED,
+            _ => s::TAG_ACTION_FAILED,
+        };
+        self.emit(Event::TagsStatus(status.into()));
+        self.net_failed(SyncOp::Push, false, e);
+    }
+
     fn note(&self, note: &str) {
         self.emit(Event::OpFinished {
             outcome: OpOutcome::Done,
             note: note.to_string(),
+            stash_kept: false,
         });
     }
 
     /// Run a history operation, reload what depends on HEAD, then report its outcome.
+    /// `offer_stash`: see `git_op`.
     fn history_op(
         &mut self,
         note: &str,
         cmd: &Command,
+        offer_stash: bool,
         run: impl FnOnce(&Repo) -> Result<OpOutcome, GitError>,
     ) {
         let Some(repo) = self.open_current(Op::History) else {
@@ -200,9 +242,10 @@ impl Worker {
                 self.emit(Event::OpFinished {
                     outcome,
                     note: note.to_string(),
+                    stash_kept: false,
                 });
             }
-            Err(GitError::WouldOverwrite { files }) => self.emit(Event::OpBlocked {
+            Err(GitError::WouldOverwrite { files }) if offer_stash => self.emit(Event::OpBlocked {
                 retry: Box::new(cmd.clone()),
                 files,
             }),
@@ -276,6 +319,7 @@ impl Worker {
             Err(GitError::StashConflict) => self.emit(Event::OpFinished {
                 outcome: OpOutcome::Conflicts,
                 note: s::NOTE_STASH_APPLIED.to_string(),
+                stash_kept: true,
             }),
             Err(e) => self.fail(Op::Changes, AppError::from_git(&e)),
         }
