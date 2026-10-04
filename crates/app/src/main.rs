@@ -41,6 +41,8 @@ fn main() -> eframe::Result {
     // Before the window: the click that launched the app must find its handler.
     #[cfg(target_os = "macos")]
     retrogit::notify::macos::init();
+    #[cfg(windows)]
+    std::thread::spawn(retrogit::notify::winreg::register);
     log::info!("RetroGit {} starting", retrogit::version::version());
     if let Ok(exe) = std::env::current_exe() {
         gitcore::set_askpass_program(exe);

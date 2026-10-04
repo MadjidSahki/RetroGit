@@ -40,7 +40,7 @@ block2.workspace = true
 winresource = "0.1"
 
 [target.'cfg(windows)'.dependencies]
-tauri-winrt-notification.workspace = true
+windows.workspace = true
 
 [dev-dependencies]
 egui_kittest.workspace = true

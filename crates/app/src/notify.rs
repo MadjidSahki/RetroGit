@@ -133,6 +133,8 @@ pub fn show(title: &str, body: &str, link: Option<String>) {
     });
 }
 
+pub mod winreg;
+
 #[cfg(target_os = "macos")]
 pub mod macos;
 
@@ -163,14 +165,18 @@ fn show_now(title: &str, body: &str, link: Option<&str>) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn show_now(title: &str, body: &str, _link: Option<&str>) -> Result<(), String> {
-    use tauri_winrt_notification::Toast;
-    // Without an installer there is no registered app id: PowerShell's is used.
-    Toast::new(Toast::POWERSHELL_APP_ID)
-        .title(&format!("RetroGit - {title}"))
-        .text1(body)
-        .show()
-        .map_err(|e| e.to_string())
+fn show_now(title: &str, body: &str, link: Option<&str>) -> Result<(), String> {
+    use windows::Data::Xml::Dom::XmlDocument;
+    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+    use windows::core::HSTRING;
+    let show = || -> windows::core::Result<()> {
+        let doc = XmlDocument::new()?;
+        doc.LoadXml(&HSTRING::from(winreg::toast_xml(title, body, link)))?;
+        let toast = ToastNotification::CreateToastNotification(&doc)?;
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(winreg::AUMID))?
+            .Show(&toast)
+    };
+    show().map_err(|e| e.to_string())
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]

@@ -21,6 +21,8 @@ for size in (32, 256):
     (assets / f"icon-{size}.rgba").write_bytes(icon.resize((size, size), Image.LANCZOS).tobytes())
 (assets / "logo-128.rgba").write_bytes(logo.resize((128, 128), Image.LANCZOS).tobytes())
 logo.resize((256, 256), Image.LANCZOS).save(root / "docs" / "logo.png", optimize=True)
+# Windows: the notifications' icon (written next to the app data at start).
+icon.resize((256, 256), Image.LANCZOS).save(assets / "icon-256.png", optimize=True)
 # Windows: one .ico with the usual sizes (the .exe icon and the installer).
 icon.save(assets / "RetroGit.ico", sizes=[(s, s) for s in (16, 24, 32, 48, 64, 128, 256)])
 # macOS: RetroGit.icns through Apple's iconutil (skipped elsewhere).
