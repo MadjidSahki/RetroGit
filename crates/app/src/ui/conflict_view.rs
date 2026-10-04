@@ -136,7 +136,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             };
             match ed.file.kind {
                 ConflictKind::Content | ConflictKind::AddedByBoth => content(ui, cx, &mut ed),
-                _ => whole_file_only(ui, cx, &mut ed),
+                _ => whole_file_only(ui, &mut ed),
             }
             if cx.state.changes.conflict.is_none() {
                 cx.state.changes.conflict = Some(ed);
@@ -145,26 +145,21 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     );
 }
 
-/// Binary files, and files deleted on one side: keep one version, or the deletion.
-fn whole_file_only(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor) {
+/// Binary files, and files deleted on one side: keep one version, or the deletion (each
+/// asked first, in [`confirm_dialog`]).
+fn whole_file_only(ui: &mut egui::Ui, ed: &mut ConflictEditor) {
     let path = ed.file.path.clone();
     let names = side_names(ed.file.operation, &ed.segments);
     ui.label(RichText::new(&path).color(win95::theme::palette(ui.ctx()).link));
-    let keep = |pick| Command::ResolveConflictWith {
-        path: path.clone(),
-        pick,
-    };
-    let (question, choices): (String, Vec<(String, Command)>) = match ed.file.kind {
+    let keep = ConflictConfirm::WholeFile;
+    let (question, choices): (String, Vec<(String, ConflictConfirm)>) = match ed.file.kind {
         ConflictKind::DeletedByUs => (
             s::CONFLICT_DELETED_IN
                 .replace("{deleted}", names.mine_long)
                 .replace("{changed}", names.theirs_long),
             vec![
                 (s::KEEP_FILE.to_string(), keep(Pick::Theirs)),
-                (
-                    s::DELETE_FILE.to_string(),
-                    Command::ResolveDelete(path.clone()),
-                ),
+                (s::DELETE_FILE.to_string(), ConflictConfirm::DeleteFile),
             ],
         ),
         ConflictKind::DeletedByThem => (
@@ -173,10 +168,7 @@ fn whole_file_only(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor)
                 .replace("{changed}", names.mine_long),
             vec![
                 (s::KEEP_FILE.to_string(), keep(Pick::Ours)),
-                (
-                    s::DELETE_FILE.to_string(),
-                    Command::ResolveDelete(path.clone()),
-                ),
+                (s::DELETE_FILE.to_string(), ConflictConfirm::DeleteFile),
             ],
         ),
         _ => (
@@ -193,7 +185,7 @@ fn whole_file_only(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor)
     ui.label(question);
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        for (label, cmd) in choices {
+        for (label, confirm) in choices {
             if ui
                 .add(
                     Button95::new(label)
@@ -202,7 +194,7 @@ fn whole_file_only(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor)
                 )
                 .clicked()
             {
-                cx.worker.send(ed.resolve(cmd));
+                ed.confirm = Some(confirm);
             }
         }
     });
@@ -251,9 +243,12 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor) {
         if let Some(repo) = cx.state.current.as_ref().map(|c| c.path.clone())
             && let Some(ide) = crate::ide::ide_for(&cx.state.config, &cx.state.ides, &repo)
             && ui.add(b(s::OPEN_IN_IDE_SHORT)).clicked()
-            && let Err(e) = crate::ide::open(ide, &repo)
+            && let Err(e) = crate::ide::open(ide, &repo, Some(std::path::Path::new(&ed.file.path)))
         {
-            log::warn!("cannot open the IDE: {e}");
+            let mut err =
+                crate::protocol::AppError::new(crate::protocol::Severity::Error, s::ERR_OPEN_IDE);
+            err.detail = Some(format!("{}: {e}", ide.name));
+            cx.state.messages.push_back(err);
         }
     });
     if ed.on_disk.is_some() {
@@ -526,6 +521,24 @@ pub fn confirm_dialog(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             s::CONFIRM_DISCARD_EDITS.to_string()
         }
         ConflictConfirm::Abort => s::CONFIRM_ABORT_EDITS.to_string(),
+        ConflictConfirm::DeleteFile => {
+            let (path, changed) = cx
+                .state
+                .changes
+                .conflict
+                .as_ref()
+                .map(|e| {
+                    let changed = match e.file.kind {
+                        ConflictKind::DeletedByUs => names.theirs_long,
+                        _ => names.mine_long,
+                    };
+                    (e.file.path.clone(), changed)
+                })
+                .unwrap_or_default();
+            s::CONFIRM_DELETE_FILE
+                .replace("{path}", &path)
+                .replace("{changed}", changed)
+        }
     };
     let (mut yes, mut no) = (false, false);
     let r = Dialog::new("conflict_confirm", s::CONFLICT_TITLE)
@@ -571,9 +584,12 @@ pub fn confirm_dialog(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
         }
         ConflictConfirm::Discard(_) => {
             ed.confirm = Some(confirm);
-            if let Some(next) = c.discard_conflict_edits() {
-                cx.worker.send(Command::LoadConflict(next));
+            if let Some(cmd) = c.discard_conflict_edits() {
+                cx.worker.send(cmd);
             }
+        }
+        ConflictConfirm::DeleteFile => {
+            cx.worker.send(ed.resolve(Command::ResolveDelete(path)));
         }
         ConflictConfirm::Abort => {
             c.conflict = None;

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use gitcore::{Change, ConflictFile, ConflictKind, FileStatus, Head, Operation, RepoSummary};
+use gitcore::{Change, ConflictFile, ConflictKind, FileStatus, Head, Operation, Pick, RepoSummary};
 use github::{Client, MemoryAccounts, TokenProvider};
 use retrogit::config::Config;
 use retrogit::protocol::Event;
@@ -169,6 +169,104 @@ fn files_deleted_on_one_side_offer_keep_or_delete() {
     );
     assert!(h.query_by_label(s::KEEP_FILE).is_some());
     assert!(h.query_by_label(s::DELETE_FILE).is_some());
+}
+
+fn confirm(h: &Harness<'static, World>) -> Option<ConflictConfirm> {
+    h.state()
+        .state
+        .changes
+        .conflict
+        .as_ref()
+        .unwrap()
+        .confirm
+        .clone()
+}
+
+fn resolving(h: &Harness<'static, World>) -> bool {
+    h.state().state.changes.conflict.as_ref().unwrap().resolving
+}
+
+#[test]
+fn keeping_a_file_deleted_on_one_side_asks_first() {
+    let mut h = harness(world(ConflictKind::DeletedByThem));
+    h.run();
+    h.get_by_label(s::KEEP_FILE).click();
+    h.run();
+    assert_eq!(confirm(&h), Some(ConflictConfirm::WholeFile(Pick::Ours)));
+    assert!(!resolving(&h), "nothing sent yet");
+    assert!(
+        h.query_by_label_contains("dropping the changes of the other version")
+            .is_some()
+    );
+    h.get_by_label(s::OK).click();
+    h.run();
+    assert_eq!(confirm(&h), None);
+    assert!(resolving(&h), "sent on OK");
+}
+
+#[test]
+fn deleting_a_file_deleted_on_one_side_asks_first() {
+    let mut h = harness(world(ConflictKind::DeletedByUs));
+    h.run();
+    h.get_by_label(s::DELETE_FILE).click();
+    h.run();
+    assert_eq!(confirm(&h), Some(ConflictConfirm::DeleteFile));
+    assert!(!resolving(&h), "nothing sent yet");
+    let question = s::CONFIRM_DELETE_FILE
+        .replace("{path}", "src/login.rs")
+        .replace("{changed}", s::SIDE_THEIRS_LONG);
+    assert!(h.query_by_label(&question).is_some(), "{question}");
+    h.get_by_label(s::CANCEL).click();
+    h.run();
+    assert_eq!(confirm(&h), None);
+    assert!(!resolving(&h));
+    h.get_by_label(s::DELETE_FILE).click();
+    h.run();
+    h.get_by_label(s::OK).click();
+    h.run();
+    assert!(resolving(&h), "sent on OK");
+}
+
+#[test]
+fn using_one_side_of_a_binary_file_asks_first() {
+    let mut h = harness(world(ConflictKind::Binary));
+    h.run();
+    h.get_by_label("Use theirs").click();
+    h.run();
+    assert_eq!(confirm(&h), Some(ConflictConfirm::WholeFile(Pick::Theirs)));
+    assert!(!resolving(&h), "nothing sent yet");
+    h.get_by_label(s::OK).click();
+    h.run();
+    assert!(resolving(&h), "sent on OK");
+}
+
+#[test]
+fn open_in_ide_from_a_conflict_says_when_the_ide_cannot_start() {
+    let mut w = world(ConflictKind::Content);
+    // A repository folder that does not exist: the IDE cannot be started there.
+    w.state.current.as_mut().unwrap().path =
+        PathBuf::from("/nonexistent/retrogit-t5-repo-that-is-not-there");
+    w.state.ides = vec![retrogit::ide::Ide {
+        id: "vscode".into(),
+        name: "VS Code".into(),
+        program: PathBuf::from("/nonexistent/retrogit-t5-ide"),
+    }];
+    let mut h = harness(w);
+    h.run();
+    h.get_all_by_label(s::OPEN_IN_IDE_SHORT)
+        .last()
+        .unwrap()
+        .click();
+    h.run();
+    assert!(
+        h.state()
+            .state
+            .messages
+            .iter()
+            .any(|m| m.message == s::ERR_OPEN_IDE),
+        "{:?}",
+        h.state().state.messages
+    );
 }
 
 #[test]

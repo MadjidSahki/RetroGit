@@ -8,7 +8,7 @@ use gitcore::{
 use crate::highlight::{Colors, MAX_BYTES, MAX_LINES, Target};
 
 use super::{AppState, ChangesView};
-use crate::protocol::{AppError, Severity};
+use crate::protocol::{AppError, Command, Severity};
 use crate::strings as s;
 
 /// A whole text as a one-hunk diff of unchanged lines: what the background highlighter
@@ -49,12 +49,25 @@ pub enum ConflictConfirm {
     WholeFile(Pick),
     /// Mark resolved although conflict markers remain.
     ResolveWithMarkers,
-    /// Leave the edited file for another one (`Some(path)`) or close the editor (`None`).
-    Discard(Option<String>),
+    /// Delete the file (it was deleted on one side).
+    DeleteFile,
+    /// Drop the edits and go to `DiscardTarget`.
+    Discard(DiscardTarget),
     /// Abort the merge / rebase although the file was edited.
     Abort,
     /// Open another repository although the file was edited.
     OpenRepo(std::path::PathBuf),
+}
+
+/// Where the user goes once the edits are dropped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiscardTarget {
+    /// Close the editor.
+    Close,
+    /// Another conflicted file.
+    Conflict(String),
+    /// A file's diff in the Changes list.
+    File { path: String, side: Side },
 }
 
 /// The file being resolved.
@@ -108,7 +121,7 @@ fn to_crlf(text: &str) -> String {
 
 impl ConflictEditor {
     /// Send `cmd` (a resolution): the buttons stay greyed until Git answers.
-    pub fn resolve(&mut self, cmd: crate::protocol::Command) -> crate::protocol::Command {
+    pub fn resolve(&mut self, cmd: Command) -> Command {
         self.resolving = true;
         cmd
     }
@@ -326,7 +339,9 @@ impl ChangesView {
             && ed.edited
             && ed.file.path != path
         {
-            ed.confirm = Some(ConflictConfirm::Discard(Some(path.to_string())));
+            ed.confirm = Some(ConflictConfirm::Discard(DiscardTarget::Conflict(
+                path.to_string(),
+            )));
             return false;
         }
         self.conflict_path = Some(path.to_string());
@@ -341,11 +356,40 @@ impl ChangesView {
         if let Some(ed) = self.conflict.as_mut()
             && ed.edited
         {
-            ed.confirm = Some(ConflictConfirm::Discard(None));
+            ed.confirm = Some(ConflictConfirm::Discard(DiscardTarget::Close));
             return;
         }
         self.conflict = None;
         self.conflict_path = None;
+    }
+
+    /// Show the diff of `path` (closing the conflict editor): returns the load to send, or
+    /// `None` while the user is asked to drop the edits first (then shown on OK).
+    pub fn select_file(&mut self, path: &str, side: Side) -> Option<Command> {
+        if let Some(ed) = self.conflict.as_mut()
+            && ed.edited
+        {
+            ed.confirm = Some(ConflictConfirm::Discard(DiscardTarget::File {
+                path: path.to_string(),
+                side,
+            }));
+            return None;
+        }
+        self.conflict = None;
+        self.conflict_path = None;
+        Some(self.show_file(path, side))
+    }
+
+    fn show_file(&mut self, path: &str, side: Side) -> Command {
+        if self.shown.as_ref() != Some(&(path.to_string(), side)) {
+            self.shown = Some((path.to_string(), side));
+            self.diff = None;
+            self.selected_lines.clear();
+        }
+        Command::LoadDiff {
+            path: path.to_string(),
+            side,
+        }
     }
 
     /// Open another repository: asks first if the open conflict was edited. Returns
@@ -374,8 +418,8 @@ impl ChangesView {
         true
     }
 
-    /// The user confirmed dropping the edits: go where they wanted.
-    pub fn discard_conflict_edits(&mut self) -> Option<String> {
+    /// The user confirmed dropping the edits: go where they wanted (returns what to load).
+    pub fn discard_conflict_edits(&mut self) -> Option<Command> {
         let target = match self.conflict.as_ref().and_then(|e| e.confirm.clone()) {
             Some(ConflictConfirm::Discard(t)) => t,
             _ => return None,
@@ -383,11 +427,12 @@ impl ChangesView {
         self.conflict = None;
         self.conflict_path = None;
         match target {
-            Some(path) => {
+            DiscardTarget::Conflict(path) => {
                 self.open_conflict(&path);
-                Some(path)
+                Some(Command::LoadConflict(path))
             }
-            None => None,
+            DiscardTarget::File { path, side } => Some(self.show_file(&path, side)),
+            DiscardTarget::Close => None,
         }
     }
 }

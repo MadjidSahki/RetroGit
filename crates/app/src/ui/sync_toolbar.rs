@@ -177,7 +177,7 @@ fn ide_controls(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         .on_disabled_hover_text(s::NO_IDE_FOUND);
     if open.clicked()
         && let Some(ide) = &chosen
-        && let Err(e) = crate::ide::open(ide, &repo)
+        && let Err(e) = crate::ide::open(ide, &repo, None)
     {
         let mut err =
             crate::protocol::AppError::new(crate::protocol::Severity::Error, s::ERR_OPEN_IDE);

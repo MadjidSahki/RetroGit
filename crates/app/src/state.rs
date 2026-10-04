@@ -11,7 +11,7 @@ mod sync;
 mod update;
 
 pub use appearance::{AppearanceDialog, SIZES, ZoomStep, next_zoom, size_label};
-pub use conflicts::{ConflictConfirm, ConflictEditor, text_as_diff};
+pub use conflicts::{ConflictConfirm, ConflictEditor, DiscardTarget, text_as_diff};
 pub use explore::{
     ExploreView, FileView, HistoryFilter, SearchForm, SearchView, TreeRow, age_ranks, tree_rows,
 };

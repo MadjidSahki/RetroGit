@@ -242,32 +242,40 @@ fn vswhere_devenv() -> Option<PathBuf> {
     (!path.is_empty()).then(|| PathBuf::from(path))
 }
 
-/// Program and arguments that open `repo` in `ide` (`mac`: use `open -a`).
-pub fn launch_args(ide: &Ide, repo: &Path, mac: bool) -> (PathBuf, Vec<String>) {
-    let repo = repo.display().to_string();
-    if mac {
-        return (
+/// Program and arguments that open `repo` in `ide` (`mac`: use `open -a`), and `file` (relative
+/// to `repo`) in it when given.
+pub fn launch_args(
+    ide: &Ide,
+    repo: &Path,
+    file: Option<&Path>,
+    mac: bool,
+) -> (PathBuf, Vec<String>) {
+    let mut paths = vec![repo.display().to_string()];
+    paths.extend(file.map(|f| repo.join(f).display().to_string()));
+    let (program, mut args) = if mac {
+        (
             PathBuf::from("open"),
-            vec!["-a".into(), ide.program.display().to_string(), repo],
-        );
-    }
-    let is_cmd = ide
+            vec!["-a".into(), ide.program.display().to_string()],
+        )
+    } else if ide
         .program
         .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"));
-    if is_cmd {
+        .is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
+    {
         (
             PathBuf::from("cmd"),
-            vec!["/C".into(), ide.program.display().to_string(), repo],
+            vec!["/C".into(), ide.program.display().to_string()],
         )
     } else {
-        (ide.program.clone(), vec![repo])
-    }
+        (ide.program.clone(), Vec::new())
+    };
+    args.extend(paths);
+    (program, args)
 }
 
-/// Start the IDE on `repo` without waiting for it.
-pub fn open(ide: &Ide, repo: &Path) -> std::io::Result<()> {
-    let (program, args) = launch_args(ide, repo, cfg!(target_os = "macos"));
+/// Start the IDE on `repo` (and `file` in it) without waiting for it.
+pub fn open(ide: &Ide, repo: &Path, file: Option<&Path>) -> std::io::Result<()> {
+    let (program, args) = launch_args(ide, repo, file, cfg!(target_os = "macos"));
     let mut cmd = std::process::Command::new(program);
     cmd.args(args)
         .current_dir(repo)
@@ -446,7 +454,7 @@ name:                       Something else
             name: "Rider".into(),
             program: PathBuf::from("/Applications/Rider.app"),
         };
-        let (prog, args) = launch_args(&app, Path::new("/w/my repo"), true);
+        let (prog, args) = launch_args(&app, Path::new("/w/my repo"), None, true);
         assert_eq!(prog, PathBuf::from("open"));
         assert_eq!(args, ["-a", "/Applications/Rider.app", "/w/my repo"]);
         // Windows always starts the exe directly (no cmd: "R&D" or "%x%" in a path stay literal).
@@ -456,7 +464,7 @@ name:                       Something else
             program: PathBuf::from(r"C:\R\rider64.exe"),
         };
         assert_eq!(
-            launch_args(&r, Path::new(r"C:\w\R&D"), false),
+            launch_args(&r, Path::new(r"C:\w\R&D"), None, false),
             (
                 PathBuf::from(r"C:\R\rider64.exe"),
                 vec![r"C:\w\R&D".to_string()]
