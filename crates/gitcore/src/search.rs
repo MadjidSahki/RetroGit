@@ -203,6 +203,10 @@ impl Repo {
                 }
                 (RefKind::RemoteBranch, n)
             } else if let Some(n) = name.strip_prefix("refs/tags/") {
+                // A tag can point to a tree or a blob: nothing to explore as a version.
+                if r.peel_to_commit().is_err() {
+                    continue;
+                }
                 (RefKind::Tag, n)
             } else {
                 continue;

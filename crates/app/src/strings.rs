@@ -207,6 +207,7 @@ pub const ERR_ACCESS_DENIED: &str = "GitHub refused access to this repository wi
 pub const ERR_GIT_MISSING: &str = "Install Git to use this feature.";
 pub const ERR_NET_AUTH_HELP: &str = "Git could not authenticate. For SSH remotes, add your key to ssh-agent (ssh-add). For HTTPS remotes outside github.com, configure a credential helper.";
 pub const INFO_CONFLICTS: &str = "There are conflicts. Resolve them in your editor, stage the files, then commit (or continue the rebase).";
+pub const INFO_STASH_CONFLICTS: &str = "The stash was applied with conflicts. Resolve them, then stage the files (no commit needed). The stash was kept: drop it when done.";
 pub const INFO_CLONE_CANCELLED: &str = "Clone cancelled.";
 
 // --- Sub-project 4: pull requests ---
@@ -551,6 +552,12 @@ pub const MENU_CREATE_TAG: &str = "Create tag here...";
 pub const MENU_REBASE_UPSTREAM: &str = "Interactive rebase (unpushed commits)...";
 pub const STASH_RETRY_MESSAGE: &str = "RetroGit: local changes put aside";
 pub const STASH_RETRY_TITLE: &str = "Local changes in the way";
+pub const ERR_NOTHING_TO_STASH: &str = "These files block the operation but cannot be stashed (ignored, skip-worktree or a case clash):";
+
+/// `ERR_NOTHING_TO_STASH` followed by the files in the way.
+pub fn nothing_to_stash(files: &[String]) -> String {
+    format!("{ERR_NOTHING_TO_STASH} {}", files.join(", "))
+}
 pub const STASH_RETRY_QUESTION: &str = "Your local changes would be overwritten. Stash them (they stay in the Stashes tab) and try again?";
 pub const STASH_AND_RETRY: &str = "Stash and retry";
 pub const ERR_REBASE_MESSAGE_REFUSED: &str = "The new commit message was refused (hook or signing). The rebase is paused: Continue keeps the old message, Abort cancels the rebase.";

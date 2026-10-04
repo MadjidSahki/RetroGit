@@ -86,7 +86,7 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                 s::STASH_AND_RETRY,
             ) {
                 Some(true) => {
-                    cx.worker.send(Command::StashAndRetry(retry));
+                    cx.worker.send(Command::StashAndRetry { retry, files });
                     None
                 }
                 Some(false) => None,

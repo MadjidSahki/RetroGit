@@ -230,7 +230,10 @@ fn an_operation_blocked_by_local_changes_offers_stash_and_retry() {
         }
         other => panic!("{other:?}"),
     }
-    w.send(Command::StashAndRetry(Box::new(pick)));
+    w.send(Command::StashAndRetry {
+        retry: Box::new(pick),
+        files: vec!["a.txt".into()],
+    });
     until(&w, |e| matches!(e, Event::OpFinished { .. }));
     assert_eq!(git(&dir, &["log", "-1", "--format=%s"]), "theirs\n");
     assert_eq!(
@@ -238,6 +241,127 @@ fn an_operation_blocked_by_local_changes_offers_stash_and_retry() {
         1,
         "changes kept in a stash"
     );
+}
+
+/// Events until the next error, then whatever follows within half a second.
+fn until_error(w: &WorkerHandle) -> Vec<Event> {
+    let mut evs = until(w, |e| matches!(e, Event::Error { .. }));
+    while let Ok(ev) = w.events.recv_timeout(Duration::from_millis(500)) {
+        evs.push(ev);
+    }
+    evs
+}
+
+#[test]
+fn stash_and_retry_with_nothing_stashable_says_so_and_does_not_ask_again() {
+    let Some((_d, dir)) = repo() else { return };
+    git(&dir, &["switch", "-q", "-c", "other"]);
+    let theirs = commit(&dir, "a.txt", "theirs\n", "theirs");
+    git(&dir, &["switch", "-q", "main"]);
+    // A skip-worktree file blocks the cherry-pick but `git stash` does not see it.
+    git(&dir, &["update-index", "--skip-worktree", "a.txt"]);
+    std::fs::write(dir.join("a.txt"), "dirty\n").unwrap();
+    let w = start(&dir);
+    let pick = Command::CherryPick(theirs);
+    w.send(pick.clone());
+    let evs = until(&w, |e| matches!(e, Event::OpBlocked { .. }));
+    let Some(Event::OpBlocked { files, .. }) = evs.last() else {
+        panic!("{evs:?}")
+    };
+    assert_eq!(files, &["a.txt"]);
+    w.send(Command::StashAndRetry {
+        retry: Box::new(pick),
+        files: files.clone(),
+    });
+    let evs = until_error(&w);
+    assert!(
+        !evs.iter().any(|e| matches!(e, Event::OpBlocked { .. })),
+        "{evs:?}"
+    );
+    let Some(Event::Error { error, .. }) = evs.iter().find(|e| matches!(e, Event::Error { .. }))
+    else {
+        unreachable!()
+    };
+    assert!(
+        error
+            .message
+            .starts_with(retrogit::strings::ERR_NOTHING_TO_STASH),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.message,
+        retrogit::strings::nothing_to_stash(&["a.txt".into()])
+    );
+    assert_eq!(git(&dir, &["log", "-1", "--format=%s"]), "base\n");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("a.txt")).unwrap(),
+        "dirty\n"
+    );
+}
+
+#[test]
+fn stash_and_retry_blocked_again_gives_an_error_and_keeps_the_stash() {
+    let Some((_d, dir)) = repo() else { return };
+    commit(&dir, "b.txt", "b\n", "add b");
+    git(&dir, &["switch", "-q", "-c", "other"]);
+    std::fs::write(dir.join("a.txt"), "theirs\n").unwrap();
+    let theirs = commit(&dir, "b.txt", "theirs\n", "theirs");
+    git(&dir, &["switch", "-q", "main"]);
+    // a.txt can be stashed, b.txt (skip-worktree) cannot.
+    std::fs::write(dir.join("a.txt"), "dirty\n").unwrap();
+    git(&dir, &["update-index", "--skip-worktree", "b.txt"]);
+    std::fs::write(dir.join("b.txt"), "dirty\n").unwrap();
+    let w = start(&dir);
+    let pick = Command::CherryPick(theirs);
+    w.send(pick.clone());
+    let evs = until(&w, |e| matches!(e, Event::OpBlocked { .. }));
+    let Some(Event::OpBlocked { files, .. }) = evs.last() else {
+        panic!("{evs:?}")
+    };
+    w.send(Command::StashAndRetry {
+        retry: Box::new(pick),
+        files: files.clone(),
+    });
+    let evs = until_error(&w);
+    assert!(
+        !evs.iter().any(|e| matches!(e, Event::OpBlocked { .. })),
+        "{evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(e, Event::Error { error, .. }
+            if error.message == retrogit::strings::ERR_WOULD_OVERWRITE)),
+        "{evs:?}"
+    );
+    assert_eq!(
+        git(&dir, &["stash", "list"]).lines().count(),
+        1,
+        "stash kept"
+    );
+    assert_eq!(git(&dir, &["log", "-1", "--format=%s"]), "add b\n");
+}
+
+#[test]
+fn a_stash_popped_with_conflicts_is_reported_as_kept() {
+    let Some((_d, dir)) = repo() else { return };
+    std::fs::write(dir.join("a.txt"), "stashed\n").unwrap();
+    git(&dir, &["stash", "push", "-q", "-m", "wip"]);
+    commit(&dir, "a.txt", "committed\n", "change a");
+    let id = git(&dir, &["rev-parse", "stash@{0}"]).trim().to_string();
+    let w = start(&dir);
+    w.send(Command::StashPop { index: 0, id });
+    let evs = until(&w, |e| matches!(e, Event::OpFinished { .. }));
+    assert!(
+        matches!(
+            evs.last(),
+            Some(Event::OpFinished {
+                outcome: gitcore::OpOutcome::Conflicts,
+                stash_kept: true,
+                ..
+            })
+        ),
+        "{evs:?}"
+    );
+    assert_eq!(git(&dir, &["stash", "list"]).lines().count(), 1);
 }
 
 #[test]

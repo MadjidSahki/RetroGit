@@ -53,15 +53,24 @@ impl Repo {
     }
 
     pub fn abort_operation(&self) -> Result<(), GitError> {
-        match self.operation_in_progress() {
-            Some(op) => self.git_ok(&[Self::op_command(op), "--abort"]).map(|_| ()),
-            None => Ok(()),
+        if let Some(op) = self.operation_in_progress() {
+            self.git_ok(&[Self::op_command(op), "--abort"])?;
+        }
+        self.forget_rebase_messages();
+        Ok(())
+    }
+
+    /// Remove the message files of an interactive rebase once no operation needs them.
+    pub(crate) fn forget_rebase_messages(&self) {
+        if self.operation_in_progress().is_none() {
+            let _ = std::fs::remove_dir_all(self.git().path().join("retrogit-rebase"));
         }
     }
 
     /// Continue a rebase once conflicts are resolved and staged.
     pub fn continue_rebase(&self) -> Result<(), GitError> {
         let out = self.run_git(&["-c", "core.editor=true", "rebase", "--continue"])?;
+        self.forget_rebase_messages();
         if out.success {
             Ok(())
         } else {
@@ -156,6 +165,7 @@ impl Repo {
         out: crate::cli::GitOutput,
         op: Operation,
     ) -> Result<OpOutcome, GitError> {
+        self.forget_rebase_messages();
         if out.success && self.operation_in_progress().is_none() {
             return Ok(OpOutcome::Done);
         }

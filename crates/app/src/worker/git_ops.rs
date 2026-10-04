@@ -9,22 +9,33 @@ use crate::strings as s;
 
 impl Worker {
     pub(super) fn handle_git_ops(&mut self, cmd: Command) {
+        self.git_op(cmd, true);
+    }
+
+    /// `offer`: local changes in the way open the Stash and retry dialog (otherwise they are
+    /// an error: the retry after a stash must not ask again).
+    fn git_op(&mut self, cmd: Command, offer: bool) {
         match cmd {
             Command::CherryPick(ref id) => {
-                self.history_op(s::NOTE_CHERRY_PICKED, &cmd, |r| r.cherry_pick(id))
+                self.history_op(s::NOTE_CHERRY_PICKED, &cmd, offer, |r| r.cherry_pick(id))
             }
             Command::Revert { ref id, mainline } => {
-                self.history_op(s::NOTE_REVERTED, &cmd, |r| r.revert(id, mainline))
+                self.history_op(s::NOTE_REVERTED, &cmd, offer, |r| r.revert(id, mainline))
             }
-            Command::Reset { ref id, mode } => self.history_op(s::NOTE_RESET, &cmd, |r| {
+            Command::Reset { ref id, mode } => self.history_op(s::NOTE_RESET, &cmd, offer, |r| {
                 r.reset(id, mode).map(|()| OpOutcome::Done)
             }),
-            Command::StashAndRetry(retry) => {
+            Command::StashAndRetry { retry, files } => {
                 let Some(r) = self.open_current(Op::Changes) else {
                     return;
                 };
                 match r.stash_save(s::STASH_RETRY_MESSAGE, true) {
-                    Ok(_) => self.handle_git_ops(*retry),
+                    Ok(true) => self.git_op(*retry, false),
+                    // Ignored or skip-worktree files, case clashes: the same block again.
+                    Ok(false) => self.fail(
+                        Op::Changes,
+                        AppError::new(Severity::Info, &s::nothing_to_stash(&files)),
+                    ),
                     Err(e) => self.fail(Op::Changes, AppError::from_git(&e)),
                 }
                 self.send_stashes();
@@ -44,11 +55,15 @@ impl Worker {
             Command::InteractiveRebase {
                 ref base,
                 ref items,
-            } => self.history_op(s::NOTE_REBASED, &cmd, |r| r.interactive_rebase(base, items)),
+            } => self.history_op(s::NOTE_REBASED, &cmd, offer, |r| {
+                r.interactive_rebase(base, items)
+            }),
             Command::ContinueOperation => {
-                self.history_op(s::NOTE_CONTINUED, &cmd, Repo::continue_operation)
+                self.history_op(s::NOTE_CONTINUED, &cmd, offer, Repo::continue_operation)
             }
-            Command::SkipOperation => self.history_op(s::NOTE_SKIPPED, &cmd, Repo::skip_operation),
+            Command::SkipOperation => {
+                self.history_op(s::NOTE_SKIPPED, &cmd, offer, Repo::skip_operation)
+            }
             Command::LoadStashes => self.send_stashes(),
             Command::StashSave { message, untracked } => {
                 let Some(r) = self.open_current(Op::Changes) else {
@@ -174,14 +189,17 @@ impl Worker {
         self.emit(Event::OpFinished {
             outcome: OpOutcome::Done,
             note: note.to_string(),
+            stash_kept: false,
         });
     }
 
     /// Run a history operation, reload what depends on HEAD, then report its outcome.
+    /// `offer_stash`: see `git_op`.
     fn history_op(
         &mut self,
         note: &str,
         cmd: &Command,
+        offer_stash: bool,
         run: impl FnOnce(&Repo) -> Result<OpOutcome, GitError>,
     ) {
         let Some(repo) = self.open_current(Op::History) else {
@@ -200,9 +218,10 @@ impl Worker {
                 self.emit(Event::OpFinished {
                     outcome,
                     note: note.to_string(),
+                    stash_kept: false,
                 });
             }
-            Err(GitError::WouldOverwrite { files }) => self.emit(Event::OpBlocked {
+            Err(GitError::WouldOverwrite { files }) if offer_stash => self.emit(Event::OpBlocked {
                 retry: Box::new(cmd.clone()),
                 files,
             }),
@@ -276,6 +295,7 @@ impl Worker {
             Err(GitError::StashConflict) => self.emit(Event::OpFinished {
                 outcome: OpOutcome::Conflicts,
                 note: s::NOTE_STASH_APPLIED.to_string(),
+                stash_kept: true,
             }),
             Err(e) => self.fail(Op::Changes, AppError::from_git(&e)),
         }

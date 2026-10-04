@@ -161,12 +161,20 @@ impl AppState {
 
     pub(super) fn apply_git_ops(&mut self, event: Event) {
         match event {
-            Event::OpFinished { outcome, note } => match outcome {
+            Event::OpFinished {
+                outcome,
+                note,
+                stash_kept,
+            } => match outcome {
                 OpOutcome::Done => self.sync.note = Some(note),
                 OpOutcome::Conflicts => {
                     self.tab = Tab::Changes;
-                    self.messages
-                        .push_back(AppError::new(Severity::Info, s::INFO_CONFLICTS));
+                    let info = if stash_kept {
+                        s::INFO_STASH_CONFLICTS
+                    } else {
+                        s::INFO_CONFLICTS
+                    };
+                    self.messages.push_back(AppError::new(Severity::Info, info));
                 }
                 OpOutcome::Empty => {}
             },

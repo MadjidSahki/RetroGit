@@ -169,7 +169,11 @@ pub enum Command {
     /// One tag, or all (`None`).
     PushTags(Option<String>),
     /// Stash the local changes (untracked included), then run the blocked command again.
-    StashAndRetry(Box<Command>),
+    /// `files`: those git said were in the way (shown if nothing could be stashed).
+    StashAndRetry {
+        retry: Box<Command>,
+        files: Vec<String>,
+    },
     // --- Sub-project 6a: conflicts of the open repository. ---
     LoadConflict(String),
     /// Write `content` as the resolution of `path` and mark it resolved.
@@ -451,9 +455,11 @@ pub enum Event {
     /// `path` is no longer in conflict (sent after the refreshed status).
     ConflictResolved(String),
     /// A history operation finished: done, stopped on conflicts, or empty.
+    /// `stash_kept`: a stash applied with conflicts (it was kept).
     OpFinished {
         outcome: gitcore::OpOutcome,
         note: String,
+        stash_kept: bool,
     },
     /// Local changes prevent `retry` from starting (nothing was changed).
     /// Answer of the explore service for the repository at `repo`.

@@ -36,15 +36,31 @@ fn a_finished_operation_notes_it_and_conflicts_lead_to_changes() {
     st.apply(Event::OpFinished {
         outcome: OpOutcome::Done,
         note: s::NOTE_CHERRY_PICKED.into(),
+        stash_kept: false,
     });
     assert_eq!(st.sync.note.as_deref(), Some(s::NOTE_CHERRY_PICKED));
     assert_eq!(st.tab, Tab::History);
     st.apply(Event::OpFinished {
         outcome: OpOutcome::Conflicts,
         note: s::NOTE_CHERRY_PICKED.into(),
+        stash_kept: false,
     });
     assert_eq!(st.tab, Tab::Changes);
     assert_eq!(st.messages.back().unwrap().message, s::INFO_CONFLICTS);
+}
+
+#[test]
+fn a_stash_applied_with_conflicts_says_it_was_kept() {
+    let mut st = state();
+    st.tab = Tab::History;
+    st.apply(Event::OpFinished {
+        outcome: OpOutcome::Conflicts,
+        note: s::NOTE_STASH_APPLIED.into(),
+        stash_kept: true,
+    });
+    assert_eq!(st.tab, Tab::Changes);
+    assert_eq!(st.messages.back().unwrap().message, s::INFO_STASH_CONFLICTS);
+    assert_eq!(st.messages.len(), 1);
 }
 
 #[test]
