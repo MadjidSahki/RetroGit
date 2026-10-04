@@ -194,6 +194,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
         seen: Default::default(),
         no_account: Default::default(),
         unchecked: Default::default(),
+        offline: false,
         last_account: None,
         cancel_net: cancel_net.clone(),
         deps,
@@ -256,6 +257,8 @@ struct Worker {
     /// Accounts kept without being checked (offline at startup): checked again on the
     /// next `ValidateToken` and after the next GitHub call that works.
     unchecked: std::collections::HashSet<String>,
+    /// The app was told it is offline (no account checked at startup).
+    offline: bool,
     /// Account used by the last GitHub call (to sign out the right one on a 401).
     last_account: Option<String>,
     deps: WorkerDeps,

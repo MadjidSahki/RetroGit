@@ -175,3 +175,27 @@ fn gh_auth_token_reads_the_cli_errors() {
         GhToken::Missing
     );
 }
+
+#[test]
+fn an_updated_gh_is_seen_at_once() {
+    let clock = Clock::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let n = calls.clone();
+    let p = TokenProvider::from_gh(Arc::new(move |_: &str| {
+        if n.fetch_add(1, Ordering::SeqCst) == 0 {
+            GhToken::TooOld
+        } else {
+            GhToken::Token("gho_cli".into())
+        }
+    }))
+    .with_clock(clock.source());
+    assert_eq!(p.gh_token_for("ada"), None);
+    assert!(p.gh_too_old());
+    // The user updated gh as told: the next try asks it again.
+    assert_eq!(p.gh_token_for("ada").as_deref(), Some("gho_cli"));
+    assert!(!p.gh_too_old());
+    // Signing in again or checking the accounts asks gh again too.
+    p.forget_restricted();
+    p.gh_token_for("ada");
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+}

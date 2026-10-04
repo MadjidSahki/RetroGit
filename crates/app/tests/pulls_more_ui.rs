@@ -606,3 +606,54 @@ fn a_closed_pull_request_still_offers_resolve_in_files() {
     assert!(h.query_by_label(s::RESOLVE).is_some());
     assert!(h.query_by_label(s::REPLY).is_none(), "reply: open only");
 }
+
+#[test]
+fn an_edit_is_saved_into_the_pull_request_it_was_opened_on() {
+    let mut w = world(false);
+    w.server
+        .mock("GET", "/user")
+        .with_body(r#"{"login":"ada","name":null}"#)
+        .create();
+    w.server
+        .mock("GET", "/user/orgs")
+        .match_query(mockito::Matcher::Any)
+        .with_body(r#"[{"login":"o"}]"#)
+        .create();
+    let saved = w
+        .server
+        .mock("PATCH", "/repos/o/r/pulls/7")
+        .match_body(mockito::Matcher::PartialJson(
+            serde_json::json!({ "title": "New title" }),
+        ))
+        .with_body("{}")
+        .create();
+    let wrong = w
+        .server
+        .mock("PATCH", "/repos/o/r/pulls/8")
+        .expect(0)
+        .create();
+    w.worker
+        .send(retrogit::protocol::Command::SavePat("ghp_pat".into()));
+    let mut h = harness(w);
+    h.run();
+    h.get_by_label(s::EDIT_PULL).click();
+    h.run();
+    match h.state_mut().state.pulls.dialog.as_mut() {
+        Some(PullDialog::EditPull { number, title, .. }) => {
+            assert_eq!(*number, 7, "kept at opening");
+            *title = "New title".into();
+        }
+        other => panic!("{other:?}"),
+    }
+    // A notification click selects another pull request while the window is open.
+    h.state_mut().state.pulls.select(8);
+    h.run();
+    h.get_by_label(s::SAVE).click();
+    h.run();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !saved.matched() {
+        assert!(std::time::Instant::now() < deadline, "edit not saved");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    wrong.assert();
+}

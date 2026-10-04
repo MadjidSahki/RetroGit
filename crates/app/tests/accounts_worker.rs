@@ -148,6 +148,57 @@ fn the_old_single_account_is_cleared_once_its_login_is_known() {
     assert_eq!(store.load_legacy().unwrap(), None);
 }
 
+#[test]
+fn an_account_removed_after_migrating_does_not_come_back() {
+    let mut server = mockito::Server::new();
+    user(&mut server, "gho_old", "ada", &[]);
+    let store = Arc::new(MemoryAccounts::with_legacy("gho_old"));
+    let w = start(&server, store.clone(), &[], &[]);
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::SignedIn(u) if u.login == "ada"));
+    w.send(Command::RemoveAccount("ada".into()));
+    until(&w, |e| matches!(e, Event::SignedOut));
+    assert_eq!(store.load_legacy().unwrap(), None, "the old slot goes too");
+}
+
+#[test]
+fn a_newer_token_is_not_replaced_by_the_old_single_account() {
+    let mut server = mockito::Server::new();
+    user(&mut server, "gho_old", "ada", &[]);
+    user(&mut server, "gho_new", "ada", &[]);
+    let store = Arc::new(MemoryAccounts::with_legacy("gho_old"));
+    store.save("ada", "gho_new").unwrap();
+    let w = start(&server, store.clone(), &["ada"], &[]);
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::SignedIn(u) if u.login == "ada"));
+    assert_eq!(store.load("ada").unwrap().as_deref(), Some("gho_new"));
+    assert_eq!(store.load_legacy().unwrap(), None);
+}
+
+#[test]
+fn accounts_back_online_sign_the_app_in() {
+    let mut server = mockito::Server::new();
+    let down = server
+        .mock("GET", "/user")
+        .match_header("authorization", "Bearer gho_ada")
+        .with_status(500)
+        .create();
+    let store = Arc::new(MemoryAccounts::with("ada", "gho_ada"));
+    let w = start(&server, store, &["ada"], &[]);
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::Offline));
+    down.remove();
+    user(&mut server, "gho_ada", "ada", &[]);
+    list(&mut server, "gho_ada");
+    let evs = load_pulls(&w, "ada", "app");
+    if !evs
+        .iter()
+        .any(|e| matches!(e, Event::SignedIn(u) if u.login == "ada"))
+    {
+        until(&w, |e| matches!(e, Event::SignedIn(u) if u.login == "ada"));
+    }
+}
+
 /// bob's `GET /user` fails at startup (offline), then answers with his name.
 fn bob_offline_at_start(server: &mut mockito::Server) -> WorkerHandle {
     user(server, "gho_ada", "ada", &[]);

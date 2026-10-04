@@ -86,16 +86,23 @@ impl Worker {
                 match self.deps.client.current_user(&token) {
                     Ok(user) => {
                         let was_known = known.iter().any(|k| k.eq_ignore_ascii_case(&user.login));
-                        // The old token is cleared only once the configuration lists its
-                        // login (a later start): until then, it is the only trace of it.
-                        if self.deps.store.save(&user.login, &token).is_ok() && was_known {
+                        let saved = matches!(self.deps.store.load(&user.login), Ok(Some(_)));
+                        if was_known && saved {
+                            // Moved by an earlier start (its token may have been renewed
+                            // since): only the old slot is left to clear.
                             let _ = self.deps.store.clear_legacy();
+                        } else {
+                            // The old token is cleared only once the configuration lists
+                            // its login (a later start): until then, it is its only trace.
+                            if self.deps.store.save(&user.login, &token).is_ok() && was_known {
+                                let _ = self.deps.store.clear_legacy();
+                            }
+                            if !was_known {
+                                known.push(user.login.clone());
+                            }
+                            // Still usable this session even if it could not be moved.
+                            self.add_account(token, &user);
                         }
-                        if !was_known {
-                            known.push(user.login.clone());
-                        }
-                        // Still usable this session even if it could not be moved.
-                        self.add_account(token, &user);
                     }
                     Err(GithubError::Unauthorized) => {
                         let _ = self.deps.store.clear_legacy();
@@ -155,8 +162,12 @@ impl Worker {
         }
         self.accounts_changed();
         match first {
-            Some(user) => self.emit(Event::SignedIn(user)),
+            Some(user) => {
+                self.offline = false;
+                self.emit(Event::SignedIn(user));
+            }
             None if offline => {
+                self.offline = true;
                 self.fail(
                     Op::Auth,
                     AppError::from_github(&GithubError::Network(String::new())),
@@ -172,7 +183,7 @@ impl Worker {
         if self.unchecked.is_empty() {
             return;
         }
-        let mut changed = false;
+        let mut back: Option<User> = None;
         for login in std::mem::take(&mut self.unchecked) {
             let Some(account) = self.accounts.get(&login) else {
                 continue;
@@ -180,7 +191,7 @@ impl Worker {
             match self.deps.client.current_user(&account.token) {
                 Ok(user) => {
                     self.add_account(account.token, &user);
-                    changed = true;
+                    back = back.or(Some(user));
                 }
                 Err(GithubError::Unauthorized) => self.invalidate(&login, Op::Auth),
                 Err(e) => {
@@ -189,8 +200,12 @@ impl Worker {
                 }
             }
         }
-        if changed {
+        if let Some(user) = back {
             self.accounts_changed();
+            // Back online after an offline start: the app is signed in now.
+            if std::mem::take(&mut self.offline) {
+                self.emit(Event::SignedIn(user));
+            }
         }
     }
 
@@ -207,6 +222,7 @@ impl Worker {
                 self.deps.tokens.forget_account(&user.login);
                 self.add_account(token, &user);
                 self.accounts_changed();
+                self.offline = false;
                 self.emit(Event::SignedIn(user));
                 self.send_repo_account();
             }
@@ -222,6 +238,12 @@ impl Worker {
 
     /// Forget `login` (and its token, and the repositories that use it).
     pub(super) fn remove_account(&mut self, login: &str) {
+        // An account moved from older versions this session: its old slot goes too, or the
+        // next start would sign it in again.
+        let token = self.deps.store.load(login).ok().flatten();
+        if token.is_some() && self.deps.store.load_legacy().ok().flatten() == token {
+            let _ = self.deps.store.clear_legacy();
+        }
         if let Err(e) = self.deps.store.clear(login) {
             self.fail(Op::Auth, AppError::from_store(&e));
         }

@@ -70,6 +70,8 @@ pub enum PullDialog {
     },
     /// Title and description of the pull request.
     EditPull {
+        /// The pull request it was opened on (the selection may change meanwhile).
+        number: u64,
         title: String,
         body: String,
     },

@@ -176,6 +176,7 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
         );
         if d.viewer_can_update && ui.add(Button95::new(s::EDIT_PULL).enabled(!busy)).clicked() {
             cx.state.pulls.dialog = Some(PullDialog::EditPull {
+                number: d.summary.number,
                 title: d.summary.title.clone(),
                 body: d.body.clone(),
             });

@@ -102,13 +102,14 @@ impl TokenProvider {
             return token.clone();
         }
         let answer = (self.gh)(login);
-        self.gh_too_old
-            .store(answer == GhToken::TooOld, Ordering::Relaxed);
+        let too_old = answer == GhToken::TooOld;
+        self.gh_too_old.store(too_old, Ordering::Relaxed);
         let token = match answer {
             GhToken::Token(t) => Some(t),
             GhToken::Missing | GhToken::TooOld => None,
         };
-        if let Ok(mut cache) = self.gh_cache.lock() {
+        // A gh too old is not remembered: once the user updates it, the next try sees it.
+        if !too_old && let Ok(mut cache) = self.gh_cache.lock() {
             cache.insert(key, (now, token.clone()));
         }
         token
@@ -126,10 +127,14 @@ impl TokenProvider {
         }
     }
 
-    /// Forget every restricted owner (a new sign-in: RetroGit may have been approved).
+    /// Forget every restricted owner and every `gh` answer (a new sign-in or a check of the
+    /// accounts: RetroGit may have been approved, `gh` installed or signed in since).
     pub fn forget_restricted(&self) {
         if let Ok(mut s) = self.restricted.lock() {
             s.clear();
+        }
+        if let Ok(mut cache) = self.gh_cache.lock() {
+            cache.clear();
         }
     }
 

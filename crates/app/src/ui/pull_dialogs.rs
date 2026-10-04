@@ -138,7 +138,11 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             (title, body, base, draft, labels, publish),
         ),
         PullDialog::Labels { old, checked } => labels(egui_ctx, cx, &slug, old, checked),
-        PullDialog::EditPull { title, body } => edit_pull(egui_ctx, cx, &slug, title, body),
+        PullDialog::EditPull {
+            number,
+            title,
+            body,
+        } => edit_pull(egui_ctx, cx, &slug, number, title, body),
         PullDialog::People {
             kind,
             checked,
@@ -626,12 +630,10 @@ fn edit_pull(
     egui_ctx: &egui::Context,
     cx: &mut Ctx<'_>,
     slug: &Slug,
+    number: u64,
     mut title: String,
     mut body: String,
 ) -> Outcome {
-    let Some(number) = cx.state.pulls.selected else {
-        return Outcome::Close;
-    };
     let busy = cx.state.pulls.busy;
     let (mut save, mut cancel) = (false, false);
     let r = Dialog::new("pull_edit", s::EDIT_PULL_TITLE)
@@ -654,6 +656,7 @@ fn edit_pull(
         return Outcome::Close;
     }
     let keep = PullDialog::EditPull {
+        number,
         title: title.clone(),
         body: body.clone(),
     };
