@@ -22,6 +22,7 @@ pub mod sign_in;
 pub mod stashes;
 pub mod sync_dialogs;
 pub mod sync_toolbar;
+pub mod update;
 
 use crate::state::AppState;
 use crate::worker::WorkerHandle;

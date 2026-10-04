@@ -615,3 +615,17 @@ pub const CANCEL_SEARCH: &str = "Cancel";
 pub const EXPLORE_SELECT_FILE: &str = "Select a file.";
 pub const NO_BLAME_BINARY: &str = "Binary or very large file: no blame.";
 pub const ERR_WORKFLOW_SCOPE: &str = "GitHub refused the push: it changes workflows (.github/workflows) and your sign-in does not allow that. Sign in again with this account (File > Accounts): RetroGit now asks for the 'workflow' permission.";
+pub const CHECK_FOR_UPDATES: &str = "Check for updates...";
+pub const UPDATE_AVAILABLE: &str = "Update available ({version})";
+pub const UPDATE_TITLE: &str = "Update to {version}";
+pub const UPDATE_INTRO: &str = "RetroGit {version} is available (you have {current}).";
+pub const INSTALL_AND_RESTART: &str = "Install and restart";
+pub const DOWNLOAD_UPDATE: &str = "Download";
+pub const DOWNLOAD_HELP: &str =
+    "This copy of RetroGit cannot update itself: download the new version from its release page.";
+pub const LATER: &str = "Later";
+pub const SKIP_VERSION: &str = "Skip this version";
+pub const CHECK_AUTOMATICALLY: &str = "Check for updates automatically";
+pub const RETROGIT_UP_TO_DATE: &str = "RetroGit is up to date ({version}).";
+pub const ERR_UPDATE_CHECK: &str = "Could not check for updates.";
+pub const CHECKING_UPDATES: &str = "Checking for updates...";

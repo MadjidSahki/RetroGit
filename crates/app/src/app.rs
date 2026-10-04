@@ -30,6 +30,12 @@ pub struct RetroGitApp {
     /// Pull request events from the watcher thread.
     pr_events: Option<std::sync::mpsc::Receiver<Vec<github::PrEvent>>>,
     _pr_watcher: Option<crate::pr_watch::PrWatcher>,
+    /// Update checks (6g) and their answers.
+    updates: Option<crate::update::Checker>,
+    update_results:
+        Option<std::sync::mpsc::Receiver<(Result<crate::update::Release, String>, bool)>>,
+    /// Follows the "Check for updates automatically" setting.
+    updates_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Appearance and zoom last applied to the egui context.
     applied: Option<(win95::theme::Appearance, f32)>,
 }
@@ -81,6 +87,9 @@ impl RetroGitApp {
             watcher: None,
             was_focused: true,
             applied: None,
+            updates: None,
+            update_results: None,
+            updates_enabled: Default::default(),
         };
         // Saved scheme, font and zoom in place before the window first shows.
         app.sync_appearance(&ides_ctx_for_appearance);
@@ -109,6 +118,31 @@ impl RetroGitApp {
             }
             Err(e) => log::warn!("single-instance listener not started: {e}"),
         }
+        self
+    }
+
+    /// Check GitHub for a newer RetroGit 30 s after start, then every day (if enabled).
+    pub fn with_updates(mut self, api: &str, ctx: egui::Context) -> RetroGitApp {
+        if let Ok(exe) = std::env::current_exe() {
+            self.state.update.kind =
+                crate::update::install_kind(std::env::consts::OS, &exe, |p| p.exists());
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let enabled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            self.state.config.updates.check,
+        ));
+        self.updates_enabled = enabled.clone();
+        self.updates = Some(crate::update::Checker::start(
+            api.to_string(),
+            std::time::Duration::from_secs(30),
+            std::time::Duration::from_secs(24 * 3600),
+            move || enabled.load(std::sync::atomic::Ordering::SeqCst),
+            move |result, manual| {
+                let _ = tx.send((result, manual));
+                ctx.request_repaint();
+            },
+        ));
+        self.update_results = Some(rx);
         self
     }
 
@@ -278,6 +312,24 @@ impl eframe::App for RetroGitApp {
         for events in pr_events {
             self.state.apply(crate::protocol::Event::PrEvents(events));
         }
+        let answers: Vec<_> = self
+            .update_results
+            .as_ref()
+            .map(|rx| rx.try_iter().collect())
+            .unwrap_or_default();
+        for (result, manual) in answers {
+            self.state
+                .update_checked(crate::version::version(), result, manual);
+        }
+        if std::mem::take(&mut self.state.update.check_requested)
+            && let Some(c) = &self.updates
+        {
+            c.check_now();
+        }
+        self.updates_enabled.store(
+            self.state.config.updates.check,
+            std::sync::atomic::Ordering::SeqCst,
+        );
         while let Ok(notice) = self.notices.try_recv() {
             self.state.messages.push_back(notice);
         }
@@ -319,6 +371,7 @@ impl eframe::App for RetroGitApp {
         ui::sign_in::show(&egui_ctx, &mut cx);
         ui::about::show(&egui_ctx, &mut cx);
         ui::appearance::show(&egui_ctx, &mut cx);
+        ui::update::show(&egui_ctx, &mut cx);
         ui::discard::show(&egui_ctx, &mut cx);
         ui::sync_dialogs::show(&egui_ctx, &mut cx);
         ui::pull_dialogs::show(&egui_ctx, &mut cx);
