@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use gitcore::{Head, OpOutcome, RepoSummary, StashEntry, TodoAction, TodoItem};
 use retrogit::config::Config;
 use retrogit::protocol::Event;
-use retrogit::state::{AppState, GitDialog, Tab, move_item};
+use retrogit::state::{AppState, GitDialog, Tab, move_item, pick_action};
 use retrogit::strings as s;
 
 fn state() -> AppState {
@@ -265,4 +265,31 @@ fn a_refused_rebase_message_says_continue_keeps_the_old_one() {
         output: "hook said no".into(),
     });
     assert_eq!(e.message, retrogit::strings::ERR_REBASE_MESSAGE_REFUSED);
+}
+
+#[test]
+fn choosing_the_current_action_again_keeps_the_typed_message() {
+    let mut i = item("x");
+    i.message = "subject".into();
+    i.action = TodoAction::Reword("typed".into());
+    let again = TodoAction::Reword(i.message.clone());
+    pick_action(&mut i, again);
+    assert_eq!(i.action, TodoAction::Reword("typed".into()));
+    i.action = TodoAction::Squash(Some("joined".into()));
+    pick_action(&mut i, TodoAction::Squash(None));
+    assert_eq!(i.action, TodoAction::Squash(Some("joined".into())));
+    pick_action(&mut i, TodoAction::Fixup);
+    assert_eq!(i.action, TodoAction::Fixup, "another action replaces it");
+}
+
+#[test]
+fn a_late_rebase_list_does_not_replace_an_open_dialog() {
+    let mut st = state();
+    st.git_dialog = Some(GitDialog::ConfirmSkip);
+    st.apply(Event::RebaseListLoaded {
+        base: "b".into(),
+        items: vec![item("1")],
+        pushed: 0,
+    });
+    assert_eq!(st.git_dialog, Some(GitDialog::ConfirmSkip));
 }

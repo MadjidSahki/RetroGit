@@ -15,7 +15,7 @@ pub use conflicts::{ConflictConfirm, ConflictEditor, text_as_diff};
 pub use explore::{
     ExploreView, FileView, HistoryFilter, SearchForm, SearchView, TreeRow, age_ranks, tree_rows,
 };
-pub use git_ops::{GitDialog, HistoryAction, StashesView, move_item};
+pub use git_ops::{GitDialog, HistoryAction, StashesView, move_item, pick_action};
 pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};
 pub use pulls::{
     CHECKS_REFRESH, PullDialog, PullTab, PullsView, default_merge_method, merge_defaults,
@@ -74,6 +74,8 @@ pub struct ChangesView {
     pub conflict: Option<ConflictEditor>,
     /// `conflict_path` must be loaded (set when moving to the next conflicted file).
     pub load_conflict: bool,
+    /// Why loading `conflict_path` failed (shown instead of "Loading...").
+    pub conflict_error: Option<String>,
 }
 
 /// A destructive command and the question shown before running it.
@@ -206,6 +208,8 @@ pub struct AppState {
     pub accounts: Vec<github::AccountStatus>,
     /// File > Accounts... is open.
     pub accounts_dialog: bool,
+    /// Removing this account, waiting for the user to confirm.
+    pub accounts_remove: Option<String>,
     /// Repository > Account... is open.
     pub repo_account_dialog: bool,
     /// Account of the open repository, once the worker said (`Some(None)`: none).
@@ -226,6 +230,10 @@ pub struct AppState {
     pub tags: Vec<gitcore::Tag>,
     /// The Stashes tab asked for the list once (since the repository was opened).
     pub stashes_loaded: bool,
+    // --- Sub-project 7a ---
+    /// Opening or cloning another repository, waiting for the user to drop the pending line
+    /// comments.
+    pub repo_switch: Option<crate::protocol::Command>,
 }
 
 impl AppState {
@@ -268,8 +276,10 @@ impl AppState {
             update: UpdateView::default(),
             tags: Vec::new(),
             stashes_loaded: false,
+            repo_switch: None,
             accounts: Vec::new(),
             accounts_dialog: false,
+            accounts_remove: None,
             repo_account_dialog: false,
             repo_account: None,
         }
@@ -447,13 +457,13 @@ impl AppState {
             | Event::TagsStatus(_)) => self.apply_git_ops(ev),
             Event::ExploreLoaded { repo, result } => self.explore_loaded(repo, result),
             Event::Error { during, error } => {
-                self.on_error(during);
+                self.on_error(during, &error);
                 self.messages.push_back(error);
             }
         }
     }
 
-    fn on_error(&mut self, during: Op) {
+    fn on_error(&mut self, during: Op, error: &AppError) {
         match during {
             Op::Auth => {
                 if !matches!(self.auth, Auth::SignedIn(_)) {
@@ -474,7 +484,20 @@ impl AppState {
                     self.missing.insert(path);
                 }
             }
-            Op::Changes => {}
+            Op::Changes => {
+                if let Some(ed) = self.changes.conflict.as_mut() {
+                    ed.resolving = false;
+                }
+            }
+            Op::Conflict(path) => {
+                let c = &mut self.changes;
+                if let Some(ed) = c.conflict.as_mut() {
+                    ed.resolving = false;
+                }
+                if c.conflict_path.as_deref() == Some(path.as_str()) {
+                    c.conflict_error = Some(error.message.clone());
+                }
+            }
             Op::History => self.history.loading = false,
             Op::Sync => {
                 self.sync.running = None;
@@ -484,6 +507,9 @@ impl AppState {
             }
             Op::Commit => self.changes.committing = false,
             Op::Pulls => self.pulls.loading = false,
+            Op::PullDetail(number) => {
+                self.pulls.load_error = Some((number, error.message.clone()));
+            }
             Op::PullAction => {
                 self.pulls.busy = false;
                 self.pulls.comment_sent = false;
@@ -540,6 +566,32 @@ impl AppState {
             }
         }
         self.current = Some(summary);
+    }
+
+    /// `cmd` opens or clones a repository: the command to send now, or `None` when the
+    /// pending line comments of this one must be confirmed lost first (`repo_switch`).
+    pub fn request_repo_switch(
+        &mut self,
+        cmd: crate::protocol::Command,
+    ) -> Option<crate::protocol::Command> {
+        let same = matches!(&cmd, crate::protocol::Command::OpenRepo(path)
+            if self.current.as_ref().is_some_and(|c| &c.path == path));
+        if same || self.pulls.pending_total() == 0 {
+            return Some(cmd);
+        }
+        self.repo_switch = Some(cmd);
+        None
+    }
+
+    /// The user dropped the pending line comments: the repository command to send.
+    pub fn confirm_repo_switch(&mut self) -> Option<crate::protocol::Command> {
+        self.repo_switch.take()
+    }
+
+    /// The user kept the pending line comments: stay in this repository.
+    pub fn cancel_repo_switch(&mut self) {
+        self.repo_switch = None;
+        self.pulls.open_after_switch = None;
     }
 
     fn remember(&mut self, summary: &RepoSummary) {

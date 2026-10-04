@@ -111,8 +111,9 @@ fn title(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
 fn open_folder(cx: &mut Ctx<'_>) {
     if let Some(folder) = rfd::FileDialog::new().pick_folder()
         && cx.state.changes.request_open_repo(&folder)
+        && let Some(cmd) = cx.state.request_repo_switch(Command::OpenRepo(folder))
     {
-        cx.worker.send(Command::OpenRepo(folder));
+        cx.worker.send(cmd);
     }
 }
 
@@ -293,8 +294,11 @@ fn recents(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         });
     if let Some(row) = resp.clicked
         && cx.state.changes.request_open_repo(&recent[row].path)
+        && let Some(cmd) = cx
+            .state
+            .request_repo_switch(Command::OpenRepo(recent[row].path.clone()))
     {
-        cx.worker.send(Command::OpenRepo(recent[row].path.clone()));
+        cx.worker.send(cmd);
     }
     if let Some(row) = remove {
         cx.state.remove_recent(&recent[row].path);

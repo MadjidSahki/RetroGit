@@ -13,7 +13,7 @@ use github::{
 };
 use retrogit::config::Config;
 use retrogit::protocol::Event;
-use retrogit::state::{AppState, PeopleKind, PullDialog, PullTab, Tab};
+use retrogit::state::{AppState, LineSelection, PeopleKind, PullDialog, PullTab, Tab};
 use retrogit::strings as s;
 use retrogit::ui::Ctx;
 use retrogit::worker::{WorkerDeps, WorkerHandle, spawn};
@@ -233,4 +233,147 @@ fn typing_in_the_people_filter_searches_github() {
         h.state().state.pulls.assignable_query.as_deref(),
         Some("car")
     );
+}
+
+fn click_right_of(h: &Harness<'static, World>, text: &str, button: egui::PointerButton) {
+    let rect = h.get_by_label_contains(text).rect();
+    let pos = egui::pos2(rect.right() + 100.0, rect.center().y);
+    h.hover_at(pos);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+}
+
+fn files_world() -> Harness<'static, World> {
+    let mut w = world(false);
+    w.state.pulls.sub_tab = PullTab::Files;
+    w.state.pulls.open_file("a.rs");
+    let mut h = harness(w);
+    h.run();
+    h
+}
+
+#[test]
+fn clicking_right_of_a_diff_line_text_selects_the_line() {
+    let mut h = files_world();
+    click_right_of(&h, "3 + let c = 3;", egui::PointerButton::Primary);
+    h.run();
+    assert_eq!(
+        h.state().state.pulls.selection,
+        Some(LineSelection {
+            hunk: 0,
+            from: 3,
+            to: 3
+        })
+    );
+}
+
+#[test]
+fn right_clicking_right_of_a_diff_line_text_offers_a_comment() {
+    let mut h = files_world();
+    assert!(h.query_by_label(s::ADD_COMMENT).is_none());
+    click_right_of(&h, "3 + let c = 3;", egui::PointerButton::Secondary);
+    h.run();
+    assert!(h.query_by_label(s::ADD_COMMENT).is_some());
+}
+
+#[test]
+fn hovering_a_multi_line_comment_shows_all_of_it() {
+    let mut h = files_world();
+    assert!(h.query_by_label_contains("```suggestion").is_none());
+    let rect = h.get_by_label_contains("> carol: Simpler:").rect();
+    // Right of the text (the row ends near the window edge).
+    h.hover_at(egui::pos2(rect.right() + 30.0, rect.center().y));
+    for _ in 0..10 {
+        h.run();
+    }
+    assert!(
+        h.query_by_label_contains("```suggestion").is_some(),
+        "full comment in a tooltip"
+    );
+}
+
+#[test]
+fn hovering_a_multi_line_pending_comment_shows_all_of_it() {
+    let mut w = world(false);
+    w.state.pulls.sub_tab = PullTab::Files;
+    w.state.pulls.open_file("a.rs");
+    w.state.queue_line_comment(github::LineComment {
+        path: "a.rs".into(),
+        line: 4,
+        side: DiffSide::Right,
+        start: None,
+        body: "First line\nsecond line here".into(),
+    });
+    let mut h = harness(w);
+    h.run();
+    assert!(h.query_by_label_contains("second line here").is_none());
+    let rect = h.get_by_label_contains("First line").rect();
+    h.hover_at(egui::pos2(rect.right() + 100.0, rect.center().y));
+    for _ in 0..10 {
+        h.run();
+    }
+    assert!(h.query_by_label_contains("second line here").is_some());
+    assert_eq!(retrogit::ui::pull_detail::comment_hover("one line\n"), None);
+}
+
+fn titled(line: Option<u32>, start: Option<u32>, side: DiffSide) -> ReviewThread {
+    ReviewThread {
+        id: "T".into(),
+        can_resolve: false,
+        can_unresolve: false,
+        path: "src/a.rs".into(),
+        line,
+        original_line: Some(9),
+        side,
+        start_line: start,
+        start_side: start.map(|_| side),
+        outdated: false,
+        resolved: false,
+        comments: Vec::new(),
+    }
+}
+
+#[test]
+fn conversation_titles_show_line_ranges_old_side_and_outdated() {
+    use retrogit::ui::pull_detail::thread_title;
+    assert_eq!(
+        thread_title(&titled(Some(3), None, DiffSide::Right)),
+        "src/a.rs:3"
+    );
+    assert_eq!(
+        thread_title(&titled(Some(3), Some(3), DiffSide::Right)),
+        "src/a.rs:3",
+        "a range of one line"
+    );
+    assert_eq!(
+        thread_title(&titled(Some(5), Some(2), DiffSide::Right)),
+        "src/a.rs lines 2-5"
+    );
+    assert_eq!(
+        thread_title(&titled(Some(4), None, DiffSide::Left)),
+        "src/a.rs (old):4"
+    );
+    assert_eq!(
+        thread_title(&titled(Some(5), Some(2), DiffSide::Left)),
+        "src/a.rs (old) lines 2-5"
+    );
+    let mut gone = titled(None, None, DiffSide::Right);
+    gone.outdated = true;
+    assert_eq!(thread_title(&gone), "src/a.rs:9 (outdated)");
+    let mut moved = titled(Some(3), None, DiffSide::Right);
+    moved.outdated = true;
+    assert_eq!(
+        thread_title(&moved),
+        "src/a.rs:3",
+        "still placed: not outdated"
+    );
+    let mut done = titled(Some(3), None, DiffSide::Right);
+    done.resolved = true;
+    assert_eq!(thread_title(&done), "src/a.rs:3 (resolved)");
 }

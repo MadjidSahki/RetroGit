@@ -287,7 +287,11 @@ impl RetroGitApp {
     fn open_requested(&mut self, path: PathBuf) {
         match crate::cli::route(path) {
             crate::cli::Requested::Link(link) => self.state.open_link(&link),
-            crate::cli::Requested::Folder(path) => self.worker.send(Command::OpenRepo(path)),
+            crate::cli::Requested::Folder(path) => {
+                if let Some(cmd) = self.state.request_repo_switch(Command::OpenRepo(path)) {
+                    self.worker.send(cmd);
+                }
+            }
         }
     }
 
@@ -366,6 +370,14 @@ pub fn apply_appearance(ctx: &egui::Context, saved: &crate::config::AppearanceCo
     )));
 }
 
+/// What brings the window back in front: out of the Dock first, then focused.
+pub fn bring_to_front() -> [egui::ViewportCommand; 2] {
+    [
+        egui::ViewportCommand::Minimized(false),
+        egui::ViewportCommand::Focus,
+    ]
+}
+
 impl eframe::App for RetroGitApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         while let Ok(ev) = self.worker.events.try_recv() {
@@ -378,13 +390,16 @@ impl eframe::App for RetroGitApp {
             .unwrap_or_default();
         for path in requested {
             self.open_requested(path);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            for c in bring_to_front() {
+                ctx.send_viewport_cmd(c);
+            }
         }
         #[cfg(target_os = "macos")]
         for link in crate::notify::macos::take_clicked() {
             self.state.open_link(&link);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            for c in bring_to_front() {
+                ctx.send_viewport_cmd(c);
+            }
         }
         if let Some(found) = self.ides.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.state.ides = found;

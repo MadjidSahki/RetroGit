@@ -70,6 +70,11 @@ pub struct ConflictEditor {
     /// The file changed on disk while edited: offered with Reload.
     pub on_disk: Option<ConflictFile>,
     pub confirm: Option<ConflictConfirm>,
+    /// A resolution was sent and Git has not answered yet: the buttons are greyed.
+    pub resolving: bool,
+    /// The result pane scrolls to the current block on its next frame (opening, Next,
+    /// Previous, a choice), not when an edit merely moves the block.
+    pub scroll_result: bool,
     /// Syntax colors of each pane (computed in the background; `result_colors` again after
     /// every change of the result).
     pub mine_colors: Colors,
@@ -87,13 +92,60 @@ pub struct ConflictEditor {
     theirs_blocks: Vec<Option<(usize, usize)>>,
 }
 
+/// `text` with every lone `\n` turned into `\r\n`.
+fn to_crlf(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut prev = None;
+    for c in text.chars() {
+        if c == '\n' && prev != Some('\r') {
+            out.push('\r');
+        }
+        out.push(c);
+        prev = Some(c);
+    }
+    out
+}
+
 impl ConflictEditor {
+    /// Send `cmd` (a resolution): the buttons stay greyed until Git answers.
+    pub fn resolve(&mut self, cmd: crate::protocol::Command) -> crate::protocol::Command {
+        self.resolving = true;
+        cmd
+    }
+
+    /// The working file uses CRLF line endings: edited as plain `\n` (so Enter, Backspace and
+    /// Delete act on whole line breaks), written back as CRLF by [`Self::content`].
+    pub fn crlf(&self) -> bool {
+        self.file
+            .working
+            .as_deref()
+            .is_some_and(|w| w.contains("\r\n"))
+    }
+
+    /// What Mark resolved writes: `result` with the file's own line endings back.
+    pub fn content(&self) -> String {
+        if self.crlf() {
+            to_crlf(&self.result)
+        } else {
+            self.result.clone()
+        }
+    }
+
     pub fn new(file: ConflictFile) -> ConflictEditor {
-        let result = file.working.clone().unwrap_or_default();
+        let working = file.working.as_deref().unwrap_or_default();
+        let crlf = working.contains("\r\n");
+        let lf = |t: &str| {
+            if crlf {
+                t.replace("\r\n", "\n")
+            } else {
+                t.to_string()
+            }
+        };
+        let result = lf(working);
         let original = parse_conflicts(&result);
         let locate = |text: &Option<String>, pane| {
             text.as_deref()
-                .map(|t| locate_blocks(&original, t, pane))
+                .map(|t| locate_blocks(&original, &lf(t), pane))
                 .unwrap_or_default()
         };
         ConflictEditor {
@@ -107,6 +159,8 @@ impl ConflictEditor {
             edited: false,
             on_disk: None,
             confirm: None,
+            resolving: false,
+            scroll_result: true,
             mine_colors: Colors::NotRequested,
             theirs_colors: Colors::NotRequested,
             result_colors: Colors::NotRequested,
@@ -218,15 +272,18 @@ impl ConflictEditor {
         }
         let text = apply_choice(&self.result, self.current, choice);
         self.set_result(text);
+        self.scroll_result = true;
     }
 
     pub fn next(&mut self) {
         self.current += 1;
         self.clamp();
+        self.scroll_result = true;
     }
 
     pub fn previous(&mut self) {
         self.current = self.current.saturating_sub(1);
+        self.scroll_result = true;
     }
 
     /// Keep `current` on an existing block (after edits).
@@ -273,6 +330,7 @@ impl ChangesView {
             return false;
         }
         self.conflict_path = Some(path.to_string());
+        self.conflict_error = None;
         self.shown = None;
         self.diff = None;
         true
@@ -340,6 +398,7 @@ impl AppState {
         if c.conflict_path.as_deref() != Some(file.path.as_str()) {
             return;
         }
+        c.conflict_error = None;
         match c.conflict.as_mut() {
             Some(ed) if ed.file.path == file.path && ed.edited => {
                 // Never overwrite what the user typed; offer the new version instead.
@@ -355,6 +414,9 @@ impl AppState {
     /// `path` was resolved: show the next conflicted file, or say it is over.
     pub(super) fn conflict_resolved(&mut self, path: &str) {
         let c = &mut self.changes;
+        if let Some(ed) = c.conflict.as_mut() {
+            ed.resolving = false;
+        }
         if c.conflict.as_ref().is_some_and(|e| e.file.path == path) {
             c.conflict = None;
             c.conflict_path = None;

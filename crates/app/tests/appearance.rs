@@ -327,3 +327,16 @@ fn a_huge_error_detail_keeps_the_ok_button_on_screen() {
     let ok = h.get_by_label(s::OK).rect();
     assert!(screen.contains_rect(ok), "OK at {ok:?}, screen {screen:?}");
 }
+
+#[test]
+fn a_zoom_key_while_appearance_is_open_survives_ok_and_cancel() {
+    let mut st = AppState::new(Config::default());
+    st.open_appearance();
+    st.zoom_key(ZoomStep::In);
+    st.appearance_ok();
+    assert_eq!(st.config.appearance.zoom, 1.1, "OK keeps it");
+    st.open_appearance();
+    st.zoom_key(ZoomStep::In);
+    st.appearance_cancel();
+    assert_eq!(st.config.appearance.zoom, 1.2, "Cancel keeps it");
+}

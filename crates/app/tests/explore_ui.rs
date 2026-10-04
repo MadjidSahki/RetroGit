@@ -352,3 +352,68 @@ fn code_rows_reach_the_bottom_of_their_frame() {
         clip.bottom()
     );
 }
+
+#[test]
+fn clicking_a_symbolic_link_opens_it() {
+    let mut w = world();
+    loaded(
+        &mut w.state,
+        ExploreResult::Tree {
+            rev: "HEAD".into(),
+            commit: "c0ffee1234".into(),
+            entries: vec![TreeEntry {
+                path: "link".into(),
+                kind: EntryKind::Symlink,
+                size: 9,
+            }],
+        },
+    );
+    let mut h = harness(w);
+    h.run();
+    h.get_by_label("link").click();
+    h.run();
+    assert_eq!(h.state().state.explore.file.as_deref(), Some("link"));
+}
+
+/// Whether the row of `text` is drawn (only the visible rows are).
+fn row_shown(h: &Harness<'static, World>, text: &str) -> bool {
+    h.output()
+        .shapes
+        .iter()
+        .any(|c| matches!(&c.shape, egui::Shape::Text(t) if t.galley.job.text.ends_with(text)))
+}
+
+#[test]
+fn opening_the_same_search_result_again_scrolls_to_it_again() {
+    let mut w = world();
+    w.state.explore.open_match("README.md", 300);
+    let text: String = (1..=400).map(|i| format!("line {i}\n")).collect();
+    loaded(
+        &mut w.state,
+        ExploreResult::File {
+            rev: "c0ffee1234".into(),
+            path: "README.md".into(),
+            content: FileContent::Text(text),
+        },
+    );
+    let mut h = harness(w);
+    h.run();
+    h.run();
+    assert!(row_shown(&h, "  line 300"), "scrolled to the match");
+    // The user scrolls back to the top.
+    h.event(egui::Event::PointerMoved(egui::pos2(800.0, 400.0)));
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, 100_000.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    // The wheel scrolls smoothly over several frames.
+    h.run_steps(30);
+    assert!(row_shown(&h, "  line 1"), "back at the top");
+    assert!(!row_shown(&h, "  line 300"));
+    h.state_mut().state.explore.open_match("README.md", 300);
+    h.run();
+    h.run();
+    assert!(row_shown(&h, "  line 300"), "scrolled to the match again");
+}

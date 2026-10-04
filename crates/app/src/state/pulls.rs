@@ -6,6 +6,7 @@ use github::{
     ReviewEvent,
 };
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::AppState;
@@ -91,8 +92,8 @@ pub struct PullsView {
     pub file: Option<String>,
     pub file_diff: Option<FileDiff>,
     pub file_colors: crate::highlight::Colors,
-    /// Line comments of the review being written (for `selected`).
-    pub pending: Vec<LineComment>,
+    /// Line comments of the reviews being written, by pull request number.
+    pub pending: HashMap<u64, Vec<LineComment>>,
     /// Conversation comment being typed.
     pub comment: String,
     /// `comment` was sent: cleared once GitHub accepted it, kept after an error.
@@ -115,6 +116,10 @@ pub struct PullsView {
     pub loaded_at: Option<std::time::Instant>,
     /// Search sent for `assignable` (GitHub returns at most 100 people per search).
     pub assignable_query: Option<String>,
+    /// Pull request created in this session, until GitHub's list has it (its search lags).
+    pub created: Option<u64>,
+    /// The detail of this pull request failed to load, and why.
+    pub load_error: Option<(u64, String)>,
 }
 
 impl PullsView {
@@ -136,7 +141,7 @@ impl PullsView {
             self.file_diff = None;
             self.file_colors = crate::highlight::Colors::NotRequested;
             self.selection = None;
-            self.pending.clear();
+            self.load_error = None;
             self.comment.clear();
             self.comment_sent = false;
             self.sub_tab = PullTab::Conversation;
@@ -166,6 +171,39 @@ impl PullsView {
         self.selection = None;
         self.file_diff = Some(crate::pr_diff::parse_patch(&f.path, f.patch.as_deref()));
         self.file_colors = crate::highlight::Colors::NotRequested;
+    }
+
+    /// Line comments waiting in the review of the selected pull request.
+    pub fn selected_pending(&self) -> &[LineComment] {
+        self.selected
+            .and_then(|n| self.pending.get(&n))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// Line comments waiting in every pull request of this repository.
+    pub fn pending_total(&self) -> usize {
+        self.pending.values().map(Vec::len).sum()
+    }
+
+    /// Drop the `i`th pending line comment of the selected pull request.
+    pub fn drop_pending(&mut self, i: usize) {
+        let Some(n) = self.selected else {
+            return;
+        };
+        if let Some(list) = self.pending.get_mut(&n)
+            && i < list.len()
+        {
+            list.remove(i);
+            if list.is_empty() {
+                self.pending.remove(&n);
+            }
+        }
+    }
+
+    /// The selected pull request is loaded again: forget why it failed last time.
+    pub fn reload_selected(&mut self) -> Option<u64> {
+        self.load_error = None;
+        self.selected
     }
 
     pub fn summary(&self, number: u64) -> Option<&PrSummary> {
@@ -298,12 +336,28 @@ impl AppState {
         match event {
             Event::PullsLoaded { slug, filter, list } => {
                 if p.slug.as_ref() == Some(&slug) && p.filter == filter {
-                    p.list = list;
+                    let old = std::mem::replace(&mut p.list, list);
                     p.loading = false;
+                    if let Some(n) = p.created {
+                        if p.list.iter().any(|r| r.number == n) {
+                            p.created = None;
+                        } else if p.selected == Some(n)
+                            && let Some(row) = old.into_iter().find(|r| r.number == n)
+                        {
+                            // GitHub's search does not list it yet: keep it.
+                            p.list.insert(0, row);
+                        }
+                    }
                 }
             }
             Event::PullLoaded { slug, detail } => {
                 if p.slug.as_ref() == Some(&slug) && p.selected == Some(detail.summary.number) {
+                    if p.created == Some(detail.summary.number)
+                        && detail.summary.state != github::PrState::Open
+                    {
+                        // Merged or closed since: lists no longer keep it.
+                        p.created = None;
+                    }
                     // Keep the list in step with what the detail says.
                     if let Some(row) = p
                         .list
@@ -311,7 +365,13 @@ impl AppState {
                         .find(|r| r.number == detail.summary.number)
                     {
                         *row = detail.summary.clone();
+                    } else if p.created == Some(detail.summary.number)
+                        && matches!(p.filter, PrFilter::Open | PrFilter::Mine)
+                    {
+                        // Just created: open and ours, before GitHub's search lists it.
+                        p.list.insert(0, detail.summary.clone());
                     }
+                    p.load_error = None;
                     p.detail = Some(Arc::new(*detail));
                     p.loaded_at = Some(std::time::Instant::now());
                 }
@@ -356,6 +416,7 @@ impl AppState {
                     p.busy = false;
                     p.dialog = None;
                     p.select(number);
+                    p.created = Some(number);
                     p.stale = true;
                     p.note = Some(s::NOTE_PULL_CREATED.to_string());
                 }
@@ -372,7 +433,7 @@ impl AppState {
                 if p.selected == Some(number) {
                     // The review went through with its line comments.
                     if matches!(p.dialog, Some(PullDialog::Review { .. })) {
-                        p.pending.clear();
+                        p.pending.remove(&number);
                     }
                     if p.comment_sent {
                         p.comment.clear();
@@ -387,7 +448,9 @@ impl AppState {
 
     /// Queue a line comment in the pending review (from the line comment dialog).
     pub fn queue_line_comment(&mut self, comment: LineComment) {
-        self.pulls.pending.push(comment);
+        if let Some(n) = self.pulls.selected {
+            self.pulls.pending.entry(n).or_default().push(comment);
+        }
     }
 }
 

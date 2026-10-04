@@ -163,6 +163,7 @@ impl Worker {
                 self.add_account(token, &user);
                 self.accounts_changed();
                 self.emit(Event::SignedIn(user));
+                self.send_repo_account();
             }
             Err(GithubError::Unauthorized) if is_pat => {
                 self.fail(
@@ -216,6 +217,7 @@ impl Worker {
         if self.accounts.list().is_empty() {
             self.emit(Event::SignedOut);
         }
+        self.send_repo_account();
     }
 
     fn learn(&mut self, slug: &Slug, login: &str) {

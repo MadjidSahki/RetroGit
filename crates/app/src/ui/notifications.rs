@@ -93,7 +93,9 @@ fn open_target(egui_ctx: &egui::Context, cx: &mut Ctx<'_>, repo: &str, target: N
         NotificationTarget::Current(number) => cx.state.show_pull(number),
         NotificationTarget::Local(path, number) => {
             cx.state.pulls.open_after_switch = split_repo(repo).map(|slug| (slug, number));
-            cx.worker.send(Command::OpenRepo(path));
+            if let Some(cmd) = cx.state.request_repo_switch(Command::OpenRepo(path)) {
+                cx.worker.send(cmd);
+            }
         }
         NotificationTarget::Browser(url) => egui_ctx.open_url(egui::OpenUrl::new_tab(url)),
     }

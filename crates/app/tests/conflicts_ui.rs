@@ -230,3 +230,187 @@ fn undo_does_not_bring_back_another_files_text() {
     h.run();
     assert!(!result(&h).contains("login"), "{}", result(&h));
 }
+
+fn disabled(h: &Harness<'static, World>, label: &str) -> bool {
+    use egui_kittest::kittest::NodeT;
+    h.get_by_label(label).accesskit_node().is_disabled()
+}
+
+#[test]
+fn mark_resolved_is_greyed_until_git_answers() {
+    let mut w = world(ConflictKind::Content);
+    w.state
+        .changes
+        .conflict
+        .as_mut()
+        .unwrap()
+        .edit("fn login() {\n    check(a);\n}\n".into());
+    let mut h = harness(w);
+    h.run();
+    assert!(!disabled(&h, s::MARK_RESOLVED));
+    h.get_by_label(s::MARK_RESOLVED).click();
+    h.run();
+    assert!(h.state().state.changes.conflict.as_ref().unwrap().resolving);
+    assert!(disabled(&h, s::MARK_RESOLVED));
+    assert!(disabled(&h, "Whole file: theirs"));
+}
+
+#[test]
+fn a_failed_conflict_load_says_why() {
+    let mut w = world(ConflictKind::Content);
+    assert!(w.state.changes.open_conflict("README.md"));
+    w.state.apply(Event::Error {
+        during: retrogit::protocol::Op::Conflict("README.md".into()),
+        error: retrogit::protocol::AppError::new(
+            retrogit::protocol::Severity::Warning,
+            "cannot read README.md: Is a directory",
+        ),
+    });
+    let mut h = harness(w);
+    h.run();
+    assert!(
+        h.query_by_label("cannot read README.md: Is a directory")
+            .is_some()
+    );
+    assert!(h.query_by_label(s::LOADING_CONFLICT).is_none());
+}
+
+#[test]
+fn next_scrolls_the_result_to_the_current_block() {
+    let mut w = world(ConflictKind::Content);
+    let lines = |n: usize, t: &str| (0..n).map(|i| format!("{t}{i}\n")).collect::<String>();
+    let block = |m: &str| format!("<<<<<<< HEAD\n{m}\n=======\nother\n>>>>>>> x\n");
+    let working = format!(
+        "{}{}{}{}{}",
+        lines(100, "top"),
+        block("one"),
+        lines(300, "middle"),
+        block("two"),
+        lines(100, "end")
+    );
+    assert!(w.state.changes.open_conflict("README.md"));
+    w.state.apply(Event::ConflictLoaded(Box::new(ConflictFile {
+        path: "README.md".into(),
+        kind: ConflictKind::Content,
+        mine: Some(format!(
+            "{}one\n{}two\n",
+            lines(100, "top"),
+            lines(300, "middle")
+        )),
+        theirs: Some(format!(
+            "{}other\n{}other\n",
+            lines(100, "top"),
+            lines(300, "middle")
+        )),
+        working: Some(working),
+        operation: Some(Operation::Merge),
+    })));
+    let mut h = harness(w);
+    h.run();
+    h.run();
+    let top = |h: &Harness<'static, World>| result_input(h, "middle299").rect().top();
+    let first = top(&h);
+    h.get_by_label(s::NEXT_CONFLICT).click();
+    h.run();
+    h.run();
+    let second = top(&h);
+    // 305 lines further down: the result moved up by far more than a screen.
+    assert!(second < first - 2000.0, "{first} -> {second}");
+}
+
+#[test]
+fn typing_above_the_current_block_does_not_scroll_the_result() {
+    let mut w = world(ConflictKind::Content);
+    let lines = |n: usize, t: &str| (0..n).map(|i| format!("{t}{i}\n")).collect::<String>();
+    let block = |m: &str| format!("<<<<<<< HEAD\n{m}\n=======\nother\n>>>>>>> x\n");
+    let working = format!(
+        "{}{}{}{}{}",
+        lines(100, "top"),
+        block("one"),
+        lines(300, "middle"),
+        block("two"),
+        lines(100, "end")
+    );
+    assert!(w.state.changes.open_conflict("README.md"));
+    w.state.apply(Event::ConflictLoaded(Box::new(ConflictFile {
+        path: "README.md".into(),
+        kind: ConflictKind::Content,
+        mine: Some(format!(
+            "{}one\n{}two\n",
+            lines(100, "top"),
+            lines(300, "middle")
+        )),
+        theirs: Some(format!(
+            "{}other\n{}other\n",
+            lines(100, "top"),
+            lines(300, "middle")
+        )),
+        working: Some(working),
+        operation: Some(Operation::Merge),
+    })));
+    let mut h = harness(w);
+    h.run();
+    h.run();
+    // The user scrolls back to the top, then adds a line there.
+    h.event(egui::Event::PointerMoved(egui::pos2(900.0, 500.0)));
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, 100_000.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(30);
+    let top = |h: &Harness<'static, World>| result_input(h, "middle299").rect().top();
+    let before = top(&h);
+    let typed = format!("new line\n{}", result(&h));
+    h.state_mut()
+        .state
+        .changes
+        .conflict
+        .as_mut()
+        .unwrap()
+        .typed(typed);
+    h.run();
+    h.run();
+    let after = top(&h);
+    assert!((after - before).abs() < 1.0, "{before} -> {after}");
+}
+
+#[test]
+fn enter_and_backspace_in_a_crlf_file_keep_crlf() {
+    let mut w = world(ConflictKind::Content);
+    assert!(w.state.changes.open_conflict("README.md"));
+    w.state.apply(Event::ConflictLoaded(Box::new(ConflictFile {
+        path: "README.md".into(),
+        kind: ConflictKind::Content,
+        mine: Some("readme mine\r\n".into()),
+        theirs: Some("readme theirs\r\n".into()),
+        working: Some(
+            "<<<<<<< HEAD\r\nreadme mine\r\n=======\r\nreadme theirs\r\n>>>>>>> x\r\n".into(),
+        ),
+        operation: Some(Operation::Merge),
+    })));
+    let mut h = harness(w);
+    h.run();
+    result_input(&h, "readme").focus();
+    h.run();
+    result_input(&h, "readme").type_text("x");
+    h.run();
+    h.key_press(egui::Key::Enter);
+    h.run();
+    result_input(&h, "readme").type_text("y");
+    h.run();
+    let content =
+        |h: &Harness<'static, World>| h.state().state.changes.conflict.as_ref().unwrap().content();
+    let r = content(&h);
+    assert!(r.contains("x\r\ny"), "{r:?}");
+    assert_eq!(r.matches('\n').count(), r.matches("\r\n").count(), "{r:?}");
+    // Backspace at the start of a line joins it with the line above, leaving no lone '\r'.
+    h.key_press(egui::Key::ArrowLeft);
+    h.run();
+    h.key_press(egui::Key::Backspace);
+    h.run();
+    let r = content(&h);
+    assert!(r.contains("xy"), "{r:?}");
+    assert_eq!(r.matches('\r').count(), r.matches("\r\n").count(), "{r:?}");
+}

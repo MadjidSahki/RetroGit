@@ -566,7 +566,7 @@ fn refresh_requests_are_deduplicated_while_one_is_pending() {
     until(&w, |e| matches!(e, Event::DeviceCode { .. }));
     let refresh = w.refresher();
     for _ in 0..10 {
-        refresh();
+        refresh(retrogit::watch::Refresh::Status);
         w.send(Command::RefreshStatus);
     }
     w.cancel_device_flow();
@@ -577,6 +577,35 @@ fn refresh_requests_are_deduplicated_while_one_is_pending() {
         .filter(|e| matches!(e, Event::StatusLoaded(_)))
         .count();
     assert_eq!(refreshes, 1, "{evs:?}");
+}
+
+#[test]
+fn a_pending_refs_refresh_absorbs_status_refreshes() {
+    let mut server = mockito::Server::new();
+    let _c = mock_device_code(&mut server);
+    let _t = server
+        .mock("POST", "/login/oauth/access_token")
+        .with_body(r#"{"error":"authorization_pending"}"#)
+        .create();
+    let d = repo_for_changes();
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "Iv1.test");
+    w.send(Command::OpenRepo(d.path().to_path_buf()));
+    until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+    w.send(Command::StartDeviceFlow);
+    until(&w, |e| matches!(e, Event::DeviceCode { .. }));
+    let refresh = w.refresher();
+    for _ in 0..10 {
+        refresh(retrogit::watch::Refresh::Refs);
+        refresh(retrogit::watch::Refresh::Status);
+        w.send(Command::RefreshRefs);
+        w.send(Command::RefreshStatus);
+    }
+    w.cancel_device_flow();
+    w.send(Command::ValidateToken); // marker: replies SignedOut
+    let evs = until(&w, |e| matches!(e, Event::SignedOut));
+    let count = |f: fn(&Event) -> bool| evs.iter().filter(|e| f(e)).count();
+    assert_eq!(count(|e| matches!(e, Event::RepoOpened(_))), 1, "{evs:?}");
+    assert_eq!(count(|e| matches!(e, Event::StatusLoaded(_))), 1, "{evs:?}");
 }
 
 #[test]
@@ -754,6 +783,49 @@ mod sync {
             unreachable!()
         };
         assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn a_commit_made_outside_the_app_shows_up_after_a_refs_refresh() {
+        let Some((_tmp, work)) = remote_env() else {
+            return;
+        };
+        let server = mockito::Server::new();
+        let w = start(&server, Arc::new(MemoryAccounts::default()), "");
+        w.send(Command::OpenRepo(work.clone()));
+        until(&w, |e| {
+            matches!(
+                e,
+                Event::SyncFinished {
+                    op: SyncOp::Fetch,
+                    ..
+                }
+            )
+        });
+        // The fetch then reloads branches and history: let it finish first.
+        until(&w, |e| matches!(e, Event::LogLoaded { .. }));
+        // A commit made by another tool, with git2 (no global git config involved).
+        let r = git2::Repository::open(&work).unwrap();
+        std::fs::write(work.join("outside.txt"), "x\n").unwrap();
+        let mut index = r.index().unwrap();
+        index.add_path(Path::new("outside.txt")).unwrap();
+        index.write().unwrap();
+        let tree = r.find_tree(index.write_tree().unwrap()).unwrap();
+        let parent = r.head().unwrap().peel_to_commit().unwrap();
+        let sig = git2::Signature::now("Ada", "ada@example.com").unwrap();
+        r.commit(Some("HEAD"), &sig, &sig, "outside", &tree, &[&parent])
+            .unwrap();
+        w.send(Command::RefreshRefs);
+        let evs = until(
+            &w,
+            |e| matches!(e, Event::BranchesLoaded(b) if b.iter().any(|b| b.name == "main" && b.ahead == 1)),
+        );
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, Event::RepoOpened(s) if s.head == gitcore::Head::Branch("main".into())
+                    && s.last_commit.as_ref().is_some_and(|c| c.summary == "outside"))),
+            "{evs:?}"
+        );
     }
 
     #[test]

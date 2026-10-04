@@ -501,3 +501,56 @@ fn repositories_seen_only_with_gh_mark_their_owner_as_restricted() {
     assert!(tokens.is_restricted("ada", "corp"));
     assert!(!tokens.is_restricted("ada", "ada"));
 }
+
+/// A repository whose origin is `https://github.com/{slug}.git`, opened by `w`; returns
+/// once the worker told which account it uses.
+fn open_github_repo(w: &WorkerHandle, slug: &str) -> (tempfile::TempDir, Option<String>) {
+    let d = tempfile::tempdir().unwrap();
+    let r = git2::Repository::init(d.path()).unwrap();
+    r.remote("origin", &format!("https://github.com/{slug}.git"))
+        .unwrap();
+    w.send(Command::OpenRepo(d.path().to_path_buf()));
+    let evs = until(w, |e| matches!(e, Event::RepoAccount { .. }));
+    let Some(Event::RepoAccount { login, .. }) = evs.last().cloned() else {
+        unreachable!()
+    };
+    (d, login)
+}
+
+#[test]
+fn signing_in_tells_the_account_of_the_open_repository() {
+    let mut server = mockito::Server::new();
+    user(&mut server, "ghp_ada", "ada", &["corp"]);
+    let w = start(&server, Arc::new(MemoryAccounts::default()), &[], &[]);
+    let (_d, before) = open_github_repo(&w, "corp/app");
+    assert_eq!(before, None, "no account yet");
+    w.send(Command::SavePat("ghp_ada".into()));
+    until(&w, |e| matches!(e, Event::SignedIn(u) if u.login == "ada"));
+    until(
+        &w,
+        |e| matches!(e, Event::RepoAccount { login: Some(l), .. } if l == "ada"),
+    );
+}
+
+#[test]
+fn a_rejected_token_tells_the_open_repository_its_account_changed() {
+    let mut server = mockito::Server::new();
+    let (w, _) = two_accounts(&mut server);
+    let (_d, before) = open_github_repo(&w, "corp/x");
+    assert_eq!(before.as_deref(), Some("ada"));
+    server
+        .mock("POST", "/graphql")
+        .match_header("authorization", "Bearer gho_ada")
+        .with_status(401)
+        .create();
+    w.send(Command::LoadPulls {
+        slug: ("corp".into(), "x".into()),
+        filter: PrFilter::Open,
+    });
+    until(&w, |e| matches!(e, Event::Error { .. }));
+    let evs = until(&w, |e| matches!(e, Event::RepoAccount { .. }));
+    assert!(
+        !matches!(evs.last(), Some(Event::RepoAccount { login: Some(l), .. }) if l == "ada"),
+        "ada must sign in again: {evs:?}"
+    );
+}

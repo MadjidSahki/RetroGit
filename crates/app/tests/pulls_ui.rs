@@ -274,3 +274,113 @@ fn a_long_title_keeps_edit_and_the_actions_on_screen() {
         );
     }
 }
+
+fn fail_detail(w: &mut World, number: u64, message: &str) {
+    w.state.apply(Event::Error {
+        during: retrogit::protocol::Op::PullDetail(number),
+        error: retrogit::protocol::AppError::new(retrogit::protocol::Severity::Warning, message),
+    });
+}
+
+#[test]
+fn a_failed_pull_request_load_says_why_instead_of_loading() {
+    let mut w = world(false);
+    w.state.pulls.select(8);
+    fail_detail(&mut w, 8, "Could not resolve to a PullRequest");
+    let mut h = harness(w);
+    h.run();
+    assert!(
+        h.query_by_label("Could not resolve to a PullRequest")
+            .is_some()
+    );
+    assert!(h.query_by_label(s::LOADING_PULL).is_none());
+    h.get_by_label(s::REFRESH).click();
+    h.run();
+    assert_eq!(
+        h.state().state.pulls.load_error,
+        None,
+        "Refresh tries again"
+    );
+    assert!(h.query_by_label(s::LOADING_PULL).is_some());
+}
+
+#[test]
+fn failed_files_say_why_in_the_files_tab() {
+    let mut w = world(false);
+    fail_detail(&mut w, 7, "files failed");
+    w.state.pulls.sub_tab = retrogit::state::PullTab::Files;
+    let mut h = harness(w);
+    h.run();
+    assert!(h.query_by_label("files failed").is_some());
+    assert!(h.query_by_label(s::LOADING_PULL).is_none());
+}
+
+fn pending_world() -> World {
+    let mut w = world(false);
+    w.state.queue_line_comment(github::LineComment {
+        path: "a.rs".into(),
+        line: 1,
+        side: github::DiffSide::Right,
+        start: None,
+        body: "x".into(),
+    });
+    w.state.queue_line_comment(github::LineComment {
+        path: "a.rs".into(),
+        line: 2,
+        side: github::DiffSide::Right,
+        start: None,
+        body: "y".into(),
+    });
+    w
+}
+
+#[test]
+fn changing_repository_with_pending_comments_asks_and_cancel_stays() {
+    let mut w = pending_world();
+    let other = retrogit::protocol::Command::OpenRepo(PathBuf::from("/tmp/retrogit-none-a"));
+    assert!(w.state.request_repo_switch(other).is_none());
+    let mut h = harness(w);
+    h.run();
+    assert!(h.query_by_label(&s::pending_discard_question(2)).is_some());
+    assert_eq!(
+        s::pending_discard_question(2),
+        "Discard 2 pending line comments?"
+    );
+    h.get_by_label(s::CANCEL).click();
+    h.run();
+    let st = &h.state().state;
+    assert_eq!(st.repo_switch, None);
+    assert_eq!(st.pulls.pending_total(), 2);
+    assert_eq!(st.current.as_ref().unwrap().path, PathBuf::from("/tmp/r"));
+    assert!(h.query_by_label(&s::pending_discard_question(2)).is_none());
+}
+
+#[test]
+fn changing_repository_with_pending_comments_goes_on_ok() {
+    let mut w = pending_world();
+    let path = PathBuf::from("/tmp/retrogit-none-b");
+    let other = retrogit::protocol::Command::OpenRepo(path.clone());
+    assert!(w.state.request_repo_switch(other).is_none());
+    let mut h = harness(w);
+    h.run();
+    h.get_by_label(s::OK).click();
+    h.run();
+    assert_eq!(h.state().state.repo_switch, None);
+    // The worker was asked to open it (it does not exist: it says so).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        assert!(std::time::Instant::now() < deadline, "OpenRepo not sent");
+        if let Ok(Event::Error {
+            during: retrogit::protocol::Op::Open(p),
+            ..
+        }) = h
+            .state()
+            .worker
+            .events
+            .recv_timeout(std::time::Duration::from_millis(100))
+            && p == path
+        {
+            break;
+        }
+    }
+}

@@ -102,7 +102,7 @@ fn accounts_window(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             });
         });
     if let Some(login) = remove {
-        cx.worker.send(Command::RemoveAccount(login));
+        cx.state.accounts_remove = Some(login);
     }
     if add {
         // The sign-in window adds the account; this one comes back when it closes.
@@ -110,6 +110,33 @@ fn accounts_window(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
     }
     if close || r.close_requested {
         cx.state.accounts_dialog = false;
+        cx.state.accounts_remove = None;
+    }
+    remove_window(egui_ctx, cx);
+}
+
+/// "Remove @login?" with OK / Cancel.
+fn remove_window(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
+    let Some(login) = cx.state.accounts_remove.clone() else {
+        return;
+    };
+    let button = egui::vec2(90.0, 23.0);
+    let (mut ok, mut cancel) = (false, false);
+    let r = Dialog::new("accounts_remove", s::REMOVE_ACCOUNT_TITLE)
+        .width(400.0)
+        .show(egui_ctx, |ui| {
+            ui.add(egui::Label::new(s::remove_account_question(&login)).wrap());
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ok = ui.add(Button95::new(s::OK).min_size(button)).clicked();
+                cancel = ui.add(Button95::new(s::CANCEL).min_size(button)).clicked();
+            });
+        });
+    if ok {
+        cx.worker.send(Command::RemoveAccount(login));
+    }
+    if ok || cancel || r.close_requested {
+        cx.state.accounts_remove = None;
     }
 }
 
@@ -163,7 +190,7 @@ fn repo_account_window(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             slug: slug.clone(),
             login,
         });
-        if let Some(number) = cx.state.pulls.selected {
+        if let Some(number) = cx.state.pulls.reload_selected() {
             cx.worker.send(Command::LoadPull { slug, number });
         }
     }

@@ -234,9 +234,10 @@ fn only_a_missing_repository_suggests_the_restriction() {
         number: 99,
     });
     let evs = until(&w, |e| matches!(e, Event::Error { .. }));
-    let Some(Event::Error { error, .. }) = evs.last() else {
+    let Some(Event::Error { during, error }) = evs.last() else {
         unreachable!()
     };
+    assert_eq!(*during, Op::PullDetail(99), "the detail pane says why");
     assert_eq!(
         error.message,
         "Could not resolve to a PullRequest with the number of 99."

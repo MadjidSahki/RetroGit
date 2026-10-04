@@ -417,3 +417,14 @@ fn outside_retrogit_app_notifications_stay_on_osascript() {
         "tests do not run from an app bundle"
     );
 }
+
+#[test]
+fn a_clicked_notification_restores_then_focuses_the_window() {
+    assert_eq!(
+        retrogit::app::bring_to_front(),
+        [
+            egui::ViewportCommand::Minimized(false),
+            egui::ViewportCommand::Focus
+        ]
+    );
+}

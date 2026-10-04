@@ -258,6 +258,12 @@ pub const REVIEW_NEEDS_TEXT: &str = "Write a comment, or add line comments, firs
 pub const OWN_PULL_REVIEW: &str = "You cannot approve or request changes on your own pull request.";
 pub const PENDING_COMMENTS: &str = "pending line comments: send them with Review...";
 pub const DISCARD_PENDING: &str = "Discard pending comments";
+pub const PENDING_DISCARD_TITLE: &str = "Pending line comments";
+
+/// Asked before opening another repository while line comments are pending.
+pub fn pending_discard_question(n: usize) -> String {
+    format!("Discard {n} pending line comments?")
+}
 pub const MERGE_TITLE: &str = "Merge pull request";
 pub const MERGE_METHOD: &str = "Method:";
 pub const MERGE_COMMIT: &str = "Create a merge commit";
@@ -349,6 +355,12 @@ pub const NO_ACCOUNTS: &str = "No account yet.";
 pub const ADD_ACCOUNT: &str = "Add account...";
 pub const REMOVE: &str = "Remove";
 pub const SIGN_IN_AGAIN: &str = "sign in again";
+pub const REMOVE_ACCOUNT_TITLE: &str = "Remove account";
+
+/// Asked before removing the account `login`.
+pub fn remove_account_question(login: &str) -> String {
+    format!("Remove @{login}? Repositories assigned to it go back to automatic.")
+}
 pub const ACCOUNT_LABEL: &str = "Account:";
 pub const ACCOUNTS_COUNT: &str = "accounts";
 pub const CHECKING_ACCOUNT: &str = "Account: checking...";
@@ -444,6 +456,8 @@ pub const COMMENT_ON_LINES: &str = "Comment on lines {a}-{b}...";
 pub const SUGGEST_CHANGE: &str = "Suggest change...";
 pub const APPLY_SUGGESTION: &str = "Apply suggestion";
 pub const LINES_RANGE: &str = "lines {a}-{b}";
+/// A review thread on the old side of the diff, as in "path (old):12".
+pub const OLD_SIDE: &str = "old";
 pub const WHY_FORK_SUGGESTION: &str =
     "This pull request comes from a fork: apply its suggestions on github.com.";
 pub const WHY_CHECKS_RUNNING: &str = "Waiting for the required checks to finish.";

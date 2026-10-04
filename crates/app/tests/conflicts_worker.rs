@@ -255,3 +255,31 @@ fn a_pull_with_rebase_that_conflicts_is_resolved_and_continued() {
         "mine\nupstream\nbase\n"
     );
 }
+
+#[test]
+fn a_conflicted_file_that_cannot_be_read_fails_its_own_load() {
+    if !gitcore::git_available() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let dir = retrogit::watch::canonical(d.path());
+    merge_conflict(&dir);
+    // A directory where the file should be: reading it fails on every platform.
+    std::fs::remove_file(dir.join("a.txt")).unwrap();
+    std::fs::create_dir(dir.join("a.txt")).unwrap();
+    let w = start();
+    w.send(Command::OpenRepo(dir.clone()));
+    until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+    w.send(Command::LoadConflict("a.txt".into()));
+    let evs = until(&w, |e| {
+        matches!(e, Event::Error { .. } | Event::ConflictLoaded(_))
+    });
+    assert!(
+        matches!(
+            evs.last(),
+            Some(Event::Error { during: retrogit::protocol::Op::Conflict(p), .. }) if p == "a.txt"
+        ),
+        "{:?}",
+        evs.last()
+    );
+}

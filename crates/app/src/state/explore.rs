@@ -56,6 +56,8 @@ pub struct ExploreView {
     pub colors: Colors,
     /// Line to show once the content is there (1-based, from a search result).
     pub goto_line: Option<usize>,
+    /// Scroll to `goto_line` once (each opening of a search result asks again).
+    pub scroll_pending: bool,
     pub blame: Option<Vec<BlameBlock>>,
     /// The blamed text as a diff (for colors) and its colors.
     pub blame_code: Option<FileDiff>,
@@ -98,6 +100,7 @@ impl Default for ExploreView {
             code: None,
             colors: Colors::NotRequested,
             goto_line: None,
+            scroll_pending: false,
             blame: None,
             blame_code: None,
             blame_colors: Colors::NotRequested,
@@ -345,6 +348,7 @@ impl ExploreView {
         self.code = None;
         self.colors = Colors::NotRequested;
         self.goto_line = None;
+        self.scroll_pending = false;
         self.blame = None;
         self.blame_code = None;
         self.blame_colors = Colors::NotRequested;
@@ -437,6 +441,7 @@ impl ExploreView {
         self.open_file(path);
         self.view = FileView::Content;
         self.goto_line = Some(line);
+        self.scroll_pending = true;
     }
 
     /// Apply a result; `Err` is a message for the user.

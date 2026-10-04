@@ -20,6 +20,7 @@ use github::{Client, DeviceFlow, Step};
 use crate::logging;
 use crate::protocol::{AppError, Command, Event, Op, Severity};
 use crate::strings as s;
+use crate::watch::Refresh;
 
 pub struct WorkerDeps {
     pub client: Client,
@@ -45,6 +46,7 @@ pub struct WorkerHandle {
     cancel_clone: Arc<AtomicBool>,
     busy: Arc<AtomicBool>,
     refresh_pending: Arc<AtomicBool>,
+    refs_pending: Arc<AtomicBool>,
     cancel_net: Arc<AtomicBool>,
     explore: explore::ExploreService,
 }
@@ -62,8 +64,15 @@ impl WorkerHandle {
             Command::Fetch { .. } | Command::Pull(_) | Command::Push(_) => {
                 self.cancel_net.store(false, Ordering::SeqCst)
             }
-            // At most one refresh waiting in the queue.
-            Command::RefreshStatus if self.refresh_pending.swap(true, Ordering::SeqCst) => return,
+            // At most one refresh of each kind waiting in the queue; a refs refresh also
+            // refreshes the status.
+            Command::RefreshRefs if self.refs_pending.swap(true, Ordering::SeqCst) => return,
+            Command::RefreshStatus
+                if self.refs_pending.load(Ordering::SeqCst)
+                    || self.refresh_pending.swap(true, Ordering::SeqCst) =>
+            {
+                return;
+            }
             _ => {}
         }
         if self.tx.send(cmd).is_err() {
@@ -81,14 +90,23 @@ impl WorkerHandle {
         self.accounts.clone()
     }
 
-    /// Thread-safe "please refresh the status" callback (for the file watcher).
-    pub fn refresher(&self) -> impl Fn() + Send + 'static {
+    /// Thread-safe "please refresh the status / the refs" callback (for the file watcher).
+    pub fn refresher(&self) -> impl Fn(Refresh) + Send + 'static {
         let tx = self.tx.clone();
         let pending = self.refresh_pending.clone();
-        move || {
-            if !pending.swap(true, Ordering::SeqCst) {
-                let _ = tx.send(Command::RefreshStatus);
-            }
+        let refs_pending = self.refs_pending.clone();
+        move |kind| {
+            let cmd = match kind {
+                Refresh::Refs if !refs_pending.swap(true, Ordering::SeqCst) => Command::RefreshRefs,
+                Refresh::Status
+                    if !refs_pending.load(Ordering::SeqCst)
+                        && !pending.swap(true, Ordering::SeqCst) =>
+                {
+                    Command::RefreshStatus
+                }
+                _ => return,
+            };
+            let _ = tx.send(cmd);
         }
     }
 
@@ -154,6 +172,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
     let busy = Arc::new(AtomicBool::new(false));
     let worker_busy = busy.clone();
     let refresh_pending = Arc::new(AtomicBool::new(false));
+    let refs_pending = Arc::new(AtomicBool::new(false));
     let cancel_net = Arc::new(AtomicBool::new(false));
     let accounts = github::Accounts::default();
     // Both the worker and the explore service send events and wake the UI up.
@@ -178,6 +197,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
         shown_conflict: None,
         lease: None,
         refresh_pending: refresh_pending.clone(),
+        refs_pending: refs_pending.clone(),
         cancel_flow: cancel_flow.clone(),
         cancel_clone: cancel_clone.clone(),
         emit: Box::new(move |ev| worker_emit(ev)),
@@ -213,6 +233,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
         cancel_clone,
         busy,
         refresh_pending,
+        refs_pending,
         cancel_net,
         explore: explore::ExploreService::new(emit),
     }
@@ -237,6 +258,7 @@ struct Worker {
     /// File open in the conflict editor; re-sent after every refresh (changes on disk).
     shown_conflict: Option<String>,
     refresh_pending: Arc<AtomicBool>,
+    refs_pending: Arc<AtomicBool>,
     cancel_net: Arc<AtomicBool>,
     /// `(branch, remote commit)` recorded when a pushed commit of `branch` was amended:
     /// the only case where RetroGit offers a force push, leased on that commit.
@@ -272,6 +294,12 @@ impl Worker {
             Command::RefreshStatus => {
                 self.refresh_pending.store(false, Ordering::SeqCst);
                 self.refresh();
+            }
+            Command::RefreshRefs => {
+                self.refs_pending.store(false, Ordering::SeqCst);
+                if let Some(repo) = self.open_current(Op::Changes) {
+                    self.after_ref_change(&repo);
+                }
             }
             Command::LoadDiff { path, side } => self.load_diff(path, side),
             Command::Stage {

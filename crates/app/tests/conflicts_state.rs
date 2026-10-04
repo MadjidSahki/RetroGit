@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use gitcore::{
-    Change, Choice, ConflictFile, ConflictKind, FileStatus, Head, Operation, RepoSummary,
+    Change, Choice, ConflictFile, ConflictKind, FileStatus, Head, Operation, Pane, RepoSummary,
 };
 use retrogit::config::Config;
 use retrogit::protocol::Event;
@@ -255,4 +255,105 @@ fn big_files_are_not_sent_to_the_highlighter() {
     ed.edit("x\n".repeat(retrogit::highlight::MAX_LINES + 1));
     assert!(ed.colors_to_request().is_empty(), "too large: plain");
     assert_eq!(ed.result_colors, retrogit::highlight::Colors::Plain);
+}
+
+fn fail(st: &mut AppState, during: retrogit::protocol::Op) {
+    st.apply(Event::Error {
+        during,
+        error: retrogit::protocol::AppError::new(retrogit::protocol::Severity::Warning, "boom"),
+    });
+}
+
+#[test]
+fn a_failed_conflict_load_is_kept_to_say_why_and_a_retry_clears_it() {
+    use retrogit::protocol::Op;
+    let mut st = state();
+    assert!(st.changes.open_conflict("a.rs"));
+    fail(&mut st, Op::Conflict("b.rs".into()));
+    assert_eq!(st.changes.conflict_error, None, "another file");
+    fail(&mut st, Op::Conflict("a.rs".into()));
+    assert_eq!(st.changes.conflict_error.as_deref(), Some("boom"));
+    assert_eq!(st.changes.conflict_path.as_deref(), Some("a.rs"));
+    assert!(st.changes.open_conflict("a.rs"), "clicked again");
+    assert_eq!(st.changes.conflict_error, None, "retrying");
+    fail(&mut st, Op::Conflict("a.rs".into()));
+    st.apply(Event::ConflictLoaded(Box::new(file("a.rs", MARKED))));
+    assert_eq!(st.changes.conflict_error, None, "loaded after all");
+}
+
+#[test]
+fn resolving_is_set_when_sent_and_cleared_by_any_answer() {
+    use retrogit::protocol::{Command, Op};
+    let mut st = state();
+    open(&mut st, "a.rs");
+    let resolve = |st: &mut AppState| {
+        let ed = st.changes.conflict.as_mut().unwrap();
+        assert!(!ed.resolving);
+        let cmd = ed.resolve(Command::ResolveConflict {
+            path: "a.rs".into(),
+            content: "x\n".into(),
+        });
+        assert!(matches!(cmd, Command::ResolveConflict { .. }));
+        assert!(st.changes.conflict.as_ref().unwrap().resolving);
+    };
+    let resolving = |st: &AppState| st.changes.conflict.as_ref().unwrap().resolving;
+    resolve(&mut st);
+    fail(&mut st, Op::Changes);
+    assert!(!resolving(&st), "failed");
+    resolve(&mut st);
+    fail(&mut st, Op::Conflict("a.rs".into()));
+    assert!(!resolving(&st), "failed to load");
+    resolve(&mut st);
+    // A refresh queued before the resolution reloads the same file: still waiting for Git.
+    st.apply(Event::ConflictLoaded(Box::new(file("a.rs", MARKED))));
+    assert!(resolving(&st), "a reload is not Git's answer");
+    st.apply(Event::ConflictResolved("a.rs".into()));
+    open(&mut st, "a.rs");
+    resolve(&mut st);
+    st.apply(Event::ConflictResolved("other.rs".into()));
+    assert!(!resolving(&st), "resolved");
+}
+
+#[test]
+fn a_crlf_file_is_edited_with_plain_line_breaks_and_resolved_with_crlf() {
+    let mut st = state();
+    assert!(st.changes.open_conflict("a.rs"));
+    let mut crlf = file("a.rs", &MARKED.replace('\n', "\r\n"));
+    crlf.mine = crlf.mine.map(|m| m.replace('\n', "\r\n"));
+    crlf.theirs = crlf.theirs.map(|t| t.replace('\n', "\r\n"));
+    st.apply(Event::ConflictLoaded(Box::new(crlf)));
+    let ed = st.changes.conflict.as_mut().unwrap();
+    // The editor never sees a '\r': Enter, Backspace and Delete act on whole line breaks.
+    assert!(!ed.result.contains('\r'), "{:?}", ed.result);
+    assert_eq!(ed.result, MARKED);
+    assert_eq!(ed.conflicts_left(), 2);
+    assert_eq!(
+        ed.current_side_block(Pane::Mine),
+        Some((1, 1)),
+        "blocks still found"
+    );
+    // Typed line breaks, and joined lines, leave the file all CRLF.
+    ed.typed("a\nb\nc".into());
+    assert_eq!(ed.content(), "a\r\nb\r\nc");
+    ed.typed("ab\nc".into());
+    assert_eq!(ed.content(), "ab\r\nc");
+
+    let mut st = state();
+    open(&mut st, "a.rs");
+    let ed = st.changes.conflict.as_mut().unwrap();
+    ed.typed("a\nb\nc".into());
+    assert_eq!(ed.content(), "a\nb\nc", "LF file: unchanged");
+}
+
+#[test]
+fn a_theme_change_recolors_the_result_shown() {
+    use retrogit::highlight::Colors;
+    let mut st = state();
+    open(&mut st, "a.rs");
+    st.changes.conflict.as_mut().unwrap().result_colors_shown = Colors::Plain;
+    st.forget_colors(true);
+    assert_eq!(
+        st.changes.conflict.as_ref().unwrap().result_colors_shown,
+        Colors::NotRequested
+    );
 }

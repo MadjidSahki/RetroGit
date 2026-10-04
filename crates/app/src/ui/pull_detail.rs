@@ -72,6 +72,21 @@ pub fn duration_text(start: Option<&str>, end: Option<&str>) -> String {
     format!("{}m {:02}s", d / 60, d % 60)
 }
 
+/// "Loading..." or, if loading the selected pull request failed, why.
+fn loading(ui: &mut egui::Ui, p: &crate::state::PullsView) {
+    match &p.load_error {
+        Some((n, err)) if p.selected == Some(*n) => {
+            ui.label(RichText::new(err.as_str()).color(win95::theme::palette(ui.ctx()).error))
+        }
+        _ => ui.label(s::LOADING_PULL),
+    };
+}
+
+/// The whole comment, shown on hover when only its first line fits in the row.
+pub fn comment_hover(body: &str) -> Option<&str> {
+    body.trim_end().contains('\n').then_some(body)
+}
+
 pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
     bevel_frame(
         ui,
@@ -86,7 +101,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
                 return;
             }
             let Some(d) = p.detail.clone() else {
-                ui.label(s::LOADING_PULL);
+                loading(ui, p);
                 return;
             };
             // Checks running: reload now and then, so Merge follows them.
@@ -283,12 +298,12 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
             ui.ctx().open_url(egui::OpenUrl::new_tab(&d.summary.url));
         }
     });
-    if !cx.state.pulls.pending.is_empty() {
+    if !cx.state.pulls.selected_pending().is_empty() {
         // Shown until the review is submitted.
         ui.label(
             RichText::new(format!(
                 "{} {}",
-                cx.state.pulls.pending.len(),
+                cx.state.pulls.selected_pending().len(),
                 s::PENDING_COMMENTS
             ))
             .color(win95::theme::palette(ui.ctx()).warning),
@@ -414,19 +429,7 @@ fn conversation(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug, d: &PrDetail) 
             }
             // Every line thread, also shown under its line in Files when it can be placed.
             for t in &d.threads {
-                let line = t
-                    .line
-                    .or(t.original_line)
-                    .map(|l| format!(":{l}"))
-                    .unwrap_or_default();
-                let tag = if t.outdated {
-                    format!(" ({})", s::OUTDATED)
-                } else if t.resolved {
-                    format!(" ({})", s::RESOLVED)
-                } else {
-                    String::new()
-                };
-                let title = format!("{}{line}{tag}", t.path);
+                let title = thread_title(t);
                 let body = t
                     .comments
                     .iter()
@@ -547,6 +550,37 @@ pub enum FileRow {
     SuggestionApply(usize, usize),
 }
 
+/// Title of a thread in the Conversation tab: `path:N` or `path lines a-b`, ` (old)`
+/// before the line on the old side, then outdated (no longer placed) or resolved.
+pub fn thread_title(t: &github::ReviewThread) -> String {
+    let side = if t.side == github::DiffSide::Left {
+        format!(" ({})", s::OLD_SIDE)
+    } else {
+        String::new()
+    };
+    let line = match thread_range(t).filter(|(a, b)| a < b) {
+        Some((a, b)) => format!(
+            " {}",
+            s::LINES_RANGE
+                .replace("{a}", &a.to_string())
+                .replace("{b}", &b.to_string())
+        ),
+        None => t
+            .line
+            .or(t.original_line)
+            .map(|l| format!(":{l}"))
+            .unwrap_or_default(),
+    };
+    let tag = if t.outdated && t.line.is_none() {
+        format!(" ({})", s::OUTDATED)
+    } else if t.resolved {
+        format!(" ({})", s::RESOLVED)
+    } else {
+        String::new()
+    };
+    format!("{}{side}{line}{tag}", t.path)
+}
+
 /// Lines `start..=end` (first..last) a thread is about.
 pub fn thread_range(t: &github::ReviewThread) -> Option<(u32, u32)> {
     let end = t.line?;
@@ -620,7 +654,7 @@ fn files_tab(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
         }
     }
     let Some(files) = cx.state.pulls.files.clone() else {
-        ui.label(s::LOADING_PULL);
+        loading(ui, &cx.state.pulls);
         return;
     };
     egui::Panel::left("pull_files")
@@ -680,7 +714,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     }
     let can_comment = d.summary.state == PrState::Open;
     let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
-    let rows = file_rows(diff, &d.threads, &p.pending);
+    let rows = file_rows(diff, &d.threads, p.selected_pending());
     let mut comment_on: Option<CommentOn> = None;
     let mut select: Option<(usize, usize, bool)> = None;
     let selection = p.selection;
@@ -752,9 +786,8 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             bg
                         };
                         let resp = crate::highlight::diff_row(ui, job, ROW_HEIGHT, bg);
-                        let row_resp = resp.interact(egui::Sense::click());
-                        if row_resp.clicked() || row_resp.secondary_clicked() && !in_selection {
-                            let shift = ui.input(|i| i.modifiers.shift) && row_resp.clicked();
+                        if resp.clicked() || resp.secondary_clicked() && !in_selection {
+                            let shift = ui.input(|i| i.modifiers.shift) && resp.clicked();
                             select = Some((hi, li, shift));
                         }
                         if can_comment {
@@ -836,6 +869,10 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             ROW_HEIGHT,
                             win95::theme::palette(ui.ctx()).comment_bg,
                         );
+                        let resp = match comment_hover(&comment.body) {
+                            Some(full) => resp.on_hover_text(full),
+                            None => resp,
+                        };
                         if can_comment {
                             resp.context_menu(|ui| {
                                 if ui.button(s::REPLY).clicked() {
@@ -941,7 +978,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                         });
                     }
                     FileRow::Pending(i) => {
-                        let c = &p.pending[i];
+                        let c = &p.selected_pending()[i];
                         let first = c.body.lines().next().unwrap_or("");
                         let job = crate::highlight::colored_line(
                             &win95::theme::palette(ui.ctx()),
@@ -958,6 +995,10 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             ROW_HEIGHT,
                             win95::theme::palette(ui.ctx()).pending_bg,
                         );
+                        let resp = match comment_hover(&c.body) {
+                            Some(full) => resp.on_hover_text(full),
+                            None => resp,
+                        };
                         resp.context_menu(|ui| {
                             if ui.button(s::DISCARD_PENDING).clicked() {
                                 drop_pending = Some(i);
@@ -1007,7 +1048,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
         });
     }
     if let Some(i) = drop_pending {
-        p.pending.remove(i);
+        p.drop_pending(i);
     }
 }
 

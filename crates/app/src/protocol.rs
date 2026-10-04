@@ -36,6 +36,8 @@ pub enum Command {
     OpenRepo(PathBuf),
     // --- Sub-project 2: all apply to the repository opened last. ---
     RefreshStatus,
+    /// HEAD or refs changed outside RetroGit: reload branches, history, status, stashes.
+    RefreshRefs,
     LoadDiff {
         path: String,
         side: Side,
@@ -317,6 +319,10 @@ pub enum Op {
     Sync,
     /// Pull request reads.
     Pulls,
+    /// Loading the detail (and files) of this pull request.
+    PullDetail(u64),
+    /// Loading this conflicted file into the conflict editor.
+    Conflict(String),
     /// Pull request changes (create, review, merge...).
     PullAction,
     Internal,
