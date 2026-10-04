@@ -65,10 +65,29 @@ jobs:
           else
             scripts/package-macos.sh "$bin" "${{ steps.version.outputs.version }}" dist
           fi
+      - name: Installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RETROGIT_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+          }
+          & $iscc installer\retrogit.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./installer/test-install.ps1 dist\RetroGit-windows-x64-setup.exe
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
           path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: RetroGit-windows-x64-setup.exe
+          path: dist/RetroGit-windows-x64-setup.exe
           if-no-files-found: error
 
   release:
@@ -92,7 +111,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.version.outputs.tag }}" dist/*.zip \
+          gh release create "${{ steps.version.outputs.tag }}" dist/*.zip dist/*.exe \
             --target "$GITHUB_SHA" \
             --title "RetroGit ${{ steps.version.outputs.tag }}" \
             --generate-notes
