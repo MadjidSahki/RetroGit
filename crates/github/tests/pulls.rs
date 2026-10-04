@@ -74,7 +74,7 @@ fn list_pulls_parses_checks_reviews_and_labels() {
                 "variables": { "q": "repo:o/r is:pr is:open author:@me sort:updated-desc",
                                "owner": "o", "name": "r" }
             })),
-            Matcher::Regex(r"first: 50\) \{(\\n|\s)+issueCount".into()),
+            Matcher::Regex(r"first: 50\) \{(\\r|\\n|\s)+issueCount".into()),
         ]))
         .with_body(
             json!({ "data": { "search": { "issueCount": 120, "nodes": [
@@ -239,10 +239,10 @@ fn pull_detail_parses_timeline_threads_and_merge_options() {
             })),
             Matcher::Regex(r"author \{ login \.\.\. on User \{ databaseId \} \}".into()),
             // Every label of the pull request, and the size of each truncated connection.
-            Matcher::Regex(r"viewerDidAuthor(\\n|\s)+labels\(first: 100\)".into()),
+            Matcher::Regex(r"viewerDidAuthor(\\r|\\n|\s)+labels\(first: 100\)".into()),
             Matcher::Regex(r"comments\(last: 100\) \{ totalCount".into()),
             Matcher::Regex(r"reviews\(last: 100\) \{ totalCount".into()),
-            Matcher::Regex(r"reviewThreads\(first: 100\) \{(\\n|\s)+totalCount".into()),
+            Matcher::Regex(r"reviewThreads\(first: 100\) \{(\\r|\\n|\s)+totalCount".into()),
         ]))
         .with_body(detail_json().to_string())
         .create();
