@@ -551,6 +551,19 @@ impl AppError {
         self
     }
 
+    /// The same error, asking to update the GitHub CLI instead of installing it (it is
+    /// too old to choose the account).
+    pub fn for_old_gh(mut self) -> AppError {
+        if self.message == s::ERR_PULLS_NOT_FOUND {
+            self.message = s::ERR_PULLS_NOT_FOUND_GH_OLD.to_string();
+        } else {
+            self.message = self
+                .message
+                .replace(s::ERR_OAUTH_RESTRICTED_HELP, s::ERR_OAUTH_RESTRICTED_GH_OLD);
+        }
+        self
+    }
+
     pub fn from_github(e: &GithubError) -> AppError {
         match e {
             GithubError::Unauthorized => AppError::new(Severity::Warning, s::ERR_UNAUTHORIZED),

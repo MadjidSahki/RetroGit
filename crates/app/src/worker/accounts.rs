@@ -43,6 +43,17 @@ pub fn merge_repo_lists(lists: Vec<(String, Vec<RepoInfo>)>) -> Vec<RepoInfo> {
     out
 }
 
+/// A clone of a github.com repository (`slug_is_github`) that no signed-in account
+/// (`tried`) could see, refused by the server: say so, with the accounts tried.
+pub fn clone_refused(slug_is_github: bool, tried: &[String], e: &GitError) -> Option<AppError> {
+    let refused = matches!(e, GitError::Auth(_) | GitError::AccessDenied(_));
+    (slug_is_github && !tried.is_empty() && refused).then(|| {
+        let mut error = AppError::new(Severity::Warning, s::ERR_NO_ACCOUNT_SEES_REPO);
+        error.detail = Some(s::tried_accounts(tried));
+        error
+    })
+}
+
 impl Worker {
     fn accounts_changed(&self) {
         self.emit(Event::AccountsChanged(self.accounts.statuses()));
@@ -65,6 +76,8 @@ impl Worker {
 
     /// Startup: move the token of older versions to its login, then check every account.
     pub(super) fn validate(&mut self) {
+        self.deps.tokens.forget_restricted();
+        self.recheck_unchecked();
         let mut known = self.deps.known_accounts.clone();
         let mut legacy_offline = false;
         match self.deps.store.load_legacy() {
@@ -72,10 +85,13 @@ impl Worker {
                 logging::add_secret(&token);
                 match self.deps.client.current_user(&token) {
                     Ok(user) => {
-                        if self.deps.store.save(&user.login, &token).is_ok() {
+                        let was_known = known.iter().any(|k| k.eq_ignore_ascii_case(&user.login));
+                        // The old token is cleared only once the configuration lists its
+                        // login (a later start): until then, it is the only trace of it.
+                        if self.deps.store.save(&user.login, &token).is_ok() && was_known {
                             let _ = self.deps.store.clear_legacy();
                         }
-                        if !known.iter().any(|k| k.eq_ignore_ascii_case(&user.login)) {
+                        if !was_known {
                             known.push(user.login.clone());
                         }
                         // Still usable this session even if it could not be moved.
@@ -131,6 +147,7 @@ impl Worker {
                     // Keep it (the network may come back); its login is known, so the
                     // GitHub CLI fallback still asks for the right account.
                     log::info!("account {login} not checked: {e}");
+                    self.unchecked.insert(login.clone());
                     self.accounts.upsert(Account { login, token }, None);
                     offline = true;
                 }
@@ -150,9 +167,37 @@ impl Worker {
         }
     }
 
+    /// Check again the accounts kept offline (name, organizations, still valid).
+    pub(super) fn recheck_unchecked(&mut self) {
+        if self.unchecked.is_empty() {
+            return;
+        }
+        let mut changed = false;
+        for login in std::mem::take(&mut self.unchecked) {
+            let Some(account) = self.accounts.get(&login) else {
+                continue;
+            };
+            match self.deps.client.current_user(&account.token) {
+                Ok(user) => {
+                    self.add_account(account.token, &user);
+                    changed = true;
+                }
+                Err(GithubError::Unauthorized) => self.invalidate(&login, Op::Auth),
+                Err(e) => {
+                    log::info!("account {login} still not checked: {e}");
+                    self.unchecked.insert(login);
+                }
+            }
+        }
+        if changed {
+            self.accounts_changed();
+        }
+    }
+
     /// Validate `token` with `GET /user`, then store it as an account (new or refreshed).
     pub(super) fn sign_in_with(&mut self, token: String, is_pat: bool) {
         logging::add_secret(&token);
+        self.deps.tokens.forget_restricted();
         match self.deps.client.current_user(&token) {
             Ok(user) => {
                 if let Err(e) = self.deps.store.save(&user.login, &token) {
@@ -440,6 +485,7 @@ impl Worker {
             (None, Some(slug)) => self.account_for(slug),
             (None, None) => None,
         };
+        let tried: Vec<String> = self.accounts.list().into_iter().map(|a| a.login).collect();
         let token = match (&account, &slug) {
             (Some(a), Some(slug)) if self.deps.tokens.is_restricted(&a.login, &slug.0) => self
                 .deps
@@ -482,8 +528,16 @@ impl Worker {
                 self.opened(summary, true)
             }
             Err(GitError::Cancelled) => self.emit(Event::CloneCancelled),
-            Err(e @ GitError::Auth(_)) => self.clone_auth_failed(&e, account.as_ref()),
-            Err(e) => self.fail(Op::Clone, AppError::from_git(&e)),
+            Err(e) => match clone_refused(slug.is_some() && account.is_none(), &tried, &e) {
+                Some(mut error) => {
+                    error.link = Some(self.sso_settings_link());
+                    self.fail(Op::Clone, error)
+                }
+                None if matches!(e, GitError::Auth(_)) => {
+                    self.clone_auth_failed(&e, account.as_ref())
+                }
+                None => self.fail(Op::Clone, AppError::from_git(&e)),
+            },
         }
     }
 

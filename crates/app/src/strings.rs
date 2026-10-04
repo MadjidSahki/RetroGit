@@ -732,3 +732,15 @@ pub const ERR_UPDATE_NO_SUM: &str = "no checksum for {name}";
 pub const ERR_UPDATE_CHECKSUM: &str = "checksum mismatch for {name}";
 pub const ERR_UPDATE_SIGNATURE: &str = "the new app's signature does not hold: {why}";
 pub const ERR_UPDATE_VERSION: &str = "the downloaded app is {got}, not {want}";
+pub const GH_TOO_OLD: &str = "Update the GitHub CLI (2.40 or later), then run 'gh auth login'.";
+/// [`ERR_OAUTH_RESTRICTED_HELP`] when the GitHub CLI is too old to choose the account.
+pub const ERR_OAUTH_RESTRICTED_GH_OLD: &str = "Update the GitHub CLI (2.40 or later), then run 'gh auth login'. RetroGit then uses it for this organization. Or ask an owner to approve RetroGit (link below).";
+/// [`ERR_PULLS_NOT_FOUND`] when the GitHub CLI is too old to choose the account.
+pub const ERR_PULLS_NOT_FOUND_GH_OLD: &str = "GitHub does not show this repository to RetroGit. Its organization may restrict third-party applications. Update the GitHub CLI (2.40 or later), then run 'gh auth login'. RetroGit then uses it with the same account. Or ask an owner to approve RetroGit (link below).";
+pub const ERR_NO_ACCOUNT_SEES_REPO: &str = "No signed-in account can see this repository.";
+
+/// Detail of [`ERR_NO_ACCOUNT_SEES_REPO`]: `Tried: @a, @b`.
+pub fn tried_accounts(logins: &[String]) -> String {
+    let at: Vec<String> = logins.iter().map(|l| format!("@{l}")).collect();
+    format!("Tried: {}", at.join(", "))
+}

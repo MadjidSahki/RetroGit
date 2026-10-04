@@ -272,6 +272,31 @@ fn without_gh_the_restriction_is_explained_with_a_link() {
 }
 
 #[test]
+fn a_gh_too_old_to_choose_the_account_is_asked_to_be_updated() {
+    use retrogit::strings as s;
+    for body in [
+        r#"{"errors":[{"type":"FORBIDDEN","message":"the `o` organization has enabled OAuth App access restrictions"}]}"#,
+        r#"{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","path":["repository"],"message":"Could not resolve to a Repository with the name 'o/r'."}]}"#,
+    ] {
+        let mut server = mockito::Server::new();
+        let tokens = TokenProvider::from_gh(Arc::new(|_: &str| github::GhToken::TooOld));
+        let w = signed_in(&mut server, tokens);
+        server.mock("POST", "/graphql").with_body(body).create();
+        w.send(Command::LoadPulls {
+            slug: slug(),
+            filter: PrFilter::Open,
+        });
+        let evs = until(&w, |e| matches!(e, Event::Error { .. }));
+        let Some(Event::Error { error, .. }) = evs.last() else {
+            unreachable!()
+        };
+        assert!(error.message.contains(s::GH_TOO_OLD), "{}", error.message);
+        assert!(!error.message.contains("Install"), "{}", error.message);
+        assert!(error.link.is_some());
+    }
+}
+
+#[test]
 fn a_review_is_sent_then_the_pull_request_reloaded() {
     let mut server = mockito::Server::new();
     let w = signed_in(&mut server, TokenProvider::without_gh());

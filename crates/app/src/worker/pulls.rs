@@ -15,12 +15,16 @@ impl Worker {
         slug: &Slug,
         call: impl Fn(&Client, &str, &str, &str) -> Result<T, GithubError>,
     ) -> Result<T, GithubError> {
-        let r = self.on_github_once(slug, &call);
+        let mut r = self.on_github_once(slug, &call);
         if matches!(&r, Err(e) if github::repository_missing(e))
             && let Some(failed) = self.last_account.clone()
             && self.replace_account(slug, &failed)
         {
-            return self.on_github_once(slug, &call);
+            r = self.on_github_once(slug, &call);
+        }
+        if r.is_ok() {
+            // GitHub answers again: check the accounts kept offline at startup.
+            self.recheck_unchecked();
         }
         r
     }

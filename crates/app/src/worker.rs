@@ -1,6 +1,7 @@
 //! The single background thread doing all network and Git work.
 
 mod accounts;
+pub use accounts::clone_refused;
 mod changes;
 mod conflicts;
 mod explore;
@@ -192,6 +193,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
         repo_accounts: deps.repo_accounts.clone(),
         seen: Default::default(),
         no_account: Default::default(),
+        unchecked: Default::default(),
         last_account: None,
         cancel_net: cancel_net.clone(),
         deps,
@@ -251,6 +253,9 @@ struct Worker {
     seen: std::collections::HashMap<String, Vec<String>>,
     /// Repositories no account could see this session (not tried again).
     no_account: std::collections::HashSet<String>,
+    /// Accounts kept without being checked (offline at startup): checked again on the
+    /// next `ValidateToken` and after the next GitHub call that works.
+    unchecked: std::collections::HashSet<String>,
     /// Account used by the last GitHub call (to sign out the right one on a 401).
     last_account: Option<String>,
     deps: WorkerDeps,
@@ -276,7 +281,10 @@ impl Worker {
         (self.emit)(ev);
     }
 
-    fn fail(&self, during: Op, error: AppError) {
+    fn fail(&self, during: Op, mut error: AppError) {
+        if self.deps.tokens.gh_too_old() {
+            error = error.for_old_gh();
+        }
         log::warn!("{during:?}: {} {:?}", error.message, error.detail);
         self.emit(Event::Error { during, error });
     }

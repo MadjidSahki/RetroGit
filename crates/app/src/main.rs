@@ -92,10 +92,12 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             win95::theme::install(&cc.egui_ctx);
             let repaint = cc.egui_ctx.clone();
-            let tokens = github::TokenProvider::new(std::sync::Arc::new(|login| {
-                let token =
-                    github::gh_auth_token(retrogit::env_path::tool_path().as_deref(), Some(login));
-                if let Some(t) = &token {
+            let tokens = github::TokenProvider::from_gh(std::sync::Arc::new(|login| {
+                let token = github::gh_auth_token_checked(
+                    retrogit::env_path::tool_path().as_deref(),
+                    Some(login),
+                );
+                if let github::GhToken::Token(t) = &token {
                     logging::add_secret(t);
                 }
                 token

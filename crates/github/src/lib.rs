@@ -31,7 +31,8 @@ pub use pulls_write::{
     suggestion_block, suggestions,
 };
 pub use token::{
-    GhTokenSource, TokenProvider, gh_auth_token, hidden_by_restriction, parse_gh_token,
+    Clock, GH_CACHE, GhSource, GhToken, GhTokenSource, RETRY_RESTRICTED, TokenProvider,
+    gh_auth_token, gh_auth_token_checked, gh_stderr_too_old, hidden_by_restriction, parse_gh_token,
 };
 pub use token_store::{
     KeyringStore, MemoryStore, SECURITY_MARKER, TokenStore, TokenStoreError, keep_after_migration,
