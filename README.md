@@ -59,6 +59,14 @@ and a pixel font.
 - Stashes tab: stash changes (optionally with untracked files), browse each stash's files and diff, apply, pop or drop it (the id of a dropped stash is shown to recover it)
 - Repository → Tags: list and filter tags, create lightweight or annotated tags, delete them (also on origin), push one or all
 
+**Explore the code**
+- Explore tab: the files of any version (HEAD, a branch, a tag, or a commit from History → Browse files at this commit), with a Find file filter
+- Content with syntax colors; Blame: who last changed each line, grouped by commit and shaded by age, the message on hover, a click opens the commit in History, and Blame the parent of this commit goes back in time
+- File history: the commits that changed the file, following renames, with the file's diff in each
+- Search in files: exact text, Match case and a path filter (`*.rs src/`), results grouped by file; a click opens the file at the line
+- History filter: commits of every branch by message, author, hash or changed text (`git log -S`)
+- Searches and blames run in the background and can be cancelled: the rest of the app stays responsive
+
 **Pull requests** (github.com repositories)
 - List open, mine, review-requested or closed pull requests, with checks, review status, labels, author, target branch and age
 - Read the description (Markdown) and the conversation, the commits, the changed files with colored diffs and their line comments, and the checks with links to their runs
@@ -160,7 +168,7 @@ A Cargo workspace with four crates:
 | Crate | Role |
 |---|---|
 | `crates/win95` | Windows 95 widget kit for [egui](https://github.com/emilk/egui): bevels, buttons, title bar, list view, dialogs, tabs, combo box, splitter… |
-| `crates/gitcore` | RetroGit's Git API: status, diff, line-level staging, commit, history and graph layout, branches, fetch/pull/push, cherry-pick/revert/reset, interactive rebase, stashes and tags. Reads with libgit2 ([git2](https://github.com/rust-lang/git2-rs)), writes with the `git` command line |
+| `crates/gitcore` | RetroGit's Git API: status, diff, line-level staging, commit, history and graph layout, branches, fetch/pull/push, cherry-pick/revert/reset, interactive rebase, stashes and tags, browsing, blame, file history and searches. Reads with libgit2 ([git2](https://github.com/rust-lang/git2-rs)), writes with the `git` command line |
 | `crates/github` | GitHub client: REST (writes) and GraphQL (pull request reads), OAuth Device Flow, token storage, pull request watch |
 | `crates/app` | The application: state (a pure reducer), one background worker thread, and the screens |
 
@@ -232,4 +240,5 @@ Licenses of embedded third-party data: [THIRD_PARTY.md](THIRD_PARTY.md).
   over 20,000 lines are only shown on request.
 - Interactive rebase refuses ranges containing merge commits, and cannot edit or split a commit (stop on it) nor exec commands.
 - Stashes cannot be applied partially, and tags cannot be signed from RetroGit.
+- Explore: no regular expressions or replace in the search, no whole-word option; blame does not detect moved or copied lines (`-M` / `-C`) nor `.git-blame-ignore-revs`; searches and file histories stop at 1,000 results; files over 5 MB are not displayed; submodules cannot be browsed.
 - History pages are recomputed on each reload; very large repositories (100k+ commits) may feel slow.
