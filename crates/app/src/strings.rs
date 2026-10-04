@@ -629,3 +629,6 @@ pub const CHECK_AUTOMATICALLY: &str = "Check for updates automatically";
 pub const RETROGIT_UP_TO_DATE: &str = "RetroGit is up to date ({version}).";
 pub const ERR_UPDATE_CHECK: &str = "Could not check for updates.";
 pub const CHECKING_UPDATES: &str = "Checking for updates...";
+pub const UPDATE_DOWNLOADING: &str = "Downloading the update: {progress}";
+pub const UPDATE_WAITS: &str = "Waits for the current operation to finish...";
+pub const UPDATE_FAILED: &str = "The update failed: {why}. RetroGit was not changed.";

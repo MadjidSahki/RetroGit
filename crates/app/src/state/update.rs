@@ -19,6 +19,18 @@ pub struct UpdateView {
     pub kind: InstallKind,
     /// Install and restart was clicked (the app starts the installation).
     pub install_requested: bool,
+    /// Waiting for a Git operation to finish before installing.
+    pub waiting: bool,
+    pub installing: bool,
+    /// Bytes downloaded, and the total when known.
+    pub progress: Option<(u64, Option<u64>)>,
+    pub cancel_requested: bool,
+    /// Why the last installation failed (shown in the window).
+    pub error: Option<String>,
+    /// The new version was started: this one saves its settings and closes.
+    pub quit: bool,
+    /// This copy's folder can be written (set at start).
+    pub can_replace: bool,
 }
 
 impl Default for UpdateView {
@@ -30,6 +42,13 @@ impl Default for UpdateView {
             check_requested: false,
             kind: InstallKind::Development,
             install_requested: false,
+            waiting: false,
+            installing: false,
+            progress: None,
+            cancel_requested: false,
+            error: None,
+            quit: false,
+            can_replace: false,
         }
     }
 }
@@ -74,6 +93,40 @@ impl AppState {
                     self.messages.push_back(err);
                 }
             }
+        }
+    }
+
+    /// `true` once when the installation may start (Install was clicked and the worker is
+    /// not running a Git operation).
+    pub fn take_install(&mut self, worker_busy: bool) -> bool {
+        let u = &mut self.update;
+        if !u.install_requested || u.installing {
+            return false;
+        }
+        if worker_busy {
+            u.waiting = true;
+            return false;
+        }
+        u.install_requested = false;
+        u.waiting = false;
+        u.installing = true;
+        u.cancel_requested = false;
+        u.error = None;
+        u.progress = None;
+        true
+    }
+
+    pub fn update_progress(&mut self, done: u64, total: Option<u64>) {
+        self.update.progress = Some((done, total));
+    }
+
+    pub fn update_finished(&mut self, result: Result<(), String>) {
+        let u = &mut self.update;
+        u.installing = false;
+        u.progress = None;
+        match result {
+            Ok(()) => u.quit = true,
+            Err(e) => u.error = Some(e),
         }
     }
 

@@ -31,9 +31,10 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
         cx.state.update.open = false;
         return;
     };
-    let can_install = installable(&cx.state.update.kind, &r);
+    let can_install = cx.state.update.can_replace && installable(&cx.state.update.kind, &r);
     let mut auto = cx.state.config.updates.check;
     let (mut install, mut download, mut later, mut skip) = (false, false, false, false);
+    let mut cancel = false;
     let title = s::UPDATE_TITLE.replace("{version}", &r.version);
     let resp = Dialog::new("update", &title)
         .width(520.0)
@@ -61,6 +62,36 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                 ui.add(egui::Label::new(s::DOWNLOAD_HELP).wrap());
             }
             checkbox(ui, &mut auto, s::CHECK_AUTOMATICALLY);
+            let u = &cx.state.update;
+            if let Some(err) = &u.error {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(s::UPDATE_FAILED.replace("{why}", err))
+                            .color(win95::theme::palette(ui.ctx()).error),
+                    )
+                    .wrap(),
+                );
+            }
+            if u.waiting {
+                ui.label(s::UPDATE_WAITS);
+            }
+            if u.installing {
+                let (done, total) = u.progress.unwrap_or((0, None));
+                let mb = |b: u64| format!("{:.1}", b as f64 / (1024.0 * 1024.0));
+                let text = match total {
+                    Some(t) => format!("{} / {} MB", mb(done), mb(t)),
+                    None => format!("{} MB", mb(done)),
+                };
+                ui.add(win95::ProgressBar95::new(
+                    total.map(|t| done as f32 / t.max(1) as f32),
+                ));
+                ui.label(s::UPDATE_DOWNLOADING.replace("{progress}", &text));
+                ui.add_space(6.0);
+                if ui.add(Button95::new(s::CANCEL).min_size(BUTTON)).clicked() {
+                    cancel = true;
+                }
+                return;
+            }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if can_install {
@@ -86,7 +117,10 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
     if install {
         cx.state.update.install_requested = true;
     }
-    if later || resp.close_requested {
+    if cancel {
+        cx.state.update.cancel_requested = true;
+    }
+    if later || (resp.close_requested && !cx.state.update.installing) {
         cx.state.update.open = false;
     }
     if skip {

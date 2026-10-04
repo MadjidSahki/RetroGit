@@ -155,3 +155,43 @@ fn the_toolbar_button_opens_the_update_window() {
         "Later keeps the button"
     );
 }
+
+#[test]
+fn installing_shows_progress_then_quits_or_says_why_not() {
+    let mut st = AppState::new(Config::default());
+    st.update_checked("0.1.39", Ok(release("0.1.42")), true);
+    st.update.install_requested = true;
+    // Busy worker (a push): waits.
+    assert!(!st.take_install(true));
+    assert!(st.update.waiting);
+    assert!(st.take_install(false));
+    assert!(st.update.installing && !st.update.waiting);
+    st.update_progress(50, Some(200));
+    assert_eq!(st.update.progress, Some((50, Some(200))));
+    st.update_finished(Err("checksum mismatch".into()));
+    assert!(!st.update.installing);
+    assert_eq!(st.update.error.as_deref(), Some("checksum mismatch"));
+    assert!(!st.update.quit);
+    st.update.install_requested = true;
+    assert!(st.take_install(false));
+    assert!(st.update.error.is_none(), "a new try clears the error");
+    st.update_finished(Ok(()));
+    assert!(
+        st.update.quit,
+        "the new version was started: this one quits"
+    );
+}
+
+#[test]
+fn the_window_shows_the_download_and_cancel() {
+    let mut st = AppState::new(Config::default());
+    st.update_checked("0.1.39", Ok(release("0.1.42")), true);
+    st.update.installing = true;
+    st.update_progress(1024 * 1024, Some(4 * 1024 * 1024));
+    let mut h = harness(st);
+    h.run();
+    assert!(h.query_by_label_contains("1.0 / 4.0 MB").is_some());
+    h.get_by_label(s::CANCEL).click();
+    h.run();
+    assert!(h.state().state.update.cancel_requested);
+}
