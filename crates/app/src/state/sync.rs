@@ -213,7 +213,7 @@ impl AppState {
                     Target::ExploreBlame if self.explore.blame_code.as_ref() == Some(&diff) => {
                         self.explore.blame_colors = value
                     }
-                    Target::Explore if self.explore.history_diff.as_ref() == Some(&diff) => {
+                    Target::ExploreHistory if self.explore.history_diff.as_ref() == Some(&diff) => {
                         self.explore.history_colors = value
                     }
                     Target::Pull if self.pulls.file_diff.as_ref() == Some(&diff) => {

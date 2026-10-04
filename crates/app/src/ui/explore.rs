@@ -8,7 +8,7 @@ use win95::{Bevel, Button95, Dialog, bevel_frame, checkbox, combo_box, text_fiel
 use super::Ctx;
 use crate::highlight::Target;
 use crate::protocol::{Command, ExploreRequest};
-use crate::state::{FileView, SearchForm, Tab, age_ranks, tree_rows};
+use crate::state::{FileView, SearchForm, Tab, age_ranks};
 use crate::strings as s;
 
 const ROW: f32 = 18.0;
@@ -46,7 +46,7 @@ fn requests(cx: &mut Ctx<'_>) {
             if let Some(d) = &e.history_diff
                 && e.history_colors == crate::highlight::Colors::NotRequested
             {
-                cx.highlighter.request(Target::Explore, d.clone());
+                cx.highlighter.request(Target::ExploreHistory, d.clone());
                 e.history_colors = pending;
             }
         }
@@ -159,16 +159,20 @@ fn tree(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let mut open: Option<String> = None;
     bevel_frame(ui, Bevel::Field, pal.window, 2, |ui| {
         ui.set_min_size(ui.available_size());
-        let e = &cx.state.explore;
-        if e.commit.as_deref() == Some("") {
+        if let (None, Some(err)) = (&cx.state.explore.commit, &cx.state.explore.load_error) {
+            ui.label(RichText::new(err).color(pal.error));
+            return;
+        }
+        if cx.state.explore.commit.as_deref() == Some("") {
             ui.label(s::NO_COMMITS_YET);
             return;
         }
-        if e.commit.is_none() {
+        if cx.state.explore.commit.is_none() {
             ui.label(RichText::new(s::LOADING_FILES).color(pal.gray_text));
             return;
         }
-        let rows = tree_rows(&e.entries, &e.open_dirs, &e.filter);
+        let rows = cx.state.explore.rows().to_vec();
+        let e = &cx.state.explore;
         let font = win95::theme::font(win95::theme::FONT_SIZE);
         ScrollArea::both()
             .id_salt("explore_tree_scroll")
@@ -394,9 +398,7 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let pal = win95::theme::palette(ui.ctx());
     let e = &cx.state.explore;
     match &e.content {
-        None => {
-            ui.label(RichText::new(s::LOADING_FILE).color(pal.gray_text));
-        }
+        None => loading(ui, &pal, e.load_error.as_deref()),
         Some(FileContent::Binary) => {
             ui.label(s::BINARY_FILE);
         }
@@ -449,6 +451,14 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     }
 }
 
+/// "Loading..." or, if it failed, why.
+fn loading(ui: &mut egui::Ui, pal: &win95::Palette, error: Option<&str>) {
+    match error {
+        Some(err) => ui.label(RichText::new(err).color(pal.error)),
+        None => ui.label(RichText::new(s::LOADING_FILE).color(pal.gray_text)),
+    };
+}
+
 /// `a` mixed with `b`: `t` = 1 gives `a`.
 fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
     let m = |x: u8, y: u8| (f32::from(x) * t + f32::from(y) * (1.0 - t)).round() as u8;
@@ -478,8 +488,15 @@ fn blame(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                 );
             });
         }
+        if matches!(
+            e.content,
+            Some(FileContent::Binary | FileContent::TooLarge(_))
+        ) {
+            ui.label(s::NO_BLAME_BINARY);
+            return;
+        }
         let Some(blocks) = &e.blame else {
-            ui.label(RichText::new(s::LOADING_FILE).color(pal.gray_text));
+            loading(ui, &pal, e.load_error.as_deref());
             return;
         };
         let ages = age_ranks(blocks);
@@ -530,7 +547,10 @@ fn blame(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                         }
                         resp.context_menu(|ui| {
                             if ui
-                                .add_enabled(!block.boundary, egui::Button::new(s::BLAME_PARENT))
+                                .add_enabled(
+                                    block.previous.is_some(),
+                                    egui::Button::new(s::BLAME_PARENT),
+                                )
                                 .clicked()
                             {
                                 parent = Some(block.clone());
@@ -580,7 +600,7 @@ fn history(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     {
         let e = &cx.state.explore;
         let Some(commits) = &e.history else {
-            ui.label(RichText::new(s::LOADING_FILE).color(pal.gray_text));
+            loading(ui, &pal, e.load_error.as_deref());
             return;
         };
         if commits.is_empty() {
@@ -623,9 +643,14 @@ fn history(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             Some(d) => {
                 super::history::diff_rows(ui, d, &e.history_colors, ("explore_diff", &d.path))
             }
-            None if e.history_selected.is_some() => {
-                ui.label(RichText::new(s::LOADING_DIFF).color(pal.gray_text));
-            }
+            None if e.history_selected.is_some() => match &e.load_error {
+                Some(err) => {
+                    ui.label(RichText::new(err).color(pal.error));
+                }
+                None => {
+                    ui.label(RichText::new(s::LOADING_DIFF).color(pal.gray_text));
+                }
+            },
             None => {}
         }
     }

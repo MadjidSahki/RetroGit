@@ -206,3 +206,40 @@ filename src/new.rs
     assert_eq!(b[0].lines, ["line one", "line two"]);
     assert_eq!(b[1].lines, ["line three"]);
 }
+
+#[test]
+fn option_like_ref_names_are_never_passed_as_options() {
+    let Some((d, r)) = repo() else { return };
+    commit_as(d.path(), "Ada", "f.txt", "one\n", "first");
+    git(
+        d.path(),
+        &["update-ref", "refs/tags/--output=pwned.txt", "HEAD"],
+    );
+    let rev = "--output=pwned.txt";
+    assert_eq!(r.file_history(rev, "f.txt", 10, &NO).unwrap().len(), 1);
+    assert_eq!(r.blame(rev, "f.txt", &NO).unwrap().len(), 1);
+    assert!(
+        !d.path().join("pwned.txt").exists(),
+        "git wrote where the tag said"
+    );
+}
+
+#[test]
+fn blame_the_parent_follows_a_rename_in_the_same_commit() {
+    let Some((d, r)) = repo() else { return };
+    let c1 = commit_as(d.path(), "Ada", "café.txt", "one\n", "create");
+    git(d.path(), &["mv", "café.txt", "renamé.txt"]);
+    std::fs::write(d.path().join("renamé.txt"), "one\ntwo\n").unwrap();
+    git(d.path(), &["add", "-A"]);
+    git(d.path(), &["commit", "-q", "-m", "rename and add"]);
+    let blocks = r.blame("HEAD", "renamé.txt", &NO).unwrap();
+    let added = blocks.iter().find(|b| b.lines == ["two"]).unwrap();
+    let (prev, path) = added.previous.clone().unwrap();
+    assert_eq!((prev.as_str(), path.as_str()), (c1.as_str(), "café.txt"));
+    assert_eq!(r.blame(&prev, &path, &NO).unwrap().len(), 1);
+    let created = r.blame(&c1, "café.txt", &NO).unwrap();
+    assert_eq!(
+        created[0].previous, None,
+        "a line added by the first commit has no parent"
+    );
+}

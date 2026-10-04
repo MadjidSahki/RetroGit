@@ -494,6 +494,10 @@ impl AppState {
     /// Show `summary` as the current repo; the Changes screen restarts if it is another repo.
     fn switch_repo(&mut self, summary: RepoSummary) {
         self.remember(&summary);
+        if self.current.as_ref().map(|c| &c.path) == Some(&summary.path) {
+            // Same repository after a commit, checkout, pull...: Explore checks its version.
+            self.explore.refresh();
+        }
         if self.current.as_ref().map(|c| &c.path) != Some(&summary.path) {
             let warned = self.changes.warned_no_cli;
             self.changes = ChangesView {

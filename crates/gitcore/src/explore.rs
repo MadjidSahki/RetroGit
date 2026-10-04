@@ -49,6 +49,9 @@ pub struct BlameBlock {
     pub boundary: bool,
     /// Text of the lines (without line endings).
     pub lines: Vec<String>,
+    /// Parent commit and the file's path there, to blame the lines before this commit
+    /// (`None`: the commit added them).
+    pub previous: Option<(String, String)>,
 }
 
 /// A commit that changed a file, with the file's name in that commit.
@@ -65,6 +68,7 @@ struct CommitInfo {
     time: i64,
     summary: String,
     boundary: bool,
+    previous: Option<(String, String)>,
 }
 
 /// Undo git's C-style quoting of unusual paths (`"a\tb"`, `"\303\251"`).
@@ -133,6 +137,7 @@ pub fn parse_blame_porcelain(text: &str) -> Vec<BlameBlock> {
                     orig_start: orig,
                     boundary: false,
                     lines: Vec::new(),
+                    previous: None,
                 });
             }
             continue;
@@ -145,6 +150,11 @@ pub fn parse_blame_porcelain(text: &str) -> Vec<BlameBlock> {
             "author-time" => info.time = value.parse().unwrap_or(0),
             "summary" => info.summary = value.to_string(),
             "boundary" => info.boundary = true,
+            "previous" => {
+                if let Some((sha, path)) = value.split_once(' ') {
+                    info.previous = Some((sha.to_string(), unquote_path(path)));
+                }
+            }
             "filename" => {
                 if let Some(b) = blocks.last_mut()
                     && b.orig_path.is_empty()
@@ -161,6 +171,7 @@ pub fn parse_blame_porcelain(text: &str) -> Vec<BlameBlock> {
             b.time = i.time;
             b.summary = i.summary.clone();
             b.boundary = i.boundary;
+            b.previous = i.previous.clone();
         }
     }
     blocks
@@ -220,6 +231,12 @@ impl Repo {
             .peel_to_commit()
             .ok()
             .map(|c| c.id().to_string())
+    }
+
+    /// [`Repo::resolve`], or an error naming `rev`.
+    pub(crate) fn commit_id(&self, rev: &str) -> Result<String, GitError> {
+        self.resolve(rev)
+            .ok_or_else(|| GitError::Other(format!("unknown version {rev}")))
     }
 
     fn tree_of(&self, rev: &str) -> Result<git2::Tree<'_>, GitError> {
@@ -289,7 +306,9 @@ impl Repo {
         path: &str,
         cancel: &AtomicBool,
     ) -> Result<Vec<BlameBlock>, GitError> {
-        let out = self.run_git_cancel(&["blame", "--porcelain", rev, "--", path], cancel)?;
+        // A commit id, never a name: a ref named `--output=x` must not become an option.
+        let commit = self.commit_id(rev)?;
+        let out = self.run_git_cancel(&["blame", "--porcelain", &commit, "--", path], cancel)?;
         if !out.success {
             return Err(GitError::Other(out.text));
         }
@@ -304,6 +323,7 @@ impl Repo {
         limit: usize,
         cancel: &AtomicBool,
     ) -> Result<Vec<FileCommit>, GitError> {
+        let commit = self.commit_id(rev)?;
         let n = format!("-n{limit}");
         let out = self.run_git_cancel(
             &[
@@ -314,7 +334,7 @@ impl Repo {
                 "-z",
                 &n,
                 HISTORY_FORMAT,
-                rev,
+                &commit,
                 "--",
                 path,
             ],

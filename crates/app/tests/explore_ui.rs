@@ -125,7 +125,7 @@ fn the_tree_opens_folders_and_files() {
     loaded(
         &mut h.state_mut().state,
         ExploreResult::File {
-            rev: "HEAD".into(),
+            rev: "c0ffee1234".into(),
             path: "src/main.rs".into(),
             content: FileContent::Text("fn main() {}\nlet x = 1;\n".into()),
         },
@@ -145,7 +145,7 @@ fn binary_and_large_files_say_so() {
     loaded(
         &mut w.state,
         ExploreResult::File {
-            rev: "HEAD".into(),
+            rev: "c0ffee1234".into(),
             path: "README.md".into(),
             content: FileContent::TooLarge(8 * 1024 * 1024),
         },
@@ -163,6 +163,14 @@ fn blame_shows_who_and_offers_the_parent() {
     let mut w = world();
     w.state.explore.open_file("src/main.rs");
     w.state.explore.view = FileView::Blame;
+    loaded(
+        &mut w.state,
+        ExploreResult::File {
+            rev: "c0ffee1234".into(),
+            path: "src/main.rs".into(),
+            content: FileContent::Text("one\ntwo\nthree\n".into()),
+        },
+    );
     let block = |commit: &str, author: &str, start, lines: &[&str]| BlameBlock {
         commit: commit.repeat(40),
         author: author.into(),
@@ -174,11 +182,12 @@ fn blame_shows_who_and_offers_the_parent() {
         orig_start: start,
         boundary: false,
         lines: lines.iter().map(|l| l.to_string()).collect(),
+        previous: Some(("p".repeat(40), "src/main.rs".into())),
     };
     loaded(
         &mut w.state,
         ExploreResult::Blame {
-            rev: "HEAD".into(),
+            rev: "c0ffee1234".into(),
             path: "src/main.rs".into(),
             blocks: vec![
                 block("a", "Ada", 1, &["one", "two"]),

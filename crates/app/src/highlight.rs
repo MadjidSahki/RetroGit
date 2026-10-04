@@ -70,6 +70,7 @@ pub enum Target {
     /// Explore: the file (or a commit's diff of it), and its blame.
     Explore,
     ExploreBlame,
+    ExploreHistory,
 }
 
 /// A finished highlighting job.

@@ -156,3 +156,19 @@ fn grep_output_is_parsed() {
     assert_eq!(got[1].path, "a:b.txt");
     assert_eq!(got[1].line, 10);
 }
+
+#[test]
+fn case_insensitive_searches_understand_accents() {
+    let Some((d, r)) = repo() else { return };
+    let c = commit_as(d.path(), "Ada", "a.txt", "le café\n", "Ajoute le café");
+    assert_eq!(
+        r.grep("HEAD", "CAFÉ", false, "", 10, &NO)
+            .unwrap()
+            .matches
+            .len(),
+        1
+    );
+    let (found, _) = r.search_log(LogSearch::Message, "CAFÉ", 10, &NO).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].id, c);
+}

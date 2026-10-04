@@ -79,11 +79,15 @@ impl Repo {
             return Err(GitError::Cancelled);
         }
         let mut cmd = crate::commit::git_command();
+        // Untranslated messages, but UTF-8 characters: case-insensitive searches must fold
+        // accented letters (`CAFÉ` finds `café`), which the C locale does not.
         cmd.arg("-C")
             .arg(self.workdir()?)
             .args(args)
             .env("GIT_TERMINAL_PROMPT", "0")
-            .env("LC_ALL", "C")
+            .env_remove("LC_ALL")
+            .env("LC_CTYPE", "C.UTF-8")
+            .env("LC_MESSAGES", "C")
             .env("LANGUAGE", "C");
         #[cfg(unix)]
         {

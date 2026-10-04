@@ -90,9 +90,7 @@ impl Repo {
         limit: usize,
         cancel: &AtomicBool,
     ) -> Result<GrepResult, GitError> {
-        let commit = self
-            .resolve(rev)
-            .ok_or_else(|| GitError::Other(format!("unknown version {rev}")))?;
+        let commit = self.commit_id(rev)?;
         let mut args = vec!["grep", "-F", "-n", "--null", "-I", "--full-name"];
         if !match_case {
             args.push("-i");

@@ -612,3 +612,4 @@ pub const COMMIT_FOUND: &str = "1 commit found";
 pub const FIRST_SHOWN: &str = " (first 1000 shown)";
 pub const CANCEL_SEARCH: &str = "Cancel";
 pub const EXPLORE_SELECT_FILE: &str = "Select a file.";
+pub const NO_BLAME_BINARY: &str = "Binary or very large file: no blame.";

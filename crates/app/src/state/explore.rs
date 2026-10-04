@@ -70,10 +70,18 @@ pub struct ExploreView {
     pub search: Option<SearchView>,
     /// The Search in files window, when open.
     pub search_form: Option<SearchForm>,
+    /// Why the view shown could not be loaded (in place of "Loading...").
+    pub load_error: Option<String>,
     /// The version changed: the open file waits for the new tree.
     tree_pending: bool,
+    /// Ask for the tree again (the repository changed: HEAD or a branch may have moved).
+    reload_tree: bool,
     asked: Vec<ExploreRequest>,
+    /// Rows of the tree for (commit, open folders, filter).
+    rows_cache: Option<(RowsKey, Vec<TreeRow>)>,
 }
+
+type RowsKey = (Option<String>, BTreeSet<String>, String);
 
 impl Default for ExploreView {
     fn default() -> Self {
@@ -100,8 +108,11 @@ impl Default for ExploreView {
             history_colors: Colors::NotRequested,
             search: None,
             search_form: None,
+            load_error: None,
             tree_pending: false,
+            reload_tree: false,
             asked: Vec::new(),
+            rows_cache: None,
         }
     }
 }
@@ -150,11 +161,7 @@ pub fn tree_rows(entries: &[TreeEntry], open: &BTreeSet<String>, filter: &str) -
         }
     }
     for list in children.values_mut() {
-        list.sort_by(|a, b| {
-            let dir = |e: &TreeEntry| e.kind != EntryKind::Dir;
-            (dir(a), name_of(&a.path).to_lowercase())
-                .cmp(&(dir(b), name_of(&b.path).to_lowercase()))
-        });
+        list.sort_by_cached_key(|e| (e.kind != EntryKind::Dir, name_of(&e.path).to_lowercase()));
     }
     let mut out = Vec::new();
     fn walk(
@@ -201,35 +208,41 @@ pub fn age_ranks(blocks: &[BlameBlock]) -> Vec<f32> {
 }
 
 impl ExploreView {
+    /// Commit the requests about files use (a name could be taken for an option by git,
+    /// and the tree shown must match the files read).
+    fn shown_commit(&self) -> Option<String> {
+        self.commit.clone().filter(|c| !c.is_empty())
+    }
+
     /// Requests for what is shown and not asked yet (marked as asked).
     pub fn needs(&mut self) -> Vec<ExploreRequest> {
         let mut want = Vec::new();
         if self.refs.is_empty() {
             want.push(ExploreRequest::Refs);
         }
-        if self.commit.is_none() {
+        if self.commit.is_none() || self.reload_tree {
             want.push(ExploreRequest::Tree {
                 rev: self.rev.clone(),
             });
         }
-        if let Some(path) = self.file.clone()
+        if let (Some(path), Some(commit)) = (self.file.clone(), self.shown_commit())
             && !self.tree_pending
         {
+            let text = matches!(self.content, Some(FileContent::Text(_)));
             match self.view {
-                FileView::Content if self.content.is_none() => want.push(ExploreRequest::File {
-                    rev: self.rev.clone(),
-                    path,
-                }),
-                FileView::Blame if self.blame.is_none() => {
+                FileView::Content | FileView::Blame if self.content.is_none() => {
+                    want.push(ExploreRequest::File {
+                        rev: commit.clone(),
+                        path: path.clone(),
+                    })
+                }
+                FileView::Blame if self.blame.is_none() && text => {
                     if let Some((rev, path)) = self.blame_target() {
                         want.push(ExploreRequest::Blame { rev, path });
                     }
                 }
                 FileView::History if self.history.is_none() => {
-                    want.push(ExploreRequest::FileHistory {
-                        rev: self.rev.clone(),
-                        path,
-                    })
+                    want.push(ExploreRequest::FileHistory { rev: commit, path })
                 }
                 _ => {}
             }
@@ -245,6 +258,38 @@ impl ExploreView {
         want.retain(|r| !self.asked.contains(r));
         self.asked.extend(want.iter().cloned());
         want
+    }
+
+    /// The repository changed (commit, checkout, pull...): ask again for the refs and the
+    /// tree of the version; the open file is reloaded if the version moved.
+    pub fn refresh(&mut self) {
+        self.reload_refs();
+        self.reload_tree = true;
+        self.asked
+            .retain(|r| !matches!(r, ExploreRequest::Tree { .. }));
+    }
+
+    fn reload_refs(&mut self) {
+        self.refs.clear();
+        self.asked.retain(|r| *r != ExploreRequest::Refs);
+    }
+
+    /// Rows of the file tree (rebuilt only when the version, the open folders or the filter
+    /// change).
+    pub fn rows(&mut self) -> &[TreeRow] {
+        let key = (
+            self.commit.clone(),
+            self.open_dirs.clone(),
+            self.filter.clone(),
+        );
+        if self.rows_cache.as_ref().is_none_or(|(k, _)| *k != key) {
+            let rows = tree_rows(&self.entries, &self.open_dirs, &self.filter);
+            self.rows_cache = Some((key, rows));
+        }
+        self.rows_cache
+            .as_ref()
+            .map(|(_, r)| r.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Path of the open file in the commit selected in its history (it may have been renamed).
@@ -295,6 +340,7 @@ impl ExploreView {
     }
 
     fn clear_file(&mut self) {
+        self.load_error = None;
         self.content = None;
         self.code = None;
         self.colors = Colors::NotRequested;
@@ -326,16 +372,16 @@ impl ExploreView {
         self.blame_stack
             .last()
             .cloned()
-            .or_else(|| Some((self.rev.clone(), self.file.clone()?)))
+            .or_else(|| Some((self.shown_commit()?, self.file.clone()?)))
     }
 
-    /// Blame the file as it was just before `block`'s commit.
+    /// Blame the file as it was just before `block`'s commit (the parent and path git
+    /// names, which follows a rename made by that commit).
     pub fn blame_parent(&mut self, block: &BlameBlock) {
-        if block.boundary {
+        let Some(prev) = block.previous.clone() else {
             return;
-        }
-        self.blame_stack
-            .push((format!("{}^", block.commit), block.orig_path.clone()));
+        };
+        self.blame_stack.push(prev);
         self.reset_blame();
     }
 
@@ -350,6 +396,7 @@ impl ExploreView {
     }
 
     fn reset_blame(&mut self) {
+        self.load_error = None;
         self.blame = None;
         self.blame_code = None;
         self.blame_colors = Colors::NotRequested;
@@ -360,6 +407,7 @@ impl ExploreView {
     pub fn select_history(&mut self, id: &str) {
         if self.history_selected.as_deref() != Some(id) {
             self.history_selected = Some(id.to_string());
+            self.load_error = None;
             self.history_diff = None;
             self.history_colors = Colors::NotRequested;
             self.asked
@@ -400,7 +448,14 @@ impl ExploreView {
                 commit,
                 entries,
             } if rev == self.rev => {
-                if self.tree_pending {
+                let moved = self.commit.as_ref().is_some_and(|c| *c != commit);
+                if moved {
+                    // Same version name, new commit: what was read is out of date.
+                    let file = self.file.take();
+                    self.clear_file();
+                    self.file = file;
+                }
+                if self.tree_pending || moved {
                     self.tree_pending = false;
                     if let Some(f) = &self.file
                         && !entries.iter().any(|e| &e.path == f)
@@ -408,11 +463,13 @@ impl ExploreView {
                         self.file = None;
                     }
                 }
+                self.reload_tree = false;
                 self.commit = Some(commit);
                 self.entries = entries;
             }
             ExploreResult::File { rev, path, content }
-                if rev == self.rev && self.file.as_deref() == Some(path.as_str()) =>
+                if Some(&rev) == self.commit.as_ref()
+                    && self.file.as_deref() == Some(path.as_str()) =>
             {
                 self.code = match &content {
                     FileContent::Text(t) => Some(super::text_as_diff(&path, t)),
@@ -434,7 +491,8 @@ impl ExploreView {
                 self.blame = Some(blocks);
             }
             ExploreResult::FileHistory { rev, path, commits }
-                if rev == self.rev && self.file.as_deref() == Some(path.as_str()) =>
+                if Some(&rev) == self.commit.as_ref()
+                    && self.file.as_deref() == Some(path.as_str()) =>
             {
                 self.history = Some(commits);
             }
@@ -455,40 +513,56 @@ impl ExploreView {
                 }
             }
             ExploreResult::Failed { request, message } => {
-                return Err(self.failed(request, message));
+                return self.failed(request, message).map_or(Ok(()), Err);
             }
             _ => {}
         }
         Ok(())
     }
 
-    fn failed(&mut self, request: ExploreRequest, message: String) -> String {
+    /// A request failed: what it was for gets the error if it is still shown. Returns the
+    /// message to show in a box, if any.
+    fn failed(&mut self, request: ExploreRequest, message: String) -> Option<String> {
+        let commit = self.commit.clone();
+        let file = self.file.clone();
         match request {
             ExploreRequest::Tree { rev } if rev == self.rev && rev != "HEAD" => {
                 let gone = rev.clone();
                 self.set_rev("HEAD");
-                self.refs.clear();
-                s::ERR_EXPLORE_REF_GONE.replace("{rev}", &gone)
+                self.reload_refs();
+                Some(s::ERR_EXPLORE_REF_GONE.replace("{rev}", &gone))
             }
-            ExploreRequest::Grep { .. } => {
-                if let Some(sv) = self.search.as_mut() {
+            ExploreRequest::Tree { rev } if rev == self.rev => {
+                self.reload_tree = false;
+                self.load_error = Some(message);
+                None
+            }
+            ExploreRequest::Grep { text, .. } => {
+                let mine = self.search.as_ref().is_some_and(|sv| sv.text == text);
+                if let Some(sv) = self.search.as_mut().filter(|_| mine) {
                     sv.running = false;
                 }
-                message
+                mine.then_some(message)
             }
-            ExploreRequest::Blame { .. } => {
-                self.blame = Some(Vec::new());
-                message
+            ExploreRequest::File { rev, path } | ExploreRequest::FileHistory { rev, path }
+                if Some(&rev) == commit.as_ref() && Some(&path) == file.as_ref() =>
+            {
+                self.load_error = Some(message);
+                None
             }
-            ExploreRequest::FileHistory { .. } => {
-                self.history = Some(Vec::new());
-                message
+            ExploreRequest::Blame { rev, path }
+                if self.blame_target() == Some((rev.clone(), path.clone())) =>
+            {
+                self.load_error = Some(message);
+                None
             }
-            ExploreRequest::File { .. } => {
-                self.content = Some(FileContent::Binary);
-                message
+            ExploreRequest::FileDiff { commit, .. }
+                if self.history_selected.as_deref() == Some(commit.as_str()) =>
+            {
+                self.load_error = Some(message);
+                None
             }
-            _ => message,
+            _ => None,
         }
     }
 }
@@ -501,6 +575,8 @@ pub struct HistoryFilter {
     pub running: bool,
     /// Commits found, and whether there are more than shown.
     pub results: Option<(Vec<LogEntry>, bool)>,
+    /// The search running (the text field may be edited meanwhile).
+    pub in_flight: Option<(LogSearch, String)>,
 }
 
 impl Default for HistoryFilter {
@@ -510,6 +586,7 @@ impl Default for HistoryFilter {
             query: String::new(),
             running: false,
             results: None,
+            in_flight: None,
         }
     }
 }
@@ -523,6 +600,7 @@ impl super::HistoryView {
             return None;
         }
         f.running = true;
+        f.in_flight = Some((f.kind, query.clone()));
         Some(ExploreRequest::LogSearch {
             kind: f.kind,
             query,
@@ -531,6 +609,7 @@ impl super::HistoryView {
 
     pub fn clear_filter(&mut self) {
         self.filter.running = false;
+        self.filter.in_flight = None;
         self.filter.results = None;
     }
 
@@ -556,8 +635,9 @@ impl AppState {
         } = result
         {
             let f = &mut self.history.filter;
-            if f.running && f.kind == kind && f.query.trim() == query {
+            if f.in_flight.as_ref() == Some(&(kind, query)) {
                 f.running = false;
+                f.in_flight = None;
                 f.results = Some((entries, truncated));
             }
             return;
@@ -568,6 +648,7 @@ impl AppState {
         } = &result
         {
             self.history.filter.running = false;
+            self.history.filter.in_flight = None;
             self.messages
                 .push_back(AppError::new(Severity::Warning, message));
             return;
