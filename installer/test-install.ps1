@@ -14,6 +14,18 @@ $command = (Get-ItemProperty $keys[0]).'(default)'
 if ($command -notlike "*retrogit.exe*%1*") { throw "unexpected link handler: $command" }
 Write-Host "installed: $command"
 
+# An update runs the installer again with /RELAUNCH: RetroGit is started afterwards.
+Start-Process $Setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/RELAUNCH" -Wait
+$started = $null
+for ($i = 0; $i -lt 30 -and -not $started; $i++) {
+  $started = Get-Process retrogit -ErrorAction SilentlyContinue
+  if (-not $started) { Start-Sleep 1 }
+}
+if (-not $started) { throw "/RELAUNCH did not start RetroGit" }
+$started | Stop-Process -Force
+Start-Sleep 2
+Write-Host "relaunched after a silent update"
+
 Start-Process (Join-Path $app "unins000.exe") -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
 # The uninstaller runs from a copy in the temporary folder: wait for it to finish.
 for ($i = 0; $i -lt 60 -and (Test-Path (Join-Path $app "retrogit.exe")); $i++) { Start-Sleep 1 }

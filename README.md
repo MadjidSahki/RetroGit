@@ -121,6 +121,15 @@ gradient title bar and a pixel font.
 - **`retrogit` command**: open the repository of the current folder from a terminal.
 - Recent repositories; window size and position remembered.
 
+### Updates
+
+- RetroGit checks GitHub for a new version at start and every day (or **Help → Check for
+  updates…**) and shows **Update available** in the toolbar.
+- **Install and restart** downloads it, checks it against the release's SHA-256 checksums,
+  replaces the app (macOS app, Windows installer or portable exe — the old copy is put back
+  if anything fails) and restarts. Nothing is installed without your click; **Skip this
+  version** and automatic checks can be turned off.
+
 ---
 
 ## Install
@@ -234,6 +243,7 @@ cargo test --workspace
 - `main` is protected: changes land through pull requests, each built and tested on macOS and Windows.
 - Each merge into `main` publishes a release `v<major>.<minor>.<run number>` with both binaries.
 - Icons are made from the full logo with `python3 scripts/make-icons.py path/to/retrogit.png` (needs Pillow).
+- Each release also has `SHA256SUMS.txt`, which RetroGit checks before installing an update.
 - `scripts/package-macos.sh <binary> <version> <dir>` builds and signs `RetroGit.app` (ad-hoc,
   or `MACOS_SIGN_IDENTITY`); `installer/retrogit.iss` is the Windows installer (Inno Setup 6),
   checked by `installer/test-install.ps1` in the CI.
