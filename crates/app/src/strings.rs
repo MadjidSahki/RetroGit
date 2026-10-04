@@ -258,6 +258,12 @@ pub const REVIEW_NEEDS_TEXT: &str = "Write a comment, or add line comments, firs
 pub const OWN_PULL_REVIEW: &str = "You cannot approve or request changes on your own pull request.";
 pub const PENDING_COMMENTS: &str = "pending line comments: send them with Review...";
 pub const DISCARD_PENDING: &str = "Discard pending comments";
+pub const PENDING_DISCARD_TITLE: &str = "Pending line comments";
+
+/// Asked before opening another repository while line comments are pending.
+pub fn pending_discard_question(n: usize) -> String {
+    format!("Discard {n} pending line comments?")
+}
 pub const MERGE_TITLE: &str = "Merge pull request";
 pub const MERGE_METHOD: &str = "Method:";
 pub const MERGE_COMMIT: &str = "Create a merge commit";

@@ -217,11 +217,19 @@ fn picker(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
 
     if let Some((url, dest, name, account)) = start {
         let parent = dialog.dest_parent.trim().to_string();
-        dialog.progress = Some(Default::default());
-        dialog.cloning_name = name;
         cx.state.config.last_clone_dir = Some(PathBuf::from(parent));
         cx.state.config_dirty = true;
-        cx.worker.send(Command::Clone { url, dest, account });
+        // Pending line comments: the confirmation starts the clone.
+        if let Some(cmd) = cx
+            .state
+            .request_repo_switch(Command::Clone { url, dest, account })
+        {
+            if let Some(d) = cx.state.clone.as_mut() {
+                d.progress = Some(Default::default());
+                d.cloning_name = name;
+            }
+            cx.worker.send(cmd);
+        }
     } else if r.close_requested || close {
         cx.state.clone = None;
     }

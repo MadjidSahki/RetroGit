@@ -558,7 +558,9 @@ pub fn confirm_dialog(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
         ConflictConfirm::OpenRepo(path) => {
             c.conflict = None;
             c.conflict_path = None;
-            cx.worker.send(Command::OpenRepo(path));
+            if let Some(cmd) = cx.state.request_repo_switch(Command::OpenRepo(path)) {
+                cx.worker.send(cmd);
+            }
         }
     }
 }

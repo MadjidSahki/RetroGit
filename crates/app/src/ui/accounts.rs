@@ -163,7 +163,7 @@ fn repo_account_window(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             slug: slug.clone(),
             login,
         });
-        if let Some(number) = cx.state.pulls.selected {
+        if let Some(number) = cx.state.pulls.reload_selected() {
             cx.worker.send(Command::LoadPull { slug, number });
         }
     }

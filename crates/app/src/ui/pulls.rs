@@ -99,7 +99,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     }
     if p.load_selected {
         p.load_selected = false;
-        if let Some(number) = p.selected {
+        if let Some(number) = p.reload_selected() {
             cx.worker.send(Command::LoadPull {
                 slug: slug.clone(),
                 number,
@@ -157,7 +157,7 @@ fn toolbar(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
                 slug: slug.clone(),
                 filter: p.filter,
             });
-            if let Some(number) = p.selected {
+            if let Some(number) = p.reload_selected() {
                 cx.worker.send(Command::LoadPull {
                     slug: slug.clone(),
                     number,
@@ -290,6 +290,7 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
                 });
             if let Some(number) = clicked {
                 cx.state.pulls.select(number);
+                cx.state.pulls.reload_selected();
                 cx.worker.send(Command::LoadPull {
                     slug: slug.clone(),
                     number,

@@ -281,3 +281,43 @@ fn right_clicking_right_of_a_diff_line_text_offers_a_comment() {
     h.run();
     assert!(h.query_by_label(s::ADD_COMMENT).is_some());
 }
+
+#[test]
+fn hovering_a_multi_line_comment_shows_all_of_it() {
+    let mut h = files_world();
+    assert!(h.query_by_label_contains("```suggestion").is_none());
+    let rect = h.get_by_label_contains("> carol: Simpler:").rect();
+    // Right of the text (the row ends near the window edge).
+    h.hover_at(egui::pos2(rect.right() + 30.0, rect.center().y));
+    for _ in 0..10 {
+        h.run();
+    }
+    assert!(
+        h.query_by_label_contains("```suggestion").is_some(),
+        "full comment in a tooltip"
+    );
+}
+
+#[test]
+fn hovering_a_multi_line_pending_comment_shows_all_of_it() {
+    let mut w = world(false);
+    w.state.pulls.sub_tab = PullTab::Files;
+    w.state.pulls.open_file("a.rs");
+    w.state.queue_line_comment(github::LineComment {
+        path: "a.rs".into(),
+        line: 4,
+        side: DiffSide::Right,
+        start: None,
+        body: "First line\nsecond line here".into(),
+    });
+    let mut h = harness(w);
+    h.run();
+    assert!(h.query_by_label_contains("second line here").is_none());
+    let rect = h.get_by_label_contains("First line").rect();
+    h.hover_at(egui::pos2(rect.right() + 100.0, rect.center().y));
+    for _ in 0..10 {
+        h.run();
+    }
+    assert!(h.query_by_label_contains("second line here").is_some());
+    assert_eq!(retrogit::ui::pull_detail::comment_hover("one line\n"), None);
+}

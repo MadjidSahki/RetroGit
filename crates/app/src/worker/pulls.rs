@@ -227,7 +227,7 @@ impl Worker {
                 slug: slug.clone(),
                 detail: Box::new(detail),
             }),
-            Err(e) => return self.github_failed(Op::Pulls, &e),
+            Err(e) => return self.github_failed(Op::PullDetail(number), &e),
         }
         match self.on_github(slug, |c, t, o, r| c.pull_files(t, o, r, number)) {
             Ok(files) => self.emit(Event::PullFilesLoaded {
@@ -235,7 +235,7 @@ impl Worker {
                 number,
                 files,
             }),
-            Err(e) => self.github_failed(Op::Pulls, &e),
+            Err(e) => self.github_failed(Op::PullDetail(number), &e),
         }
     }
 

@@ -287,7 +287,11 @@ impl RetroGitApp {
     fn open_requested(&mut self, path: PathBuf) {
         match crate::cli::route(path) {
             crate::cli::Requested::Link(link) => self.state.open_link(&link),
-            crate::cli::Requested::Folder(path) => self.worker.send(Command::OpenRepo(path)),
+            crate::cli::Requested::Folder(path) => {
+                if let Some(cmd) = self.state.request_repo_switch(Command::OpenRepo(path)) {
+                    self.worker.send(cmd);
+                }
+            }
         }
     }
 

@@ -319,6 +319,8 @@ pub enum Op {
     Sync,
     /// Pull request reads.
     Pulls,
+    /// Loading the detail (and files) of this pull request.
+    PullDetail(u64),
     /// Pull request changes (create, review, merge...).
     PullAction,
     Internal,

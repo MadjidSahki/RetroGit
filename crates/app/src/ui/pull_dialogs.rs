@@ -65,7 +65,50 @@ enum Outcome {
 
 const BUTTON: egui::Vec2 = egui::vec2(110.0, 23.0);
 
+/// Another repository is being opened while line comments are pending: drop them?
+fn repo_switch(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
+    if cx.state.repo_switch.is_none() {
+        return;
+    }
+    let question = s::pending_discard_question(cx.state.pulls.pending_total());
+    let mut choice = None;
+    let r = Dialog::new("pending_discard", s::PENDING_DISCARD_TITLE)
+        .width(340.0)
+        .show(egui_ctx, |ui| {
+            ui.horizontal(|ui| {
+                win95::icon::icon(ui, win95::Icon::Warning);
+                ui.add(egui::Label::new(question).wrap());
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.add(Button95::new(s::OK)).clicked() {
+                    choice = Some(true);
+                }
+                if ui.add(Button95::new(s::CANCEL)).clicked() {
+                    choice = Some(false);
+                }
+            });
+        });
+    match (choice, r.close_requested) {
+        (Some(true), _) => {
+            if let Some(cmd) = cx.state.confirm_repo_switch() {
+                if let (Command::Clone { dest, .. }, Some(c)) = (&cmd, cx.state.clone.as_mut()) {
+                    c.progress = Some(Default::default());
+                    c.cloning_name = dest
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                }
+                cx.worker.send(cmd);
+            }
+        }
+        (Some(false), _) | (None, true) => cx.state.cancel_repo_switch(),
+        (None, false) => {}
+    }
+}
+
 pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
+    repo_switch(egui_ctx, cx);
     let Some(slug) = cx.state.github_slug() else {
         cx.state.pulls.dialog = None;
         return;
@@ -268,7 +311,7 @@ fn review(
         return Outcome::Close;
     };
     let allowed = review_events_allowed(&d);
-    let pending = cx.state.pulls.pending.len();
+    let pending = cx.state.pulls.selected_pending().len();
     let busy = cx.state.pulls.busy;
     let mut submit = false;
     let mut cancel = false;
@@ -339,7 +382,7 @@ fn review(
                 commit_id: d.head_sha.clone(),
                 event,
                 body,
-                comments: cx.state.pulls.pending.clone(),
+                comments: cx.state.pulls.selected_pending().to_vec(),
             },
         };
         return Outcome::Send(cmd, keep);

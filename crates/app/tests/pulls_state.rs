@@ -157,8 +157,18 @@ fn results_for_another_repo_filter_or_selection_are_ignored() {
     );
 }
 
+fn line_comment(body: &str) -> github::LineComment {
+    github::LineComment {
+        path: "a".into(),
+        line: 1,
+        side: github::DiffSide::Right,
+        start: None,
+        body: body.into(),
+    }
+}
+
 #[test]
-fn selecting_another_pull_request_resets_the_detail_and_pending_review() {
+fn selecting_another_pull_request_resets_the_detail_but_keeps_its_pending_review() {
     let mut st = opened(Some("https://github.com/o/r"));
     st.pulls.select(1);
     st.apply(Event::PullLoaded {
@@ -166,19 +176,171 @@ fn selecting_another_pull_request_resets_the_detail_and_pending_review() {
         detail: Box::new(detail(1)),
     });
     st.pulls.sub_tab = PullTab::Files;
-    st.queue_line_comment(github::LineComment {
-        path: "a".into(),
-        line: 1,
-        side: github::DiffSide::Right,
-        start: None,
-        body: "x".into(),
-    });
+    st.queue_line_comment(line_comment("on one"));
     st.pulls.select(1);
-    assert_eq!(st.pulls.pending.len(), 1, "same pull request: kept");
+    assert_eq!(
+        st.pulls.selected_pending().len(),
+        1,
+        "same pull request: kept"
+    );
     st.pulls.select(2);
     assert!(st.pulls.detail.is_none());
-    assert!(st.pulls.pending.is_empty());
+    assert!(st.pulls.selected_pending().is_empty(), "not shown on #2");
     assert_eq!(st.pulls.sub_tab, PullTab::Conversation);
+    st.queue_line_comment(line_comment("on two"));
+    assert_eq!(st.pulls.pending_total(), 2);
+    st.pulls.select(1);
+    assert_eq!(
+        st.pulls.selected_pending(),
+        [line_comment("on one")],
+        "back"
+    );
+    // The review of #1 went through: only its comments go.
+    st.pulls.dialog = Some(retrogit::state::PullDialog::Review {
+        event: ReviewEvent::Comment,
+        body: String::new(),
+    });
+    st.apply(Event::PullActionDone {
+        number: 1,
+        note: s::NOTE_REVIEW_SENT.into(),
+    });
+    assert!(st.pulls.selected_pending().is_empty());
+    st.pulls.select(2);
+    assert_eq!(st.pulls.selected_pending(), [line_comment("on two")]);
+}
+
+#[test]
+fn changing_repository_with_pending_comments_asks_first() {
+    use retrogit::protocol::Command;
+    let mut st = opened(Some("https://github.com/o/r"));
+    let other = Command::OpenRepo(PathBuf::from("/tmp/other"));
+    assert_eq!(
+        st.request_repo_switch(other.clone()),
+        Some(other.clone()),
+        "nothing pending: goes"
+    );
+    st.pulls.select(4);
+    st.queue_line_comment(line_comment("x"));
+    let same = Command::OpenRepo(PathBuf::from("/tmp/r"));
+    assert_eq!(
+        st.request_repo_switch(same.clone()),
+        Some(same),
+        "reopening the same repository keeps the comments"
+    );
+    assert_eq!(st.request_repo_switch(other.clone()), None, "asks");
+    assert_eq!(st.repo_switch, Some(other.clone()));
+    st.cancel_repo_switch();
+    assert_eq!(st.repo_switch, None);
+    assert_eq!(st.pulls.pending_total(), 1, "cancel keeps them");
+    let clone = Command::Clone {
+        url: "https://github.com/o/x.git".into(),
+        dest: PathBuf::from("/tmp/x"),
+        account: None,
+    };
+    assert_eq!(st.request_repo_switch(clone.clone()), None, "a clone too");
+    assert_eq!(st.confirm_repo_switch(), Some(clone));
+    assert_eq!(st.repo_switch, None);
+}
+
+#[test]
+fn a_created_pull_request_shows_in_the_list_at_once() {
+    let mut st = opened(Some("https://github.com/o/r"));
+    let list = |st: &AppState| st.pulls.list.iter().map(|p| p.number).collect::<Vec<_>>();
+    st.apply(Event::PullsLoaded {
+        slug: slug(),
+        filter: PrFilter::Open,
+        list: vec![pr(1)],
+    });
+    st.apply(Event::PullCreated {
+        slug: slug(),
+        number: 12,
+    });
+    // GitHub's search does not know it yet.
+    st.apply(Event::PullsLoaded {
+        slug: slug(),
+        filter: PrFilter::Open,
+        list: vec![pr(1)],
+    });
+    assert_eq!(list(&st), [1]);
+    st.apply(Event::PullLoaded {
+        slug: slug(),
+        detail: Box::new(detail(12)),
+    });
+    assert_eq!(list(&st), [12, 1], "inserted on top");
+    st.apply(Event::PullsLoaded {
+        slug: slug(),
+        filter: PrFilter::Open,
+        list: vec![pr(1)],
+    });
+    assert_eq!(list(&st), [12, 1], "a late list does not drop it");
+    st.apply(Event::PullsLoaded {
+        slug: slug(),
+        filter: PrFilter::Open,
+        list: vec![pr(1), pr(12)],
+    });
+    assert_eq!(list(&st), [1, 12], "GitHub caught up");
+    st.apply(Event::PullsLoaded {
+        slug: slug(),
+        filter: PrFilter::Open,
+        list: vec![pr(1)],
+    });
+    assert_eq!(
+        list(&st),
+        [1],
+        "forgotten once GitHub listed it (closed since)"
+    );
+    // A detail that is not the created one is never inserted.
+    st.pulls.select(5);
+    st.apply(Event::PullLoaded {
+        slug: slug(),
+        detail: Box::new(detail(5)),
+    });
+    assert_eq!(list(&st), [1]);
+}
+
+#[test]
+fn a_created_pull_request_is_inserted_only_under_open_or_mine() {
+    for (filter, shown) in [
+        (PrFilter::Open, true),
+        (PrFilter::Mine, true),
+        (PrFilter::ReviewRequested, false),
+        (PrFilter::Closed, false),
+    ] {
+        let mut st = opened(Some("https://github.com/o/r"));
+        st.apply(Event::PullCreated {
+            slug: slug(),
+            number: 12,
+        });
+        // Filter changed before the detail came.
+        st.pulls.filter = filter;
+        st.apply(Event::PullLoaded {
+            slug: slug(),
+            detail: Box::new(detail(12)),
+        });
+        assert_eq!(!st.pulls.list.is_empty(), shown, "{filter:?}");
+    }
+}
+
+#[test]
+fn a_failed_pull_request_load_is_kept_to_say_why() {
+    let mut st = opened(Some("https://github.com/o/r"));
+    st.pulls.select(3);
+    let fail = |st: &mut AppState, n: u64| {
+        st.apply(Event::Error {
+            during: Op::PullDetail(n),
+            error: AppError::new(Severity::Warning, "Not Found"),
+        })
+    };
+    fail(&mut st, 3);
+    assert_eq!(st.pulls.load_error, Some((3, "Not Found".to_string())));
+    st.apply(Event::PullLoaded {
+        slug: slug(),
+        detail: Box::new(detail(3)),
+    });
+    assert_eq!(st.pulls.load_error, None, "loaded after all");
+    fail(&mut st, 3);
+    st.pulls.select(4);
+    assert_eq!(st.pulls.load_error, None, "another pull request");
 }
 
 #[test]
@@ -258,13 +420,7 @@ fn actions_end_busy_and_mark_the_list_stale() {
 fn pending_comments_are_cleared_only_when_the_review_went_through() {
     let mut st = opened(Some("https://github.com/o/r"));
     st.pulls.select(4);
-    st.queue_line_comment(github::LineComment {
-        path: "a".into(),
-        line: 1,
-        side: github::DiffSide::Right,
-        start: None,
-        body: "x".into(),
-    });
+    st.queue_line_comment(line_comment("x"));
     st.pulls.dialog = Some(retrogit::state::PullDialog::Review {
         event: ReviewEvent::Comment,
         body: String::new(),
@@ -274,13 +430,17 @@ fn pending_comments_are_cleared_only_when_the_review_went_through() {
         during: Op::PullAction,
         error: AppError::new(Severity::Warning, "422"),
     });
-    assert_eq!(st.pulls.pending.len(), 1, "failed: kept, dialog still open");
+    assert_eq!(
+        st.pulls.selected_pending().len(),
+        1,
+        "failed: kept, dialog still open"
+    );
     assert!(st.pulls.dialog.is_some());
     st.apply(Event::PullActionDone {
         number: 4,
         note: s::NOTE_REVIEW_SENT.into(),
     });
-    assert!(st.pulls.pending.is_empty() && st.pulls.dialog.is_none());
+    assert!(st.pulls.selected_pending().is_empty() && st.pulls.dialog.is_none());
 }
 
 #[test]
