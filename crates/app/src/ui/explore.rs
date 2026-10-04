@@ -88,13 +88,11 @@ fn toolbar(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             e.rev.clone()
         };
         combo_box(ui, "explore_ref", &shown, 200.0, |ui| {
-            ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                for r in &e.refs {
-                    if ui.selectable_label(r.name == e.rev, &r.name).clicked() {
-                        pick = Some(r.name.clone());
-                    }
+            for r in &e.refs {
+                if ui.selectable_label(r.name == e.rev, &r.name).clicked() {
+                    pick = Some(r.name.clone());
                 }
-            });
+            }
         });
         if let Some(c) = &e.commit {
             let short: String = c.chars().take(7).collect();
