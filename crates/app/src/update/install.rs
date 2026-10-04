@@ -6,7 +6,8 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::mpsc::{RecvTimeoutError, sync_channel};
+use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
@@ -16,18 +17,27 @@ use crate::strings as s;
 /// Larger downloads are refused.
 pub const MAX_DOWNLOAD: u64 = 200 * 1024 * 1024;
 
-/// Downloads from allowed hosts only, each redirect checked.
+/// Downloads from allowed hosts only, each redirect checked. No overall time limit (slow
+/// connections finish); a download that receives nothing for `stall` fails.
 pub struct Fetcher {
     agent: ureq::Agent,
     allow: fn(&str) -> bool,
+    stall: Duration,
 }
 
 impl Fetcher {
     pub fn new(allow: fn(&str) -> bool) -> Fetcher {
         Fetcher {
-            agent: super::check::agent(Duration::from_secs(600)),
+            agent: super::check::agent(None, Some(Duration::from_secs(30))),
             allow,
+            stall: Duration::from_secs(60),
         }
+    }
+
+    /// How long without data before giving up (60 s by default).
+    pub fn with_stall(mut self, stall: Duration) -> Fetcher {
+        self.stall = stall;
+        self
     }
 
     /// GitHub's hosts only.
@@ -52,15 +62,15 @@ impl Fetcher {
             if cancel.load(Ordering::SeqCst) {
                 return Err(s::UPDATE_CANCELLED.into());
             }
-            let mut resp = self.agent.get(&url).call().map_err(|e| e.to_string())?;
+            let resp = self.agent.get(&url).call().map_err(|e| e.to_string())?;
             let status = resp.status().as_u16();
             if (300..400).contains(&status) {
-                url = resp
+                let location = resp
                     .headers()
                     .get("location")
                     .and_then(|v| v.to_str().ok())
-                    .ok_or("redirect without a location")?
-                    .to_string();
+                    .ok_or("redirect without a location")?;
+                url = resolve_location(&url, location);
                 continue;
             }
             if status != 200 {
@@ -74,22 +84,50 @@ impl Fetcher {
             if total.is_some_and(|t| t > max) {
                 return Err(s::ERR_UPDATE_TOO_LARGE.into());
             }
-            let mut reader = resp.body_mut().with_config().limit(max + 1).reader();
-            let mut buf = vec![0u8; 64 * 1024];
+            // Read on a helper thread: Cancel and a stall are noticed while a read blocks
+            // (the thread is abandoned then; it ends with the connection).
+            let mut reader = resp.into_body().into_with_config().limit(max + 1).reader();
+            let (tx, rx) = sync_channel::<Result<Vec<u8>, String>>(4);
+            std::thread::Builder::new()
+                .name("retrogit-update-download".into())
+                .spawn(move || {
+                    let mut buf = vec![0u8; 64 * 1024];
+                    loop {
+                        let chunk = match reader.read(&mut buf) {
+                            Ok(0) => return,
+                            Ok(n) => Ok(buf[..n].to_vec()),
+                            Err(e) => Err(e.to_string()),
+                        };
+                        let failed = chunk.is_err();
+                        if tx.send(chunk).is_err() || failed {
+                            return;
+                        }
+                    }
+                })
+                .map_err(|e| e.to_string())?;
             let mut done = 0u64;
+            let mut last = Instant::now();
             loop {
                 if cancel.load(Ordering::SeqCst) {
                     return Err(s::UPDATE_CANCELLED.into());
                 }
-                let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
-                if n == 0 {
-                    break;
-                }
+                let chunk = match rx.recv_timeout(Duration::from_millis(100)) {
+                    Ok(chunk) => chunk?,
+                    Err(RecvTimeoutError::Timeout) => {
+                        if last.elapsed() >= self.stall {
+                            return Err(s::ERR_UPDATE_STALLED.into());
+                        }
+                        continue;
+                    }
+                    Err(RecvTimeoutError::Disconnected) => break,
+                };
+                last = Instant::now();
+                let n = chunk.len();
                 done += n as u64;
                 if done > max {
                     return Err(s::ERR_UPDATE_TOO_LARGE.into());
                 }
-                sink(&buf[..n])?;
+                sink(&chunk)?;
                 progress(done, total);
             }
             return Ok(());
@@ -372,6 +410,20 @@ pub fn cleanup(kind: &InstallKind) {
     let old = old_path(&current);
     let _ = std::fs::remove_dir_all(&old);
     let _ = std::fs::remove_file(&old);
+    // The old exe cannot be deleted while it still runs (it may be exiting while this copy
+    // starts): tried again for a minute.
+    if matches!(kind, InstallKind::WindowsPortable(_)) && old.exists() {
+        let spawned = std::thread::Builder::new()
+            .name("retrogit-update-cleanup".into())
+            .spawn(move || {
+                remove_with_retries(&old, 120, Duration::from_millis(500), |p| {
+                    std::fs::remove_file(p)
+                });
+            });
+        if let Err(e) = spawned {
+            log::warn!("old copy not removed: {e}");
+        }
+    }
     if let Some(dir) = work_dir(kind) {
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -429,4 +481,52 @@ pub fn work_dir(kind: &InstallKind) -> Option<PathBuf> {
         InstallKind::WindowsPortable(exe) => exe.parent().map(|p| p.join(".retrogit-update")),
         _ => None,
     }
+}
+
+/// A redirect's `Location` made absolute against `base` (the URL that answered):
+/// `https://...` as is, `//host/...` with `base`'s scheme, `/path` on `base`'s host,
+/// anything else next to `base`'s last path segment.
+pub fn resolve_location(base: &str, location: &str) -> String {
+    let has_scheme = location.split_once("://").is_some_and(|(scheme, _)| {
+        !scheme.is_empty()
+            && scheme
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"+-.".contains(&b))
+    });
+    if has_scheme {
+        return location.to_string();
+    }
+    let (scheme, rest) = base.split_once("://").unwrap_or(("https", base));
+    if let Some(net) = location.strip_prefix("//") {
+        return format!("{scheme}://{net}");
+    }
+    let rest = rest.split(['?', '#']).next().unwrap_or("");
+    let (authority, path) = match rest.find('/') {
+        Some(i) => rest.split_at(i),
+        None => (rest, "/"),
+    };
+    if location.starts_with('/') {
+        return format!("{scheme}://{authority}{location}");
+    }
+    let dir = &path[..path.rfind('/').map_or(0, |i| i + 1)];
+    format!("{scheme}://{authority}{dir}{location}")
+}
+
+/// Call `remove` on `path` up to `attempts` times, `interval` apart, until it works (or the
+/// file is already gone). Returns whether it is gone.
+pub fn remove_with_retries(
+    path: &Path,
+    attempts: u32,
+    interval: Duration,
+    mut remove: impl FnMut(&Path) -> std::io::Result<()>,
+) -> bool {
+    for i in 0..attempts {
+        match remove(path) {
+            Ok(()) => return true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return true,
+            Err(_) if i + 1 < attempts => std::thread::sleep(interval),
+            Err(_) => {}
+        }
+    }
+    false
 }
