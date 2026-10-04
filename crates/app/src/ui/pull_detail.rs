@@ -203,8 +203,10 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                 .add(Button95::new(s::EDIT_LABELS).enabled(!cx.state.pulls.busy))
                 .clicked()
         {
+            let names: Vec<String> = d.summary.labels.iter().map(|l| l.name.clone()).collect();
             cx.state.pulls.dialog = Some(PullDialog::Labels {
-                checked: d.summary.labels.iter().map(|l| l.name.clone()).collect(),
+                old: names.clone(),
+                checked: names,
             });
         }
     });
@@ -413,6 +415,7 @@ fn conversation(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug, d: &PrDetail) 
                 markdown_view(ui, &d.body);
             }
             ui.separator();
+            truncated_notes(ui, d);
             for item in &d.timeline {
                 let at = item.at().get(..16).unwrap_or("").replace('T', " ");
                 match item {
@@ -465,6 +468,35 @@ fn conversation(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug, d: &PrDetail) 
     }
 }
 
+/// One line per conversation connection GitHub sent only part of, and a link to the rest.
+fn truncated_notes(ui: &mut egui::Ui, d: &PrDetail) {
+    let reviews = d
+        .timeline
+        .iter()
+        .filter(|t| matches!(t, TimelineItem::Review { .. }))
+        .count();
+    let comments = d.timeline.len() - reviews;
+    let notes: Vec<String> = [
+        (comments, d.comments_total, s::TRUNCATED_COMMENTS),
+        (reviews, d.reviews_total, s::TRUNCATED_REVIEWS),
+        (d.threads.len(), d.threads_total, s::TRUNCATED_THREADS),
+    ]
+    .into_iter()
+    // Pending reviews are read but not shown: only a cut connection counts.
+    .filter(|(_, total, _)| *total > github::DETAIL_PAGE)
+    .map(|(shown, total, what)| s::detail_truncated(shown, total, what))
+    .collect();
+    if notes.is_empty() {
+        return;
+    }
+    let gray = win95::theme::palette(ui.ctx()).gray_text;
+    for n in notes {
+        ui.label(RichText::new(n).color(gray));
+    }
+    ui.hyperlink_to(s::OPEN_ON_GITHUB, &d.summary.url);
+    ui.separator();
+}
+
 fn commits(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     let mut open: Option<String> = None;
     ScrollArea::vertical()
@@ -481,6 +513,12 @@ fn commits(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                 {
                     open = Some(c.oid.clone());
                 }
+            }
+            if d.commit_count as usize > d.commits.len() {
+                ui.label(
+                    RichText::new(s::commits_truncated(d.commits.len(), d.commit_count))
+                        .color(win95::theme::palette(ui.ctx()).gray_text),
+                );
             }
         });
     if let Some(id) = open {

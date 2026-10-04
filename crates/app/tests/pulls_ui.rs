@@ -75,6 +75,7 @@ fn world(draft: bool) -> World {
         slug: slug.clone(),
         filter: Default::default(),
         list: vec![summary(draft)],
+        total: 1,
     });
     state.pulls.select(7);
     state.apply(Event::PullLoaded {
@@ -87,6 +88,9 @@ fn world(draft: bool) -> World {
             cross_repository: false,
             commits: vec![],
             commit_count: 0,
+            comments_total: 0,
+            reviews_total: 0,
+            threads_total: 0,
             check_runs: vec![],
             timeline: vec![],
             threads: vec![],
@@ -176,8 +180,103 @@ fn labels_are_edited_in_a_dialog() {
     h.run();
     assert!(h.query_by_label("Documentation").is_some());
     assert!(
-        matches!(&h.state().state.pulls.dialog, Some(PullDialog::Labels { checked }) if checked == &["bug".to_string()])
+        matches!(&h.state().state.pulls.dialog, Some(PullDialog::Labels { old, checked }) if checked == &["bug".to_string()] && old == checked),
+        "the window remembers the labels it started from"
     );
+}
+
+/// Role of a hyperlink in egui's accessibility tree (the header button is a `Button`).
+const LINK: egui::accesskit::Role = egui::accesskit::Role::Label;
+
+fn opened_urls(h: &mut Harness<'static, World>) -> Vec<String> {
+    let mut urls = Vec::new();
+    for _ in 0..4 {
+        h.step();
+        for c in &h.output().platform_output.commands {
+            if let egui::OutputCommand::OpenUrl(o) = c {
+                urls.push(o.url.clone());
+            }
+        }
+    }
+    urls
+}
+
+fn link(h: &Harness<'static, World>) -> bool {
+    h.query_by_role_and_label(LINK, s::OPEN_ON_GITHUB).is_some()
+}
+
+#[test]
+fn a_truncated_list_says_so_with_a_link_to_github() {
+    let mut w = world(false);
+    w.state.pulls.total = 120;
+    let mut h = harness(w);
+    h.run();
+    assert!(h.query_by_label(&s::pulls_truncated(1, 120)).is_some());
+    h.get_by_role_and_label(LINK, s::OPEN_ON_GITHUB).click();
+    assert_eq!(
+        opened_urls(&mut h),
+        [github::pulls_web_url("o", "r", Default::default())]
+    );
+}
+
+#[test]
+fn a_complete_list_has_no_footer() {
+    let mut h = harness(world(false));
+    h.run();
+    assert!(h.query_by_label(&s::pulls_truncated(1, 1)).is_none());
+    assert!(!link(&h), "no link in the list nor in the conversation");
+}
+
+#[test]
+fn a_long_conversation_says_what_it_does_not_show() {
+    let mut w = world(false);
+    {
+        let pulls = &mut w.state.pulls;
+        let mut d = (**pulls.detail.as_ref().unwrap()).clone();
+        d.timeline = vec![github::TimelineItem::Comment {
+            author: "carol".into(),
+            body: "Hi".into(),
+            at: "2026-10-01T08:00:00Z".into(),
+        }];
+        d.comments_total = 130;
+        d.reviews_total = 40;
+        pulls.detail = Some(Arc::new(d));
+    }
+    let mut h = harness(w);
+    h.run();
+    assert!(
+        h.query_by_label(&s::detail_truncated(1, 130, s::TRUNCATED_COMMENTS))
+            .is_some()
+    );
+    assert!(
+        h.query_by_label(&s::detail_truncated(0, 40, s::TRUNCATED_REVIEWS))
+            .is_none(),
+        "every review was read"
+    );
+    h.get_by_role_and_label(LINK, s::OPEN_ON_GITHUB).click();
+    assert_eq!(opened_urls(&mut h), ["https://github.com/o/r/pull/7"]);
+}
+
+#[test]
+fn a_long_commit_list_says_it_shows_the_first_ones() {
+    let mut w = world(false);
+    {
+        let pulls = &mut w.state.pulls;
+        let mut d = (**pulls.detail.as_ref().unwrap()).clone();
+        d.commits = vec![github::PrCommit {
+            oid: "c1".into(),
+            short_oid: "c1".into(),
+            headline: "First".into(),
+            author: "ada".into(),
+            date: String::new(),
+        }];
+        d.commit_count = 250;
+        pulls.detail = Some(Arc::new(d));
+        pulls.sub_tab = retrogit::state::PullTab::Commits;
+    }
+    let mut h = harness(w);
+    h.run();
+    assert!(h.query_by_label(&s::commits_truncated(1, 250)).is_some());
 }
 
 #[test]

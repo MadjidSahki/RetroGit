@@ -22,9 +22,9 @@ pub use error::{GithubError, repository_missing};
 pub use graphql::GraphqlResponse;
 pub use link::next_link;
 pub use pulls::{
-    CheckRun, CheckStatus, ChecksState, DiffSide, Label, MergeMethod, Mergeable, PrCommit,
-    PrDetail, PrFile, PrFilter, PrState, PrSummary, ReviewDecision, ReviewState, ReviewThread,
-    Reviewer, ThreadComment, TimelineItem, parse_color, search_query,
+    CheckRun, CheckStatus, ChecksState, DETAIL_PAGE, DiffSide, Label, MergeMethod, Mergeable,
+    PrCommit, PrDetail, PrFile, PrFilter, PrState, PrSummary, ReviewDecision, ReviewState,
+    ReviewThread, Reviewer, ThreadComment, TimelineItem, parse_color, pulls_web_url, search_query,
 };
 pub use pulls_write::{
     LineComment, Merge, NewPull, RepoMeta, Review, ReviewEvent, diff_lists, encode_segment,

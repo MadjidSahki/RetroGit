@@ -71,6 +71,7 @@ fn world(draft: bool) -> World {
         slug: slug(),
         filter: Default::default(),
         list: vec![summary.clone()],
+        total: 1,
     });
     state.pulls.select(7);
     let thread = ReviewThread {
@@ -103,6 +104,9 @@ fn world(draft: bool) -> World {
             cross_repository: false,
             commits: vec![],
             commit_count: 0,
+            comments_total: 0,
+            reviews_total: 0,
+            threads_total: 0,
             check_runs: vec![],
             timeline: vec![],
             threads: vec![thread],

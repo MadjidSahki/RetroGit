@@ -85,6 +85,18 @@ pub fn search_query(owner: &str, repo: &str, filter: PrFilter) -> String {
     format!("repo:{owner}/{repo} is:pr {which} sort:updated-desc")
 }
 
+/// The pull requests of `owner/repo` on github.com, with the same search as `filter`.
+pub fn pulls_web_url(owner: &str, repo: &str, filter: PrFilter) -> String {
+    let q = crate::pulls_write::encode_segment(&search_query(owner, repo, filter), false);
+    format!(
+        "https://github.com/{owner}/{repo}/pulls?q={}",
+        q.replace("%20", "+")
+    )
+}
+
+/// Comments, reviews and line threads a pull request detail reads at most (each).
+pub const DETAIL_PAGE: u32 = 100;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrCommit {
     pub oid: String,
@@ -229,6 +241,10 @@ pub struct PrDetail {
     pub cross_repository: bool,
     pub commits: Vec<PrCommit>,
     pub commit_count: u32,
+    /// Sizes of the conversation connections; above `DETAIL_PAGE`, only part is read.
+    pub comments_total: u32,
+    pub reviews_total: u32,
+    pub threads_total: u32,
     pub check_runs: Vec<CheckRun>,
     pub timeline: Vec<TimelineItem>,
     pub threads: Vec<ReviewThread>,
@@ -283,16 +299,20 @@ impl Client {
         owner: &str,
         repo: &str,
         filter: PrFilter,
-    ) -> Result<Vec<PrSummary>, GithubError> {
+    ) -> Result<(Vec<PrSummary>, u32), GithubError> {
+        // The first 50 results, and how many match in all.
         let data = self.graphql(
             token,
             LIST_QUERY,
             json!({ "q": search_query(owner, repo, filter), "owner": owner, "name": repo }),
         )?;
-        Ok(nodes(&data["search"])
-            .filter(|n| n["number"].is_u64())
-            .map(summary)
-            .collect())
+        Ok((
+            nodes(&data["search"])
+                .filter(|n| n["number"].is_u64())
+                .map(summary)
+                .collect(),
+            count(&data["search"]["issueCount"]),
+        ))
     }
 
     pub fn pull_detail(
@@ -346,6 +366,10 @@ impl Client {
 /// `connection.nodes` as an iterator (empty when missing).
 pub(crate) fn nodes(connection: &Value) -> impl Iterator<Item = &Value> {
     connection["nodes"].as_array().into_iter().flatten()
+}
+
+fn count(v: &Value) -> u32 {
+    v.as_u64().unwrap_or_default().min(u32::MAX as u64) as u32
 }
 
 pub(crate) fn text(v: &Value) -> String {
@@ -578,7 +602,10 @@ fn parse_detail(data: &Value) -> Result<PrDetail, GithubError> {
         head_repo,
         cross_repository: p["isCrossRepository"].as_bool().unwrap_or(false),
         commits,
-        commit_count: p["commits"]["totalCount"].as_u64().unwrap_or_default() as u32,
+        commit_count: count(&p["commits"]["totalCount"]),
+        comments_total: count(&p["comments"]["totalCount"]),
+        reviews_total: count(&p["reviews"]["totalCount"]),
+        threads_total: count(&p["reviewThreads"]["totalCount"]),
         check_runs,
         timeline,
         threads: nodes(&p["reviewThreads"]).map(thread).collect(),

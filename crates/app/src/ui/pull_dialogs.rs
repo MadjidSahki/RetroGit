@@ -137,7 +137,7 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             &slug,
             (title, body, base, draft, labels, publish),
         ),
-        PullDialog::Labels { checked } => labels(egui_ctx, cx, &slug, checked),
+        PullDialog::Labels { old, checked } => labels(egui_ctx, cx, &slug, old, checked),
         PullDialog::EditPull { title, body } => edit_pull(egui_ctx, cx, &slug, title, body),
         PullDialog::People {
             kind,
@@ -754,6 +754,7 @@ fn labels(
     egui_ctx: &egui::Context,
     cx: &mut Ctx<'_>,
     slug: &Slug,
+    old: Vec<String>,
     mut checked: Vec<String>,
 ) -> Outcome {
     let Some(d) = cx.state.pulls.detail.clone() else {
@@ -811,11 +812,12 @@ fn labels(
         let cmd = Command::SetLabels {
             slug: slug.clone(),
             number: d.summary.number,
+            old: old.clone(),
             labels: checked.clone(),
         };
-        return Outcome::Send(cmd, PullDialog::Labels { checked });
+        return Outcome::Send(cmd, PullDialog::Labels { old, checked });
     }
-    Outcome::Keep(PullDialog::Labels { checked })
+    Outcome::Keep(PullDialog::Labels { old, checked })
 }
 
 #[cfg(test)]

@@ -200,9 +200,10 @@ impl Worker {
             Command::SetLabels {
                 slug,
                 number,
+                old,
                 labels,
             } => self.pull_action(&slug, number, s::NOTE_LABELS, |c, t, o, r| {
-                c.set_labels(t, o, r, number, &labels)
+                c.set_labels(t, o, r, number, &old, &labels)
             }),
             Command::MergePull {
                 slug,
@@ -217,7 +218,12 @@ impl Worker {
 
     fn load_pulls(&mut self, slug: Slug, filter: PrFilter) {
         match self.on_github(&slug, |c, t, o, r| c.list_pulls(t, o, r, filter)) {
-            Ok(list) => self.emit(Event::PullsLoaded { slug, filter, list }),
+            Ok((list, total)) => self.emit(Event::PullsLoaded {
+                slug,
+                filter,
+                list,
+                total,
+            }),
             Err(e) => self.github_failed(Op::Pulls, &e),
         }
     }

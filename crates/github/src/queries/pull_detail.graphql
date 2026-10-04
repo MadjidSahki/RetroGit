@@ -31,7 +31,7 @@ query PullDetail($owner: String!, $name: String!, $number: Int!) {
       mergeable
       mergeStateStatus
       viewerDidAuthor
-      labels(first: 20) { nodes { name color description } }
+      labels(first: 100) { nodes { name color description } }
       commits(first: 100) {
         totalCount
         nodes {
@@ -60,9 +60,10 @@ query PullDetail($owner: String!, $name: String!, $number: Int!) {
           }
         }
       }
-      comments(last: 100) { nodes { author { login } body createdAt } }
-      reviews(last: 100) { nodes { author { login } state body submittedAt } }
+      comments(last: 100) { totalCount nodes { author { login } body createdAt } }
+      reviews(last: 100) { totalCount nodes { author { login } state body submittedAt } }
       reviewThreads(first: 100) {
+        totalCount
         nodes {
           id
           viewerCanResolve

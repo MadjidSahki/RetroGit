@@ -289,9 +289,11 @@ pub enum Command {
         merge: Merge,
         delete_branch: Option<String>,
     },
+    /// `old`: the labels the window started from (only the differences are sent).
     SetLabels {
         slug: Slug,
         number: u64,
+        old: Vec<String>,
         labels: Vec<String>,
     },
     /// `head`: the head branch when it lives in this repository (checked out as a normal
@@ -432,6 +434,8 @@ pub enum Event {
         slug: Slug,
         filter: PrFilter,
         list: Vec<PrSummary>,
+        /// Pull requests matching the filter (the list has at most 50).
+        total: u32,
     },
     PullLoaded {
         slug: Slug,

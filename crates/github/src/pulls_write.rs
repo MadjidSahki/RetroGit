@@ -145,7 +145,7 @@ impl Client {
         )?;
         let number = resp.body_mut().read_json::<Created>()?.number;
         if !pull.labels.is_empty() {
-            self.set_labels(token, owner, repo, number, &pull.labels)?;
+            self.set_labels(token, owner, repo, number, &[], &pull.labels)?;
         }
         Ok(number)
     }
@@ -413,22 +413,39 @@ impl Client {
         .map(|_| ())
     }
 
-    /// Replace the labels of pull request `number` with `labels`.
+    /// Change the labels of pull request `number` from `old` to `new`: adds what `new`
+    /// has, removes what it dropped, and leaves alone labels neither list knows (set by
+    /// someone else meanwhile, or not shown).
     pub fn set_labels(
         &self,
         token: &str,
         owner: &str,
         repo: &str,
         number: u64,
-        labels: &[String],
+        old: &[String],
+        new: &[String],
     ) -> Result<(), GithubError> {
-        self.api_send(
-            "PUT",
-            &format!("/repos/{owner}/{repo}/issues/{number}/labels"),
-            token,
-            Some(&json!({ "labels": labels })),
-        )
-        .map(|_| ())
+        let (add, remove) = diff_lists(old, new);
+        if !add.is_empty() {
+            self.api_send(
+                "POST",
+                &format!("/repos/{owner}/{repo}/issues/{number}/labels"),
+                token,
+                Some(&json!({ "labels": add })),
+            )?;
+        }
+        for name in remove {
+            self.api_send(
+                "DELETE",
+                &format!(
+                    "/repos/{owner}/{repo}/issues/{number}/labels/{}",
+                    encode_segment(&name, false)
+                ),
+                token,
+                None,
+            )?;
+        }
+        Ok(())
     }
 
     /// Default branch and every label of the repository.

@@ -115,7 +115,7 @@ fn list_and_detail_are_loaded_for_the_repository() {
         .match_body(Matcher::PartialJson(json!({
             "variables": { "q": "repo:o/r is:pr is:open sort:updated-desc" }
         })))
-        .with_body(r#"{"data":{"search":{"nodes":[{"number":7,"title":"Fix"}]}}}"#)
+        .with_body(r#"{"data":{"search":{"issueCount":41,"nodes":[{"number":7,"title":"Fix"}]}}}"#)
         .create();
     w.send(Command::LoadPulls {
         slug: slug(),
@@ -124,7 +124,7 @@ fn list_and_detail_are_loaded_for_the_repository() {
     let evs = until(&w, |e| matches!(e, Event::PullsLoaded { .. }));
     assert!(matches!(
         evs.last(),
-        Some(Event::PullsLoaded { slug: s, filter: PrFilter::Open, list }) if *s == slug() && list[0].number == 7
+        Some(Event::PullsLoaded { slug: s, filter: PrFilter::Open, list, total: 41 }) if *s == slug() && list[0].number == 7
     ));
     let (_d, _f) = mock_detail(&mut server, 7);
     w.send(Command::LoadPull {
@@ -300,6 +300,37 @@ fn a_review_is_sent_then_the_pull_request_reloaded() {
             .any(|e| matches!(e, Event::PullActionDone { number: 7, .. }))
     );
     assert!(evs.iter().any(|e| matches!(e, Event::PullLoaded { .. })));
+}
+
+#[test]
+fn labels_are_changed_from_what_the_window_showed() {
+    let mut server = mockito::Server::new();
+    let w = signed_in(&mut server, TokenProvider::without_gh());
+    let add = server
+        .mock("POST", "/repos/o/r/issues/7/labels")
+        .match_body(Matcher::Json(json!({ "labels": ["c"] })))
+        .with_body("[]")
+        .create();
+    let remove = server
+        .mock("DELETE", "/repos/o/r/issues/7/labels/a")
+        .with_body("[]")
+        .create();
+    let put = server.mock("PUT", Matcher::Any).expect(0).create();
+    let (_d, _f) = mock_detail(&mut server, 7);
+    w.send(Command::SetLabels {
+        slug: slug(),
+        number: 7,
+        old: vec!["a".into(), "b".into()],
+        labels: vec!["b".into(), "c".into()],
+    });
+    let evs = until(&w, |e| matches!(e, Event::PullFilesLoaded { .. }));
+    add.assert();
+    remove.assert();
+    put.assert();
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, Event::PullActionDone { number: 7, .. }))
+    );
 }
 
 #[test]

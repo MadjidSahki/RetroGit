@@ -77,6 +77,9 @@ fn detail(number: u64) -> PrDetail {
             },
         ],
         commit_count: 2,
+        comments_total: 0,
+        reviews_total: 0,
+        threads_total: 0,
         check_runs: vec![],
         timeline: vec![],
         threads: vec![],
@@ -124,17 +127,20 @@ fn results_for_another_repo_filter_or_selection_are_ignored() {
         slug: ("x".into(), "y".into()),
         filter: PrFilter::Open,
         list: vec![pr(1)],
+        total: 1,
     });
     st.apply(Event::PullsLoaded {
         slug: slug(),
         filter: PrFilter::Closed,
         list: vec![pr(2)],
+        total: 1,
     });
     assert!(st.pulls.list.is_empty() && st.pulls.loading);
     st.apply(Event::PullsLoaded {
         slug: slug(),
         filter: PrFilter::Open,
         list: vec![pr(3)],
+        total: 1,
     });
     assert_eq!(st.pulls.list[0].number, 3);
     assert!(!st.pulls.loading);
@@ -243,6 +249,25 @@ fn changing_repository_with_pending_comments_asks_first() {
 }
 
 #[test]
+fn the_list_keeps_how_many_pull_requests_match() {
+    let mut st = opened(Some("https://github.com/o/r"));
+    st.apply(Event::PullsLoaded {
+        slug: slug(),
+        filter: PrFilter::Open,
+        list: vec![pr(1), pr(2)],
+        total: 120,
+    });
+    assert_eq!(st.pulls.total, 120);
+    st.apply(Event::PullsLoaded {
+        slug: ("x".into(), "y".into()),
+        filter: PrFilter::Open,
+        list: vec![pr(3)],
+        total: 7,
+    });
+    assert_eq!(st.pulls.total, 120, "another repository's count is ignored");
+}
+
+#[test]
 fn a_created_pull_request_shows_in_the_list_at_once() {
     let mut st = opened(Some("https://github.com/o/r"));
     let list = |st: &AppState| st.pulls.list.iter().map(|p| p.number).collect::<Vec<_>>();
@@ -250,6 +275,7 @@ fn a_created_pull_request_shows_in_the_list_at_once() {
         slug: slug(),
         filter: PrFilter::Open,
         list: vec![pr(1)],
+        total: 1,
     });
     st.apply(Event::PullCreated {
         slug: slug(),
@@ -260,6 +286,7 @@ fn a_created_pull_request_shows_in_the_list_at_once() {
         slug: slug(),
         filter: PrFilter::Open,
         list: vec![pr(1)],
+        total: 1,
     });
     assert_eq!(list(&st), [1]);
     st.apply(Event::PullLoaded {
@@ -271,18 +298,21 @@ fn a_created_pull_request_shows_in_the_list_at_once() {
         slug: slug(),
         filter: PrFilter::Open,
         list: vec![pr(1)],
+        total: 1,
     });
     assert_eq!(list(&st), [12, 1], "a late list does not drop it");
     st.apply(Event::PullsLoaded {
         slug: slug(),
         filter: PrFilter::Open,
         list: vec![pr(1), pr(12)],
+        total: 1,
     });
     assert_eq!(list(&st), [1, 12], "GitHub caught up");
     st.apply(Event::PullsLoaded {
         slug: slug(),
         filter: PrFilter::Open,
         list: vec![pr(1)],
+        total: 1,
     });
     assert_eq!(
         list(&st),
@@ -389,7 +419,10 @@ fn actions_end_busy_and_mark_the_list_stale() {
     st.pulls.stale = false;
     st.pulls.select(4);
     st.pulls.busy = true;
-    st.pulls.dialog = Some(retrogit::state::PullDialog::Labels { checked: vec![] });
+    st.pulls.dialog = Some(retrogit::state::PullDialog::Labels {
+        old: vec![],
+        checked: vec![],
+    });
     st.apply(Event::PullActionDone {
         number: 4,
         note: s::NOTE_LABELS.into(),
@@ -662,6 +695,7 @@ fn a_created_pull_request_merged_before_search_lists_it_leaves_the_open_list() {
         slug: slug(),
         filter: PrFilter::Open,
         list,
+        total: 1,
     };
     st.apply(pulls(vec![pr(1)]));
     st.apply(Event::PullCreated {

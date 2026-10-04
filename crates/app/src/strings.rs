@@ -250,6 +250,23 @@ pub const CHECKOUT: &str = "Checkout";
 pub const REVIEW: &str = "Review...";
 pub const MERGE_PULL: &str = "Merge...";
 pub const OPEN_ON_GITHUB: &str = "Open on GitHub";
+pub const TRUNCATED_COMMENTS: &str = "comments";
+pub const TRUNCATED_REVIEWS: &str = "reviews";
+pub const TRUNCATED_THREADS: &str = "review threads";
+
+/// Footer of a pull request list GitHub cut short.
+pub fn pulls_truncated(shown: usize, total: u32) -> String {
+    format!("Showing the {shown} most recently updated of {total}.")
+}
+
+/// A conversation shows only part of `what` (comments, reviews, review threads).
+pub fn detail_truncated(shown: usize, total: u32, what: &str) -> String {
+    format!("Showing {shown} of {total} {what}.")
+}
+
+pub fn commits_truncated(shown: usize, total: u32) -> String {
+    format!("Showing the first {shown} of {total} commits.")
+}
 pub const REVIEW_TITLE: &str = "Review";
 pub const REVIEW_COMMENT: &str = "Comment";
 pub const REVIEW_APPROVE: &str = "Approve";

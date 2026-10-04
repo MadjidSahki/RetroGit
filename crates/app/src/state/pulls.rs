@@ -44,6 +44,8 @@ pub enum PullDialog {
         publish: bool,
     },
     Labels {
+        /// Labels when the window opened.
+        old: Vec<String>,
         checked: Vec<String>,
     },
     /// New line comment, queued in the pending review.
@@ -80,6 +82,8 @@ pub struct PullsView {
     pub slug: Option<Slug>,
     pub filter: PrFilter,
     pub list: Vec<PrSummary>,
+    /// Pull requests matching the filter (GitHub sends at most 50 of them).
+    pub total: u32,
     pub loading: bool,
     /// The list must be (re)loaded when the tab is shown.
     pub stale: bool,
@@ -334,9 +338,15 @@ impl AppState {
     pub(super) fn apply_pulls(&mut self, event: Event) {
         let p = &mut self.pulls;
         match event {
-            Event::PullsLoaded { slug, filter, list } => {
+            Event::PullsLoaded {
+                slug,
+                filter,
+                list,
+                total,
+            } => {
                 if p.slug.as_ref() == Some(&slug) && p.filter == filter {
                     let old = std::mem::replace(&mut p.list, list);
+                    p.total = total;
                     p.loading = false;
                     if let Some(n) = p.created {
                         if p.list.iter().any(|r| r.number == n) {
