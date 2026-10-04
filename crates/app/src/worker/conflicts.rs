@@ -7,7 +7,7 @@ use crate::protocol::{AppError, Event, Op};
 
 impl Worker {
     pub(super) fn load_conflict(&mut self, path: &str) {
-        let Some(repo) = self.open_current(Op::Changes) else {
+        let Some(repo) = self.open_current(Op::Conflict(path.to_string())) else {
             return;
         };
         self.shown = None;
@@ -16,7 +16,7 @@ impl Worker {
                 self.shown_conflict = Some(path.to_string());
                 self.emit(Event::ConflictLoaded(Box::new(file)));
             }
-            Err(e) => self.fail(Op::Changes, AppError::from_git(&e)),
+            Err(e) => self.fail(Op::Conflict(path.to_string()), AppError::from_git(&e)),
         }
     }
 

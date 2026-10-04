@@ -321,6 +321,8 @@ pub enum Op {
     Pulls,
     /// Loading the detail (and files) of this pull request.
     PullDetail(u64),
+    /// Loading this conflicted file into the conflict editor.
+    Conflict(String),
     /// Pull request changes (create, review, merge...).
     PullAction,
     Internal,

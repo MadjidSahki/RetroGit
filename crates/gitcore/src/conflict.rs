@@ -300,9 +300,11 @@ impl Repo {
             }
         };
         let (ours, theirs) = (blob(&c.our)?, blob(&c.their)?);
-        let working = std::fs::read(self.workdir()?.join(path))
-            .ok()
-            .and_then(|b| as_text(&b));
+        let working = match std::fs::read(self.workdir()?.join(path)) {
+            Ok(b) => as_text(&b),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(GitError::Other(format!("cannot read {path}: {e}"))),
+        };
         let mine = ours.as_deref().and_then(as_text);
         let theirs_text = theirs.as_deref().and_then(as_text);
         let kind = match (&ours, &theirs) {

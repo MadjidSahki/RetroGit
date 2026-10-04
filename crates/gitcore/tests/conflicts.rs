@@ -204,3 +204,20 @@ fn paths_are_literal_not_patterns() {
     let staged = git(dir, &["diff", "--cached", "--name-only"]);
     assert!(!staged.contains("a1.txt"), "{staged}");
 }
+
+#[test]
+fn an_unreadable_working_file_is_an_error_not_a_binary_file() {
+    let Some(d) = tmp() else { return };
+    let r = conflicted(
+        d.path(),
+        Some(b"a\nb\nc\n"),
+        Some(b"a\nB-ours\nc\n"),
+        Some(b"a\nB-theirs\nc\n"),
+        false,
+    );
+    // A directory where the file should be: reading it fails on every platform.
+    std::fs::remove_file(d.path().join("file")).unwrap();
+    std::fs::create_dir(d.path().join("file")).unwrap();
+    let err = r.conflict("file").unwrap_err();
+    assert!(err.to_string().contains("file"), "{err}");
+}

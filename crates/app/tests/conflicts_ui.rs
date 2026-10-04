@@ -230,3 +230,119 @@ fn undo_does_not_bring_back_another_files_text() {
     h.run();
     assert!(!result(&h).contains("login"), "{}", result(&h));
 }
+
+fn disabled(h: &Harness<'static, World>, label: &str) -> bool {
+    use egui_kittest::kittest::NodeT;
+    h.get_by_label(label).accesskit_node().is_disabled()
+}
+
+#[test]
+fn mark_resolved_is_greyed_until_git_answers() {
+    let mut w = world(ConflictKind::Content);
+    w.state
+        .changes
+        .conflict
+        .as_mut()
+        .unwrap()
+        .edit("fn login() {\n    check(a);\n}\n".into());
+    let mut h = harness(w);
+    h.run();
+    assert!(!disabled(&h, s::MARK_RESOLVED));
+    h.get_by_label(s::MARK_RESOLVED).click();
+    h.run();
+    assert!(h.state().state.changes.conflict.as_ref().unwrap().resolving);
+    assert!(disabled(&h, s::MARK_RESOLVED));
+    assert!(disabled(&h, "Whole file: theirs"));
+}
+
+#[test]
+fn a_failed_conflict_load_says_why() {
+    let mut w = world(ConflictKind::Content);
+    assert!(w.state.changes.open_conflict("README.md"));
+    w.state.apply(Event::Error {
+        during: retrogit::protocol::Op::Conflict("README.md".into()),
+        error: retrogit::protocol::AppError::new(
+            retrogit::protocol::Severity::Warning,
+            "cannot read README.md: Is a directory",
+        ),
+    });
+    let mut h = harness(w);
+    h.run();
+    assert!(
+        h.query_by_label("cannot read README.md: Is a directory")
+            .is_some()
+    );
+    assert!(h.query_by_label(s::LOADING_CONFLICT).is_none());
+}
+
+#[test]
+fn next_scrolls_the_result_to_the_current_block() {
+    let mut w = world(ConflictKind::Content);
+    let lines = |n: usize, t: &str| (0..n).map(|i| format!("{t}{i}\n")).collect::<String>();
+    let block = |m: &str| format!("<<<<<<< HEAD\n{m}\n=======\nother\n>>>>>>> x\n");
+    let working = format!(
+        "{}{}{}{}{}",
+        lines(100, "top"),
+        block("one"),
+        lines(300, "middle"),
+        block("two"),
+        lines(100, "end")
+    );
+    assert!(w.state.changes.open_conflict("README.md"));
+    w.state.apply(Event::ConflictLoaded(Box::new(ConflictFile {
+        path: "README.md".into(),
+        kind: ConflictKind::Content,
+        mine: Some(format!(
+            "{}one\n{}two\n",
+            lines(100, "top"),
+            lines(300, "middle")
+        )),
+        theirs: Some(format!(
+            "{}other\n{}other\n",
+            lines(100, "top"),
+            lines(300, "middle")
+        )),
+        working: Some(working),
+        operation: Some(Operation::Merge),
+    })));
+    let mut h = harness(w);
+    h.run();
+    h.run();
+    let top = |h: &Harness<'static, World>| result_input(h, "middle299").rect().top();
+    let first = top(&h);
+    h.get_by_label(s::NEXT_CONFLICT).click();
+    h.run();
+    h.run();
+    let second = top(&h);
+    // 305 lines further down: the result moved up by far more than a screen.
+    assert!(second < first - 2000.0, "{first} -> {second}");
+}
+
+#[test]
+fn enter_in_a_crlf_file_types_crlf_and_the_cursor_follows() {
+    let mut w = world(ConflictKind::Content);
+    assert!(w.state.changes.open_conflict("README.md"));
+    w.state.apply(Event::ConflictLoaded(Box::new(ConflictFile {
+        path: "README.md".into(),
+        kind: ConflictKind::Content,
+        mine: Some("readme mine\r\n".into()),
+        theirs: Some("readme theirs\r\n".into()),
+        working: Some(
+            "<<<<<<< HEAD\r\nreadme mine\r\n=======\r\nreadme theirs\r\n>>>>>>> x\r\n".into(),
+        ),
+        operation: Some(Operation::Merge),
+    })));
+    let mut h = harness(w);
+    h.run();
+    result_input(&h, "readme").focus();
+    h.run();
+    result_input(&h, "readme").type_text("x");
+    h.run();
+    h.key_press(egui::Key::Enter);
+    h.run();
+    result_input(&h, "readme").type_text("y");
+    h.run();
+    let r = result(&h);
+    assert!(r.contains("x\r\ny"), "{r:?}");
+    assert_eq!(r.matches('\n').count(), r.matches("\r\n").count(), "{r:?}");
+}

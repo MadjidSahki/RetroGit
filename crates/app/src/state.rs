@@ -11,7 +11,7 @@ mod sync;
 mod update;
 
 pub use appearance::{AppearanceDialog, SIZES, ZoomStep, next_zoom, size_label};
-pub use conflicts::{ConflictConfirm, ConflictEditor, text_as_diff};
+pub use conflicts::{ConflictConfirm, ConflictEditor, added_cr_before, text_as_diff};
 pub use explore::{
     ExploreView, FileView, HistoryFilter, SearchForm, SearchView, TreeRow, age_ranks, tree_rows,
 };
@@ -74,6 +74,8 @@ pub struct ChangesView {
     pub conflict: Option<ConflictEditor>,
     /// `conflict_path` must be loaded (set when moving to the next conflicted file).
     pub load_conflict: bool,
+    /// Why loading `conflict_path` failed (shown instead of "Loading...").
+    pub conflict_error: Option<String>,
 }
 
 /// A destructive command and the question shown before running it.
@@ -482,7 +484,20 @@ impl AppState {
                     self.missing.insert(path);
                 }
             }
-            Op::Changes => {}
+            Op::Changes => {
+                if let Some(ed) = self.changes.conflict.as_mut() {
+                    ed.resolving = false;
+                }
+            }
+            Op::Conflict(path) => {
+                let c = &mut self.changes;
+                if let Some(ed) = c.conflict.as_mut() {
+                    ed.resolving = false;
+                }
+                if c.conflict_path.as_deref() == Some(path.as_str()) {
+                    c.conflict_error = Some(error.message.clone());
+                }
+            }
             Op::History => self.history.loading = false,
             Op::Sync => {
                 self.sync.running = None;

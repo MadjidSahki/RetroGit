@@ -70,6 +70,8 @@ pub struct ConflictEditor {
     /// The file changed on disk while edited: offered with Reload.
     pub on_disk: Option<ConflictFile>,
     pub confirm: Option<ConflictConfirm>,
+    /// A resolution was sent and Git has not answered yet: the buttons are greyed.
+    pub resolving: bool,
     /// Syntax colors of each pane (computed in the background; `result_colors` again after
     /// every change of the result).
     pub mine_colors: Colors,
@@ -87,7 +89,48 @@ pub struct ConflictEditor {
     theirs_blocks: Vec<Option<(usize, usize)>>,
 }
 
+/// How many `\r` turning lone `\n` into `\r\n` go before char `cursor` of `text`.
+pub fn added_cr_before(text: &str, cursor: usize) -> usize {
+    let mut prev = None;
+    let mut added = 0;
+    for c in text.chars().take(cursor) {
+        if c == '\n' && prev != Some('\r') {
+            added += 1;
+        }
+        prev = Some(c);
+    }
+    added
+}
+
+/// `text` with every lone `\n` turned into `\r\n`.
+fn to_crlf(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut prev = None;
+    for c in text.chars() {
+        if c == '\n' && prev != Some('\r') {
+            out.push('\r');
+        }
+        out.push(c);
+        prev = Some(c);
+    }
+    out
+}
+
 impl ConflictEditor {
+    /// Send `cmd` (a resolution): the buttons stay greyed until Git answers.
+    pub fn resolve(&mut self, cmd: crate::protocol::Command) -> crate::protocol::Command {
+        self.resolving = true;
+        cmd
+    }
+
+    /// The working file uses CRLF line endings: what the user types follows them.
+    pub fn crlf(&self) -> bool {
+        self.file
+            .working
+            .as_deref()
+            .is_some_and(|w| w.contains("\r\n"))
+    }
+
     pub fn new(file: ConflictFile) -> ConflictEditor {
         let result = file.working.clone().unwrap_or_default();
         let original = parse_conflicts(&result);
@@ -107,6 +150,7 @@ impl ConflictEditor {
             edited: false,
             on_disk: None,
             confirm: None,
+            resolving: false,
             mine_colors: Colors::NotRequested,
             theirs_colors: Colors::NotRequested,
             result_colors: Colors::NotRequested,
@@ -236,6 +280,7 @@ impl ConflictEditor {
 
     /// The result pane's text after the user typed in it.
     pub fn typed(&mut self, text: String) {
+        let text = if self.crlf() { to_crlf(&text) } else { text };
         self.set_result(text);
     }
 
@@ -273,6 +318,7 @@ impl ChangesView {
             return false;
         }
         self.conflict_path = Some(path.to_string());
+        self.conflict_error = None;
         self.shown = None;
         self.diff = None;
         true
@@ -340,6 +386,10 @@ impl AppState {
         if c.conflict_path.as_deref() != Some(file.path.as_str()) {
             return;
         }
+        c.conflict_error = None;
+        if let Some(ed) = c.conflict.as_mut() {
+            ed.resolving = false;
+        }
         match c.conflict.as_mut() {
             Some(ed) if ed.file.path == file.path && ed.edited => {
                 // Never overwrite what the user typed; offer the new version instead.
@@ -355,6 +405,9 @@ impl AppState {
     /// `path` was resolved: show the next conflicted file, or say it is over.
     pub(super) fn conflict_resolved(&mut self, path: &str) {
         let c = &mut self.changes;
+        if let Some(ed) = c.conflict.as_mut() {
+            ed.resolving = false;
+        }
         if c.conflict.as_ref().is_some_and(|e| e.file.path == path) {
             c.conflict = None;
             c.conflict_path = None;

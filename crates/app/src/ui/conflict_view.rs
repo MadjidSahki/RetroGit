@@ -124,6 +124,11 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         4,
         |ui| {
             ui.set_min_size(ui.available_size());
+            if let Some(err) = &cx.state.changes.conflict_error {
+                let pal = win95::theme::palette(ui.ctx());
+                ui.label(RichText::new(err.as_str()).color(pal.error));
+                return;
+            }
             // Taken out while drawing (no copy of large files every frame), then put back.
             let Some(mut ed) = cx.state.changes.conflict.take() else {
                 ui.label(s::LOADING_CONFLICT);
@@ -131,7 +136,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             };
             match ed.file.kind {
                 ConflictKind::Content | ConflictKind::AddedByBoth => content(ui, cx, &mut ed),
-                _ => whole_file_only(ui, cx, &ed),
+                _ => whole_file_only(ui, cx, &mut ed),
             }
             if cx.state.changes.conflict.is_none() {
                 cx.state.changes.conflict = Some(ed);
@@ -141,7 +146,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
 }
 
 /// Binary files, and files deleted on one side: keep one version, or the deletion.
-fn whole_file_only(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &ConflictEditor) {
+fn whole_file_only(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor) {
     let path = ed.file.path.clone();
     let names = side_names(ed.file.operation, &ed.segments);
     ui.label(RichText::new(&path).color(win95::theme::palette(ui.ctx()).link));
@@ -190,10 +195,14 @@ fn whole_file_only(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &ConflictEditor) {
     ui.horizontal(|ui| {
         for (label, cmd) in choices {
             if ui
-                .add(Button95::new(label).min_size(egui::vec2(140.0, 23.0)))
+                .add(
+                    Button95::new(label)
+                        .min_size(egui::vec2(140.0, 23.0))
+                        .enabled(!ed.resolving),
+                )
                 .clicked()
             {
-                cx.worker.send(cmd);
+                cx.worker.send(ed.resolve(cmd));
             }
         }
     });
@@ -233,7 +242,7 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor) {
         ui.separator();
         for (side, pick) in [(names.mine, Pick::Ours), (names.theirs, Pick::Theirs)] {
             if ui
-                .add(b(&s::WHOLE_FILE_SIDE.replace("{side}", side)))
+                .add(b(&s::WHOLE_FILE_SIDE.replace("{side}", side)).enabled(!ed.resolving))
                 .clicked()
             {
                 ed.confirm = Some(ConflictConfirm::WholeFile(pick));
@@ -271,16 +280,21 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor) {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 if ui
-                    .add(Button95::new(s::MARK_RESOLVED).min_size(egui::vec2(120.0, 23.0)))
+                    .add(
+                        Button95::new(s::MARK_RESOLVED)
+                            .min_size(egui::vec2(120.0, 23.0))
+                            .enabled(!ed.resolving),
+                    )
                     .clicked()
                 {
                     if gitcore::has_marker_lines(&ed.result) {
                         ed.confirm = Some(ConflictConfirm::ResolveWithMarkers);
                     } else {
-                        cx.worker.send(Command::ResolveConflict {
+                        let cmd = Command::ResolveConflict {
                             path: ed.file.path.clone(),
                             content: ed.result.clone(),
-                        });
+                        };
+                        cx.worker.send(ed.resolve(cmd));
                     }
                 }
             });
@@ -429,25 +443,49 @@ fn result_pane(ui: &mut egui::Ui, ed: &mut ConflictEditor) {
         job.wrap.max_width = wrap;
         ui.fonts_mut(|f| f.layout_job(job))
     };
-    let changed = ScrollArea::both()
+    let mut area = ScrollArea::both()
         .id_salt(("conflict_result_scroll", &path))
-        .auto_shrink([false, false])
+        .auto_shrink([false, false]);
+    // Next / Previous: scroll to the current block once, like the side panes.
+    let target = blocks.get(current).map(|(start, _)| *start);
+    let key = egui::Id::new(("conflict_result_scrolled", &path));
+    if ui.ctx().data(|d| d.get_temp::<Option<usize>>(key)) != Some(target) {
+        if let Some(start) = target {
+            let row =
+                ui.fonts_mut(|f| f.row_height(&egui::FontId::monospace(win95::theme::FONT_SIZE)));
+            area = area.vertical_scroll_offset(((start as f32 - 3.0) * row).max(0.0));
+        }
+        ui.ctx().data_mut(|d| d.insert_temp(key, target));
+    }
+    let mut output = area
         .show(ui, |ui| {
-            ui.add(
-                TextEdit::multiline(&mut text)
-                    // One undo history per file: undo never brings another file's text.
-                    .id_salt(("conflict_result", &path))
-                    .code_editor()
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(20)
-                    .layouter(&mut layouter),
-            )
-            .changed()
+            TextEdit::multiline(&mut text)
+                // One undo history per file: undo never brings another file's text.
+                .id_salt(("conflict_result", &path))
+                .code_editor()
+                .desired_width(f32::INFINITY)
+                .desired_rows(20)
+                .layouter(&mut layouter)
+                .show(ui)
         })
         .inner;
     ed.result_colors_shown = colors;
-    if changed {
+    if output.response.changed() {
+        // CRLF file: the '\r' added before the cursor move it along.
+        let cursor = output.state.cursor.char_range().map(|r| r.primary.index.0);
+        let added = match cursor {
+            Some(i) if ed.crlf() => crate::state::added_cr_before(&text, i),
+            _ => 0,
+        };
         ed.typed(text);
+        if let (Some(i), true) = (cursor, added > 0) {
+            let at = egui::text::CCursor::new(i + added);
+            output
+                .state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::one(at)));
+            output.state.store(ui.ctx(), output.response.id);
+        }
     } else {
         ed.result = text;
     }
@@ -538,12 +576,16 @@ pub fn confirm_dialog(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
     ed.confirm = None;
     match confirm {
         ConflictConfirm::WholeFile(pick) => {
-            cx.worker.send(Command::ResolveConflictWith { path, pick })
+            let cmd = Command::ResolveConflictWith { path, pick };
+            cx.worker.send(ed.resolve(cmd));
         }
-        ConflictConfirm::ResolveWithMarkers => cx.worker.send(Command::ResolveConflict {
-            path,
-            content: ed.result.clone(),
-        }),
+        ConflictConfirm::ResolveWithMarkers => {
+            let cmd = Command::ResolveConflict {
+                path,
+                content: ed.result.clone(),
+            };
+            cx.worker.send(ed.resolve(cmd));
+        }
         ConflictConfirm::Discard(_) => {
             ed.confirm = Some(confirm);
             if let Some(next) = c.discard_conflict_edits() {

@@ -113,6 +113,7 @@ impl AppState {
             ed.mine_colors = Colors::NotRequested;
             ed.theirs_colors = Colors::NotRequested;
             ed.result_colors = Colors::NotRequested;
+            ed.result_colors_shown = Colors::NotRequested;
         }
     }
 }
