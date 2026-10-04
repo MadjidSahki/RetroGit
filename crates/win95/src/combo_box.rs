@@ -5,6 +5,9 @@ use egui::{
 use crate::bevel::{self, Bevel};
 use crate::theme;
 
+/// Tallest a drop-down list gets before it scrolls.
+const MAX_LIST_HEIGHT: f32 = 400.0;
+
 /// Win95 drop-down list: white sunken field with the current value and an arrow button.
 /// `add_items` fills the popup; clicking an item closes it.
 pub fn combo_box(
@@ -56,7 +59,11 @@ pub fn combo_box(
         .style(egui::containers::menu::menu_style)
         .show(|ui| {
             ui.set_min_width(width - 8.0);
-            add_items(ui);
+            // Long lists (many branches) scroll inside the window instead of running off it.
+            let room = ui.ctx().content_rect().bottom() - rect.bottom() - 16.0;
+            egui::ScrollArea::vertical()
+                .max_height(room.clamp(80.0, MAX_LIST_HEIGHT))
+                .show(ui, add_items);
         });
     resp
 }

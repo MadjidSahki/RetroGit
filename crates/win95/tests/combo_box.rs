@@ -66,3 +66,40 @@ fn clicking_right_of_a_button_item_text_picks_it() {
 fn clicking_right_of_an_item_text_in_a_scroll_area_picks_it() {
     picking_right_of_the_text(true, true);
 }
+
+#[test]
+fn a_long_list_scrolls_with_the_wheel() {
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(400.0, 400.0))
+        .build_ui_state(
+            |ui, picked: &mut String| {
+                win95::combo_box(ui, "long", "item0", 180.0, |ui| {
+                    for i in 0..60 {
+                        let name = format!("item{i}");
+                        if ui.button(&name).clicked() {
+                            *picked = name;
+                        }
+                    }
+                });
+            },
+            String::new(),
+        );
+    h.run();
+    h.get_by_role(egui::accesskit::Role::ComboBox).click();
+    h.run();
+    let first = h.get_by_label("item1").rect();
+    h.hover_at(first.center());
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -100_000.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(30);
+    // The last branch can be reached: scrolled into the window, then picked.
+    let last = h.get_by_label("item59").rect();
+    assert!(last.bottom() <= 400.0, "item59 at {last:?}");
+    click_at(&h, last.center());
+    h.run();
+    assert_eq!(h.state(), "item59");
+}
