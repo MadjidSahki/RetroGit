@@ -525,7 +525,10 @@ fn checks(ui: &mut egui::Ui, d: &PrDetail) {
                             c.completed_at.as_deref(),
                         ));
                         match &c.url {
-                            Some(url) => ui.hyperlink_to(s::CHECK_DETAILS, url),
+                            Some(url) if win95::markdown::safe_link(url) => {
+                                ui.hyperlink_to(s::CHECK_DETAILS, url)
+                            }
+                            Some(url) => ui.label(s::CHECK_DETAILS).on_hover_text(url),
                             None => ui.label(""),
                         };
                         ui.end_row();

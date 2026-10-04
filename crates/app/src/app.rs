@@ -482,6 +482,7 @@ impl eframe::App for RetroGitApp {
         ui::notifications::show(&egui_ctx, &mut cx);
         ui::notifications::open_links(&egui_ctx, &mut cx);
         ui::message::show(&egui_ctx, &mut cx);
+        egui_ctx.output_mut(|o| retain_safe_urls(&mut o.commands));
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -490,4 +491,19 @@ impl eframe::App for RetroGitApp {
         }
         self.save_config();
     }
+}
+
+/// Drop every request to open an address that is not a web page or mail
+/// (`win95::markdown::safe_link`): no `file:` or custom scheme leaves the app.
+pub fn retain_safe_urls(cmds: &mut Vec<egui::OutputCommand>) {
+    cmds.retain(|c| match c {
+        egui::OutputCommand::OpenUrl(o) => {
+            let safe = win95::markdown::safe_link(&o.url);
+            if !safe {
+                log::warn!("not opening {}", o.url);
+            }
+            safe
+        }
+        _ => true,
+    });
 }

@@ -400,3 +400,43 @@ fn changing_repository_with_pending_comments_goes_on_ok() {
         }
     }
 }
+
+fn opened_from_check_details(url: &str) -> Vec<String> {
+    let mut w = world(false);
+    {
+        let pulls = &mut w.state.pulls;
+        let mut d = (**pulls.detail.as_ref().unwrap()).clone();
+        d.check_runs = vec![github::CheckRun {
+            name: "build".into(),
+            status: github::CheckStatus::Success,
+            url: Some(url.into()),
+            started_at: None,
+            completed_at: None,
+        }];
+        pulls.detail = Some(Arc::new(d));
+        pulls.sub_tab = retrogit::state::PullTab::Checks;
+    }
+    let mut h = harness(w);
+    h.run();
+    h.get_by_label(s::CHECK_DETAILS).click();
+    let mut urls = Vec::new();
+    for _ in 0..4 {
+        h.step();
+        for c in &h.output().platform_output.commands {
+            if let egui::OutputCommand::OpenUrl(o) = c {
+                urls.push(o.url.clone());
+            }
+        }
+    }
+    urls
+}
+
+#[test]
+fn check_details_open_only_web_links() {
+    let web = "https://github.com/o/r/actions/runs/1";
+    assert_eq!(opened_from_check_details(web), vec![web.to_string()]);
+    assert_eq!(
+        opened_from_check_details("file:///etc/passwd"),
+        Vec::<String>::new()
+    );
+}
