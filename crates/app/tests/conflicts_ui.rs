@@ -319,7 +319,65 @@ fn next_scrolls_the_result_to_the_current_block() {
 }
 
 #[test]
-fn enter_in_a_crlf_file_types_crlf_and_the_cursor_follows() {
+fn typing_above_the_current_block_does_not_scroll_the_result() {
+    let mut w = world(ConflictKind::Content);
+    let lines = |n: usize, t: &str| (0..n).map(|i| format!("{t}{i}\n")).collect::<String>();
+    let block = |m: &str| format!("<<<<<<< HEAD\n{m}\n=======\nother\n>>>>>>> x\n");
+    let working = format!(
+        "{}{}{}{}{}",
+        lines(100, "top"),
+        block("one"),
+        lines(300, "middle"),
+        block("two"),
+        lines(100, "end")
+    );
+    assert!(w.state.changes.open_conflict("README.md"));
+    w.state.apply(Event::ConflictLoaded(Box::new(ConflictFile {
+        path: "README.md".into(),
+        kind: ConflictKind::Content,
+        mine: Some(format!(
+            "{}one\n{}two\n",
+            lines(100, "top"),
+            lines(300, "middle")
+        )),
+        theirs: Some(format!(
+            "{}other\n{}other\n",
+            lines(100, "top"),
+            lines(300, "middle")
+        )),
+        working: Some(working),
+        operation: Some(Operation::Merge),
+    })));
+    let mut h = harness(w);
+    h.run();
+    h.run();
+    // The user scrolls back to the top, then adds a line there.
+    h.event(egui::Event::PointerMoved(egui::pos2(900.0, 500.0)));
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, 100_000.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(30);
+    let top = |h: &Harness<'static, World>| result_input(h, "middle299").rect().top();
+    let before = top(&h);
+    let typed = format!("new line\n{}", result(&h));
+    h.state_mut()
+        .state
+        .changes
+        .conflict
+        .as_mut()
+        .unwrap()
+        .typed(typed);
+    h.run();
+    h.run();
+    let after = top(&h);
+    assert!((after - before).abs() < 1.0, "{before} -> {after}");
+}
+
+#[test]
+fn enter_and_backspace_in_a_crlf_file_keep_crlf() {
     let mut w = world(ConflictKind::Content);
     assert!(w.state.changes.open_conflict("README.md"));
     w.state.apply(Event::ConflictLoaded(Box::new(ConflictFile {
@@ -342,7 +400,17 @@ fn enter_in_a_crlf_file_types_crlf_and_the_cursor_follows() {
     h.run();
     result_input(&h, "readme").type_text("y");
     h.run();
-    let r = result(&h);
+    let content =
+        |h: &Harness<'static, World>| h.state().state.changes.conflict.as_ref().unwrap().content();
+    let r = content(&h);
     assert!(r.contains("x\r\ny"), "{r:?}");
     assert_eq!(r.matches('\n').count(), r.matches("\r\n").count(), "{r:?}");
+    // Backspace at the start of a line joins it with the line above, leaving no lone '\r'.
+    h.key_press(egui::Key::ArrowLeft);
+    h.run();
+    h.key_press(egui::Key::Backspace);
+    h.run();
+    let r = content(&h);
+    assert!(r.contains("xy"), "{r:?}");
+    assert_eq!(r.matches('\r').count(), r.matches("\r\n").count(), "{r:?}");
 }

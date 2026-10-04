@@ -292,7 +292,7 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor) {
                     } else {
                         let cmd = Command::ResolveConflict {
                             path: ed.file.path.clone(),
-                            content: ed.result.clone(),
+                            content: ed.content(),
                         };
                         cx.worker.send(ed.resolve(cmd));
                     }
@@ -446,18 +446,15 @@ fn result_pane(ui: &mut egui::Ui, ed: &mut ConflictEditor) {
     let mut area = ScrollArea::both()
         .id_salt(("conflict_result_scroll", &path))
         .auto_shrink([false, false]);
-    // Next / Previous: scroll to the current block once, like the side panes.
-    let target = blocks.get(current).map(|(start, _)| *start);
-    let key = egui::Id::new(("conflict_result_scrolled", &path));
-    if ui.ctx().data(|d| d.get_temp::<Option<usize>>(key)) != Some(target) {
-        if let Some(start) = target {
-            let row =
-                ui.fonts_mut(|f| f.row_height(&egui::FontId::monospace(win95::theme::FONT_SIZE)));
-            area = area.vertical_scroll_offset(((start as f32 - 3.0) * row).max(0.0));
-        }
-        ui.ctx().data_mut(|d| d.insert_temp(key, target));
+    // Opening, Next / Previous, a choice: scroll to the current block once (edits that
+    // only move the block leave the view where the user put it).
+    if std::mem::take(&mut ed.scroll_result)
+        && let Some((start, _)) = blocks.get(current)
+    {
+        let row = ui.fonts_mut(|f| f.row_height(&egui::FontId::monospace(win95::theme::FONT_SIZE)));
+        area = area.vertical_scroll_offset(((*start as f32 - 3.0) * row).max(0.0));
     }
-    let mut output = area
+    let output = area
         .show(ui, |ui| {
             TextEdit::multiline(&mut text)
                 // One undo history per file: undo never brings another file's text.
@@ -471,21 +468,7 @@ fn result_pane(ui: &mut egui::Ui, ed: &mut ConflictEditor) {
         .inner;
     ed.result_colors_shown = colors;
     if output.response.changed() {
-        // CRLF file: the '\r' added before the cursor move it along.
-        let cursor = output.state.cursor.char_range().map(|r| r.primary.index.0);
-        let added = match cursor {
-            Some(i) if ed.crlf() => crate::state::added_cr_before(&text, i),
-            _ => 0,
-        };
         ed.typed(text);
-        if let (Some(i), true) = (cursor, added > 0) {
-            let at = egui::text::CCursor::new(i + added);
-            output
-                .state
-                .cursor
-                .set_char_range(Some(egui::text::CCursorRange::one(at)));
-            output.state.store(ui.ctx(), output.response.id);
-        }
     } else {
         ed.result = text;
     }
@@ -582,7 +565,7 @@ pub fn confirm_dialog(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
         ConflictConfirm::ResolveWithMarkers => {
             let cmd = Command::ResolveConflict {
                 path,
-                content: ed.result.clone(),
+                content: ed.content(),
             };
             cx.worker.send(ed.resolve(cmd));
         }

@@ -72,6 +72,9 @@ pub struct ConflictEditor {
     pub confirm: Option<ConflictConfirm>,
     /// A resolution was sent and Git has not answered yet: the buttons are greyed.
     pub resolving: bool,
+    /// The result pane scrolls to the current block on its next frame (opening, Next,
+    /// Previous, a choice), not when an edit merely moves the block.
+    pub scroll_result: bool,
     /// Syntax colors of each pane (computed in the background; `result_colors` again after
     /// every change of the result).
     pub mine_colors: Colors,
@@ -87,19 +90,6 @@ pub struct ConflictEditor {
     /// Where each original block is in the full mine / theirs versions.
     mine_blocks: Vec<Option<(usize, usize)>>,
     theirs_blocks: Vec<Option<(usize, usize)>>,
-}
-
-/// How many `\r` turning lone `\n` into `\r\n` go before char `cursor` of `text`.
-pub fn added_cr_before(text: &str, cursor: usize) -> usize {
-    let mut prev = None;
-    let mut added = 0;
-    for c in text.chars().take(cursor) {
-        if c == '\n' && prev != Some('\r') {
-            added += 1;
-        }
-        prev = Some(c);
-    }
-    added
 }
 
 /// `text` with every lone `\n` turned into `\r\n`.
@@ -123,7 +113,8 @@ impl ConflictEditor {
         cmd
     }
 
-    /// The working file uses CRLF line endings: what the user types follows them.
+    /// The working file uses CRLF line endings: edited as plain `\n` (so Enter, Backspace and
+    /// Delete act on whole line breaks), written back as CRLF by [`Self::content`].
     pub fn crlf(&self) -> bool {
         self.file
             .working
@@ -131,12 +122,30 @@ impl ConflictEditor {
             .is_some_and(|w| w.contains("\r\n"))
     }
 
+    /// What Mark resolved writes: `result` with the file's own line endings back.
+    pub fn content(&self) -> String {
+        if self.crlf() {
+            to_crlf(&self.result)
+        } else {
+            self.result.clone()
+        }
+    }
+
     pub fn new(file: ConflictFile) -> ConflictEditor {
-        let result = file.working.clone().unwrap_or_default();
+        let working = file.working.as_deref().unwrap_or_default();
+        let crlf = working.contains("\r\n");
+        let lf = |t: &str| {
+            if crlf {
+                t.replace("\r\n", "\n")
+            } else {
+                t.to_string()
+            }
+        };
+        let result = lf(working);
         let original = parse_conflicts(&result);
         let locate = |text: &Option<String>, pane| {
             text.as_deref()
-                .map(|t| locate_blocks(&original, t, pane))
+                .map(|t| locate_blocks(&original, &lf(t), pane))
                 .unwrap_or_default()
         };
         ConflictEditor {
@@ -151,6 +160,7 @@ impl ConflictEditor {
             on_disk: None,
             confirm: None,
             resolving: false,
+            scroll_result: true,
             mine_colors: Colors::NotRequested,
             theirs_colors: Colors::NotRequested,
             result_colors: Colors::NotRequested,
@@ -262,15 +272,18 @@ impl ConflictEditor {
         }
         let text = apply_choice(&self.result, self.current, choice);
         self.set_result(text);
+        self.scroll_result = true;
     }
 
     pub fn next(&mut self) {
         self.current += 1;
         self.clamp();
+        self.scroll_result = true;
     }
 
     pub fn previous(&mut self) {
         self.current = self.current.saturating_sub(1);
+        self.scroll_result = true;
     }
 
     /// Keep `current` on an existing block (after edits).
@@ -280,7 +293,6 @@ impl ConflictEditor {
 
     /// The result pane's text after the user typed in it.
     pub fn typed(&mut self, text: String) {
-        let text = if self.crlf() { to_crlf(&text) } else { text };
         self.set_result(text);
     }
 
@@ -387,9 +399,6 @@ impl AppState {
             return;
         }
         c.conflict_error = None;
-        if let Some(ed) = c.conflict.as_mut() {
-            ed.resolving = false;
-        }
         match c.conflict.as_mut() {
             Some(ed) if ed.file.path == file.path && ed.edited => {
                 // Never overwrite what the user typed; offer the new version instead.

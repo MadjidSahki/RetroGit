@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use gitcore::{
-    Change, Choice, ConflictFile, ConflictKind, FileStatus, Head, Operation, RepoSummary,
+    Change, Choice, ConflictFile, ConflictKind, FileStatus, Head, Operation, Pane, RepoSummary,
 };
 use retrogit::config::Config;
 use retrogit::protocol::Event;
@@ -304,33 +304,45 @@ fn resolving_is_set_when_sent_and_cleared_by_any_answer() {
     fail(&mut st, Op::Conflict("a.rs".into()));
     assert!(!resolving(&st), "failed to load");
     resolve(&mut st);
+    // A refresh queued before the resolution reloads the same file: still waiting for Git.
     st.apply(Event::ConflictLoaded(Box::new(file("a.rs", MARKED))));
-    assert!(!resolving(&st), "reloaded");
+    assert!(resolving(&st), "a reload is not Git's answer");
+    st.apply(Event::ConflictResolved("a.rs".into()));
+    open(&mut st, "a.rs");
     resolve(&mut st);
     st.apply(Event::ConflictResolved("other.rs".into()));
     assert!(!resolving(&st), "resolved");
 }
 
 #[test]
-fn typing_in_a_crlf_file_keeps_crlf() {
+fn a_crlf_file_is_edited_with_plain_line_breaks_and_resolved_with_crlf() {
     let mut st = state();
     assert!(st.changes.open_conflict("a.rs"));
-    st.apply(Event::ConflictLoaded(Box::new(file(
-        "a.rs",
-        &MARKED.replace('\n', "\r\n"),
-    ))));
+    let mut crlf = file("a.rs", &MARKED.replace('\n', "\r\n"));
+    crlf.mine = crlf.mine.map(|m| m.replace('\n', "\r\n"));
+    crlf.theirs = crlf.theirs.map(|t| t.replace('\n', "\r\n"));
+    st.apply(Event::ConflictLoaded(Box::new(crlf)));
     let ed = st.changes.conflict.as_mut().unwrap();
-    ed.typed("a\r\nb\nc".into());
-    assert_eq!(ed.result, "a\r\nb\r\nc");
-    // The cursor moves past each added '\r' before it ("a\r\nb\n|c": 5 -> 6).
-    assert_eq!(retrogit::state::added_cr_before("a\r\nb\nc", 5), 1);
-    assert_eq!(retrogit::state::added_cr_before("a\r\nb\nc", 3), 0);
+    // The editor never sees a '\r': Enter, Backspace and Delete act on whole line breaks.
+    assert!(!ed.result.contains('\r'), "{:?}", ed.result);
+    assert_eq!(ed.result, MARKED);
+    assert_eq!(ed.conflicts_left(), 2);
+    assert_eq!(
+        ed.current_side_block(Pane::Mine),
+        Some((1, 1)),
+        "blocks still found"
+    );
+    // Typed line breaks, and joined lines, leave the file all CRLF.
+    ed.typed("a\nb\nc".into());
+    assert_eq!(ed.content(), "a\r\nb\r\nc");
+    ed.typed("ab\nc".into());
+    assert_eq!(ed.content(), "ab\r\nc");
 
     let mut st = state();
     open(&mut st, "a.rs");
     let ed = st.changes.conflict.as_mut().unwrap();
-    ed.typed("a\r\nb\nc".into());
-    assert_eq!(ed.result, "a\r\nb\nc", "LF file: unchanged");
+    ed.typed("a\nb\nc".into());
+    assert_eq!(ed.content(), "a\nb\nc", "LF file: unchanged");
 }
 
 #[test]

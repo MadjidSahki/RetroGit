@@ -352,6 +352,12 @@ impl AppState {
             }
             Event::PullLoaded { slug, detail } => {
                 if p.slug.as_ref() == Some(&slug) && p.selected == Some(detail.summary.number) {
+                    if p.created == Some(detail.summary.number)
+                        && detail.summary.state != github::PrState::Open
+                    {
+                        // Merged or closed since: lists no longer keep it.
+                        p.created = None;
+                    }
                     // Keep the list in step with what the detail says.
                     if let Some(row) = p
                         .list

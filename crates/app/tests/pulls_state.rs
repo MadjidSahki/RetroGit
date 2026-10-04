@@ -653,3 +653,33 @@ fn loading_a_pull_request_remembers_when() {
     });
     assert!(st.pulls.loaded_at.is_some());
 }
+
+#[test]
+fn a_created_pull_request_merged_before_search_lists_it_leaves_the_open_list() {
+    let mut st = opened(Some("https://github.com/o/r"));
+    let list = |st: &AppState| st.pulls.list.iter().map(|p| p.number).collect::<Vec<_>>();
+    let pulls = |list| Event::PullsLoaded {
+        slug: slug(),
+        filter: PrFilter::Open,
+        list,
+    };
+    st.apply(pulls(vec![pr(1)]));
+    st.apply(Event::PullCreated {
+        slug: slug(),
+        number: 12,
+    });
+    st.apply(Event::PullLoaded {
+        slug: slug(),
+        detail: Box::new(detail(12)),
+    });
+    assert_eq!(list(&st), [12, 1]);
+    // Merged at once: the next list (search still behind) no longer keeps it.
+    let mut merged = detail(12);
+    merged.summary.state = PrState::Merged;
+    st.apply(Event::PullLoaded {
+        slug: slug(),
+        detail: Box::new(merged),
+    });
+    st.apply(pulls(vec![pr(1)]));
+    assert_eq!(list(&st), [1]);
+}
