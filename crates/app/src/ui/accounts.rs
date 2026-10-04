@@ -82,7 +82,7 @@ fn accounts_window(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                         } else {
                             ui.label(
                                 egui::RichText::new(s::SIGN_IN_AGAIN)
-                                    .color(egui::Color32::from_rgb(0xC0, 0, 0)),
+                                    .color(win95::theme::palette(ui.ctx()).error),
                             );
                         }
                         if ui.add(Button95::new(s::REMOVE)).clicked() {

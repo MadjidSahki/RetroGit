@@ -8,7 +8,11 @@ fn every_ui_character_has_a_glyph() {
         ui.label("warm up");
     });
     out.textures_delta.clear();
-    let font = win95::theme::font(win95::theme::FONT_SIZE);
+    // Each interface font on its own (no fallback to egui's fonts).
+    let fonts: Vec<egui::FontId> = win95::theme::Font::ALL
+        .iter()
+        .map(|f| egui::FontId::new(win95::theme::FONT_SIZE, f.family()))
+        .collect();
     let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
 
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -25,9 +29,13 @@ fn every_ui_character_has_a_glyph() {
                 continue;
             }
             for c in line.chars().filter(|c| !c.is_ascii()) {
-                // The diff view uses the monospace font, everything else the W95FA font.
-                let font_id = if file_is_diff { &mono } else { &font };
-                let ok = ctx.fonts_mut(|fonts| fonts.has_glyph(font_id, c));
+                // The diff view uses the monospace font, everything else the interface fonts.
+                let ids: Vec<&egui::FontId> = if file_is_diff {
+                    vec![&mono]
+                } else {
+                    fonts.iter().collect()
+                };
+                let ok = ids.iter().all(|id| ctx.fonts_mut(|f| f.has_glyph(id, c)));
                 if !ok {
                     missing.push(format!(
                         "{}:{} {c:?} (U+{:04X})",

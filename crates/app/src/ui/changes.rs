@@ -48,10 +48,13 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let last = c
         .last_commit
         .as_ref()
-        .map(|lc| format!(" · {} \"{}\"", lc.short_id, lc.summary))
+        .map(|lc| format!(" - {} \"{}\"", lc.short_id, lc.summary))
         .unwrap_or_default();
     ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("{} · {branch}{last}", c.name)).color(win95::theme::NAVY));
+        ui.label(
+            RichText::new(format!("{} - {branch}{last}", c.name))
+                .color(win95::theme::palette(ui.ctx()).link),
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.add(Button95::new(s::REFRESH)).clicked() {
                 cx.worker.send(Command::RefreshStatus);
@@ -71,12 +74,12 @@ fn operation_banner(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         gitcore::Operation::Revert => (s::REVERT_IN_PROGRESS, s::ABORT_REVERT),
     };
     egui::Frame::NONE
-        .fill(egui::Color32::from_rgb(0xFF, 0xFF, 0xC0))
+        .fill(win95::theme::palette(ui.ctx()).note_bg)
         .inner_margin(egui::Margin::same(4))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(text).color(win95::theme::BLACK));
+                ui.label(egui::RichText::new(text).color(win95::theme::palette(ui.ctx()).text));
                 if ui
                     .add(Button95::new(abort).min_size(egui::vec2(100.0, 20.0)))
                     .clicked()
@@ -109,7 +112,10 @@ fn operation_banner(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
 }
 
 /// "Signed with GPG key ABCD" / "Commits will NOT be signed" for the commit form.
-pub fn signing_label(cfg: Option<&gitcore::SigningConfig>) -> (String, egui::Color32) {
+pub fn signing_label(
+    pal: &win95::Palette,
+    cfg: Option<&gitcore::SigningConfig>,
+) -> (String, egui::Color32) {
     match cfg {
         Some(c) if c.enabled => {
             let kind = match c.format {
@@ -122,15 +128,9 @@ pub fn signing_label(cfg: Option<&gitcore::SigningConfig>) -> (String, egui::Col
                 .as_deref()
                 .map(|k| format!(" key {k}"))
                 .unwrap_or_default();
-            (
-                format!("{} {kind}{key}", s::SIGNED_WITH),
-                egui::Color32::from_rgb(0, 0x60, 0),
-            )
+            (format!("{} {kind}{key}", s::SIGNED_WITH), pal.success)
         }
-        _ => (
-            s::NOT_SIGNED.to_string(),
-            egui::Color32::from_rgb(0xA0, 0, 0),
-        ),
+        _ => (s::NOT_SIGNED.to_string(), pal.error),
     }
 }
 
@@ -267,7 +267,7 @@ fn file_lists(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
 fn conflicts_group(ui: &mut egui::Ui, cx: &mut Ctx<'_>, files: &[FileStatus]) {
     ui.label(
         RichText::new(format!("{} ({})", s::CONFLICTS, files.len()))
-            .color(egui::Color32::from_rgb(0xA0, 0, 0)),
+            .color(win95::theme::palette(ui.ctx()).error),
     );
     let selected = cx
         .state
@@ -417,56 +417,63 @@ fn commit_box(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let c = &mut cx.state.changes;
     let mut amend_toggled = false;
     let mut commit_clicked = false;
-    bevel_frame(ui, Bevel::Sunken, win95::theme::SILVER, 4, |ui| {
-        ui.set_width(ui.available_width());
-        ui.add_enabled_ui(!committing, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(s::SUMMARY);
-                let r = text_field(
-                    ui,
-                    &mut c.summary,
-                    (ui.available_width() - 190.0).max(120.0),
-                    false,
-                );
-                if focus {
-                    r.request_focus();
+    bevel_frame(
+        ui,
+        Bevel::Sunken,
+        win95::theme::palette(ui.ctx()).face,
+        4,
+        |ui| {
+            ui.set_width(ui.available_width());
+            ui.add_enabled_ui(!committing, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(s::SUMMARY);
+                    let r = text_field(
+                        ui,
+                        &mut c.summary,
+                        (ui.available_width() - 190.0).max(120.0),
+                        false,
+                    );
+                    if focus {
+                        r.request_focus();
+                    }
+                    let before = c.amend;
+                    checkbox(ui, &mut c.amend, s::AMEND);
+                    amend_toggled = c.amend && !before;
+                });
+                if c.amend && c.head_pushed {
+                    ui.label(
+                        RichText::new(s::AMEND_PUSHED_WARNING)
+                            .color(win95::theme::palette(ui.ctx()).error),
+                    );
                 }
-                let before = c.amend;
-                checkbox(ui, &mut c.amend, s::AMEND);
-                amend_toggled = c.amend && !before;
-            });
-            if c.amend && c.head_pushed {
-                ui.label(
-                    RichText::new(s::AMEND_PUSHED_WARNING)
-                        .color(egui::Color32::from_rgb(0x80, 0, 0)),
-                );
-            }
-            ui.horizontal(|ui| {
-                ui.label(s::DESCRIPTION);
-                text_area(
-                    ui,
-                    &mut c.description,
-                    (ui.available_width() - 100.0).max(120.0),
-                    3,
-                );
-                ui.vertical(|ui| {
-                    commit_clicked = ui
-                        .add(Button95::new(s::COMMIT).enabled(can_commit))
-                        .clicked();
+                ui.horizontal(|ui| {
+                    ui.label(s::DESCRIPTION);
+                    text_area(
+                        ui,
+                        &mut c.description,
+                        (ui.available_width() - 100.0).max(120.0),
+                        3,
+                    );
+                    ui.vertical(|ui| {
+                        commit_clicked = ui
+                            .add(Button95::new(s::COMMIT).enabled(can_commit))
+                            .clicked();
+                    });
+                });
+                ui.horizontal(|ui| {
+                    let (text, color) =
+                        signing_label(&win95::theme::palette(ui.ctx()), signing.as_ref());
+                    ui.label(egui::RichText::new(text).color(color));
                 });
             });
-            ui.horizontal(|ui| {
-                let (text, color) = signing_label(signing.as_ref());
-                ui.label(egui::RichText::new(text).color(color));
-            });
-        });
-        if committing {
-            ui.horizontal(|ui| {
-                ui.label(s::COMMITTING);
-                ui.add(ProgressBar95::new(None).width(200.0));
-            });
-        }
-    });
+            if committing {
+                ui.horizontal(|ui| {
+                    ui.label(s::COMMITTING);
+                    ui.add(ProgressBar95::new(None).width(200.0));
+                });
+            }
+        },
+    );
     if amend_toggled {
         cx.worker.send(Command::LoadAmendInfo);
     }
@@ -521,13 +528,22 @@ mod tests {
             format: gitcore::SigningFormat::Gpg,
             key: Some("ABCD1234".into()),
         };
-        assert_eq!(signing_label(Some(&cfg)).0, "Signed with GPG key ABCD1234");
+        assert_eq!(
+            signing_label(&win95::palette::STANDARD, Some(&cfg)).0,
+            "Signed with GPG key ABCD1234"
+        );
         let off = gitcore::SigningConfig {
             enabled: false,
             ..cfg
         };
-        assert_eq!(signing_label(Some(&off)).0, "Commits will NOT be signed");
-        assert_eq!(signing_label(None).0, "Commits will NOT be signed");
+        assert_eq!(
+            signing_label(&win95::palette::STANDARD, Some(&off)).0,
+            "Commits will NOT be signed"
+        );
+        assert_eq!(
+            signing_label(&win95::palette::STANDARD, None).0,
+            "Commits will NOT be signed"
+        );
     }
 
     #[test]

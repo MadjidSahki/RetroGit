@@ -1,6 +1,10 @@
 use egui::{Align2, Color32, Pos2, Stroke, Ui, pos2, vec2};
 
-use crate::theme::{self, BLACK, NAVY, WHITE};
+use crate::theme;
+
+const BLACK: Color32 = Color32::BLACK;
+const WHITE: Color32 = Color32::WHITE;
+const NAVY: Color32 = Color32::from_rgb(0x00, 0x00, 0x80);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {

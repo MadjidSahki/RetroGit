@@ -10,9 +10,6 @@ use crate::state::PullDialog;
 use crate::strings as s;
 
 const ROW_HEIGHT: f32 = 38.0;
-pub const GREEN: Color32 = Color32::from_rgb(0x00, 0x80, 0x00);
-pub const RED: Color32 = Color32::from_rgb(0xC0, 0x00, 0x00);
-pub const AMBER: Color32 = Color32::from_rgb(0xC0, 0x80, 0x00);
 
 pub fn filter_label(f: PrFilter) -> &'static str {
     match f {
@@ -24,42 +21,40 @@ pub fn filter_label(f: PrFilter) -> &'static str {
 }
 
 /// Text and color of a checks state (`None` when there are no checks).
-pub fn checks_text(c: ChecksState) -> Option<(&'static str, Color32)> {
+pub fn checks_text(pal: &win95::Palette, c: ChecksState) -> Option<(&'static str, Color32)> {
     match c {
-        ChecksState::Success => Some((s::CHECKS_PASSED, GREEN)),
-        ChecksState::Failure => Some((s::CHECKS_FAILED, RED)),
-        ChecksState::Pending => Some((s::CHECKS_RUNNING, AMBER)),
+        ChecksState::Success => Some((s::CHECKS_PASSED, pal.success)),
+        ChecksState::Failure => Some((s::CHECKS_FAILED, pal.error)),
+        ChecksState::Pending => Some((s::CHECKS_RUNNING, pal.warning)),
         ChecksState::None => None,
     }
 }
 
-pub fn review_text(r: ReviewDecision) -> Option<(&'static str, Color32)> {
+pub fn review_text(pal: &win95::Palette, r: ReviewDecision) -> Option<(&'static str, Color32)> {
     match r {
-        ReviewDecision::Approved => Some((s::REVIEW_APPROVED, GREEN)),
-        ReviewDecision::ChangesRequested => Some((s::REVIEW_CHANGES, RED)),
-        ReviewDecision::ReviewRequired => Some((s::REVIEW_REQUIRED, AMBER)),
+        ReviewDecision::Approved => Some((s::REVIEW_APPROVED, pal.success)),
+        ReviewDecision::ChangesRequested => Some((s::REVIEW_CHANGES, pal.error)),
+        ReviewDecision::ReviewRequired => Some((s::REVIEW_REQUIRED, pal.warning)),
         ReviewDecision::None => None,
     }
 }
 
 /// "ada -> main · 2h ago · checks passed · approved" (second line of a list row).
-pub fn row_details(p: &PrSummary, now: i64) -> Vec<(String, Color32)> {
-    let mut parts = vec![(format!("{} -> {}", p.author, p.base), win95::theme::BLACK)];
+pub fn row_details(pal: &win95::Palette, p: &PrSummary, now: i64) -> Vec<(String, Color32)> {
+    let mut parts = vec![(format!("{} -> {}", p.author, p.base), pal.window_text)];
     if let Some(t) = crate::format::parse_iso8601(&p.updated_at) {
-        parts.push((super::history::relative_time(now, t), win95::theme::GRAY));
+        parts.push((super::history::relative_time(now, t), pal.gray_text));
     }
     match p.state {
-        PrState::Merged => {
-            parts.push((s::STATE_MERGED.into(), Color32::from_rgb(0x60, 0x20, 0x90)))
-        }
-        PrState::Closed => parts.push((s::STATE_CLOSED.into(), RED)),
-        PrState::Open if p.draft => parts.push((s::DRAFT.into(), win95::theme::GRAY)),
+        PrState::Merged => parts.push((s::STATE_MERGED.into(), pal.merged)),
+        PrState::Closed => parts.push((s::STATE_CLOSED.into(), pal.error)),
+        PrState::Open if p.draft => parts.push((s::DRAFT.into(), pal.gray_text)),
         PrState::Open => {}
     }
-    if let Some((t, c)) = checks_text(p.checks) {
+    if let Some((t, c)) = checks_text(pal, p.checks) {
         parts.push((t.into(), c));
     }
-    if let Some((t, c)) = review_text(p.review_decision) {
+    if let Some((t, c)) = review_text(pal, p.review_decision) {
         parts.push((t.into(), c));
     }
     parts
@@ -67,17 +62,29 @@ pub fn row_details(p: &PrSummary, now: i64) -> Vec<(String, Color32)> {
 
 pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let Some(slug) = cx.state.github_slug() else {
-        bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 8, |ui| {
-            ui.set_min_size(ui.available_size());
-            ui.label(s::NOT_GITHUB);
-        });
+        bevel_frame(
+            ui,
+            Bevel::Field,
+            win95::theme::palette(ui.ctx()).window,
+            8,
+            |ui| {
+                ui.set_min_size(ui.available_size());
+                ui.label(s::NOT_GITHUB);
+            },
+        );
         return;
     };
     if cx.state.auth == crate::state::Auth::SignedOut {
-        bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 8, |ui| {
-            ui.set_min_size(ui.available_size());
-            ui.label(s::PULLS_SIGN_IN);
-        });
+        bevel_frame(
+            ui,
+            Bevel::Field,
+            win95::theme::palette(ui.ctx()).window,
+            8,
+            |ui| {
+                ui.set_min_size(ui.available_size());
+                ui.label(s::PULLS_SIGN_IN);
+            },
+        );
         return;
     }
     let p = &mut cx.state.pulls;
@@ -199,84 +206,96 @@ pub fn open_create(cx: &mut Ctx<'_>, slug: &Slug) {
 }
 
 fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
-    bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 1, |ui| {
-        ui.set_min_size(ui.available_size());
-        let p = &cx.state.pulls;
-        if p.list.is_empty() {
-            ui.label(if p.loading {
-                s::LOADING_PULLS
-            } else {
-                s::NO_PULLS
-            });
-            return;
-        }
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        let font = win95::theme::font(win95::theme::FONT_SIZE);
-        let mut clicked = None;
-        ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show_rows(ui, ROW_HEIGHT, p.list.len(), |ui, range| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                for pr in &p.list[range] {
-                    let (rect, resp) = ui.allocate_exact_size(
-                        vec2(ui.available_width(), ROW_HEIGHT),
-                        Sense::click(),
-                    );
-                    let selected = p.selected == Some(pr.number);
-                    let painter = ui.painter().with_clip_rect(rect);
-                    if selected {
-                        painter.rect_filled(rect, 0.0, win95::theme::NAVY);
-                    }
-                    let fg = |c: Color32| if selected { win95::theme::WHITE } else { c };
-                    let top = rect.top() + 10.0;
-                    let bottom = rect.top() + 28.0;
-                    let title = format!("#{} {}", pr.number, pr.title);
-                    painter.text(
-                        pos2(rect.left() + 4.0, top),
-                        Align2::LEFT_CENTER,
-                        title,
-                        font.clone(),
-                        fg(win95::theme::BLACK),
-                    );
-                    let mut x = rect.left() + 4.0;
-                    for (text, color) in row_details(pr, now) {
-                        let r = painter.text(
-                            pos2(x, bottom),
-                            Align2::LEFT_CENTER,
-                            &text,
-                            font.clone(),
-                            fg(color),
+    bevel_frame(
+        ui,
+        Bevel::Field,
+        win95::theme::palette(ui.ctx()).window,
+        1,
+        |ui| {
+            ui.set_min_size(ui.available_size());
+            let p = &cx.state.pulls;
+            if p.list.is_empty() {
+                ui.label(if p.loading {
+                    s::LOADING_PULLS
+                } else {
+                    s::NO_PULLS
+                });
+                return;
+            }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let font = win95::theme::font(win95::theme::FONT_SIZE);
+            let mut clicked = None;
+            ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show_rows(ui, ROW_HEIGHT, p.list.len(), |ui, range| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    for pr in &p.list[range] {
+                        let (rect, resp) = ui.allocate_exact_size(
+                            vec2(ui.available_width(), ROW_HEIGHT),
+                            Sense::click(),
                         );
-                        x = r.right() + 10.0;
+                        let selected = p.selected == Some(pr.number);
+                        let painter = ui.painter().with_clip_rect(rect);
+                        let pal = win95::theme::palette(ui.ctx());
+                        if selected {
+                            painter.rect_filled(rect, 0.0, pal.selection);
+                        }
+                        let fg = |c: Color32| if selected { pal.selection_text } else { c };
+                        let top = rect.top() + 10.0;
+                        let bottom = rect.top() + 28.0;
+                        let title = format!("#{} {}", pr.number, pr.title);
+                        painter.text(
+                            pos2(rect.left() + 4.0, top),
+                            Align2::LEFT_CENTER,
+                            title,
+                            font.clone(),
+                            fg(pal.window_text),
+                        );
+                        let mut x = rect.left() + 4.0;
+                        for (text, color) in row_details(&win95::theme::palette(ui.ctx()), pr, now)
+                        {
+                            let r = painter.text(
+                                pos2(x, bottom),
+                                Align2::LEFT_CENTER,
+                                &text,
+                                font.clone(),
+                                fg(color),
+                            );
+                            x = r.right() + 10.0;
+                        }
+                        for label in &pr.labels {
+                            let chip = win95::paint_chip(
+                                &painter,
+                                pos2(x, bottom),
+                                &label.name,
+                                label.color,
+                            );
+                            x = chip.right() + 4.0;
+                        }
+                        painter.line_segment(
+                            [
+                                pos2(rect.left(), rect.bottom() - 0.5),
+                                pos2(rect.right(), rect.bottom() - 0.5),
+                            ],
+                            egui::Stroke::new(1.0, pal.light),
+                        );
+                        if resp.clicked() {
+                            clicked = Some(pr.number);
+                        }
                     }
-                    for label in &pr.labels {
-                        let chip =
-                            win95::paint_chip(&painter, pos2(x, bottom), &label.name, label.color);
-                        x = chip.right() + 4.0;
-                    }
-                    painter.line_segment(
-                        [
-                            pos2(rect.left(), rect.bottom() - 0.5),
-                            pos2(rect.right(), rect.bottom() - 0.5),
-                        ],
-                        egui::Stroke::new(1.0, win95::theme::LIGHT),
-                    );
-                    if resp.clicked() {
-                        clicked = Some(pr.number);
-                    }
-                }
-            });
-        if let Some(number) = clicked {
-            cx.state.pulls.select(number);
-            cx.worker.send(Command::LoadPull {
-                slug: slug.clone(),
-                number,
-            });
-        }
-    });
+                });
+            if let Some(number) = clicked {
+                cx.state.pulls.select(number);
+                cx.worker.send(Command::LoadPull {
+                    slug: slug.clone(),
+                    number,
+                });
+            }
+        },
+    );
 }
 
 #[cfg(test)]
@@ -303,7 +322,7 @@ mod tests {
     #[test]
     fn row_details_say_who_where_when_and_how() {
         let now = crate::format::parse_iso8601("2026-10-01T12:00:00Z").unwrap_or(0);
-        let texts: Vec<String> = row_details(&pr(), now)
+        let texts: Vec<String> = row_details(&win95::palette::STANDARD, &pr(), now)
             .into_iter()
             .map(|(t, _)| t)
             .collect();
@@ -322,7 +341,7 @@ mod tests {
         merged.checks = ChecksState::None;
         merged.review_decision = ReviewDecision::None;
         merged.updated_at = String::new();
-        let texts: Vec<String> = row_details(&merged, now)
+        let texts: Vec<String> = row_details(&win95::palette::STANDARD, &merged, now)
             .into_iter()
             .map(|(t, _)| t)
             .collect();

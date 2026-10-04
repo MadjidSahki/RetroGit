@@ -26,8 +26,11 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                     }
                     if let Some(detail) = &msg.detail {
                         ui.add(
-                            egui::Label::new(egui::RichText::new(detail).color(win95::theme::GRAY))
-                                .wrap(),
+                            egui::Label::new(
+                                egui::RichText::new(detail)
+                                    .color(win95::theme::palette(ui.ctx()).gray_text),
+                            )
+                            .wrap(),
                         );
                     }
                 });

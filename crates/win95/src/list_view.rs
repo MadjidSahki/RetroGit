@@ -1,7 +1,7 @@
 use egui::{Align2, Id, Rect, ScrollArea, Sense, Ui, WidgetInfo, WidgetType, pos2, vec2};
 
 use crate::bevel::{self, Bevel};
-use crate::theme::{self, BLACK, GRAY, NAVY, SILVER, WHITE};
+use crate::theme;
 
 pub struct Column {
     pub title: &'static str,
@@ -91,8 +91,9 @@ impl<'a> ListView<'a> {
         let mut out = ListResponse::default();
         let width = ui.available_width();
         let font = theme::font(theme::FONT_SIZE);
+        let pal = theme::palette(ui.ctx());
         let (outer, _) = ui.allocate_exact_size(vec2(width, self.height), Sense::hover());
-        ui.painter().rect_filled(outer, 0.0, WHITE);
+        ui.painter().rect_filled(outer, 0.0, pal.window);
         bevel::paint(ui.painter(), outer, Bevel::Field);
         let inner = outer.shrink(2.0);
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).id_salt(self.id));
@@ -106,14 +107,14 @@ impl<'a> ListView<'a> {
             let mut x = hdr.left();
             for col in self.columns {
                 let r = Rect::from_min_size(pos2(x, hdr.top()), vec2(col.width, hdr.height()));
-                ui.painter().rect_filled(r, 0.0, SILVER);
+                ui.painter().rect_filled(r, 0.0, pal.face);
                 bevel::paint(ui.painter(), r, Bevel::Raised);
                 ui.painter().with_clip_rect(r.shrink(2.0)).text(
                     r.left_center() + vec2(4.0, 0.0),
                     Align2::LEFT_CENTER,
                     col.title,
                     font.clone(),
-                    BLACK,
+                    pal.window_text,
                 );
                 x += col.width;
             }
@@ -135,16 +136,16 @@ impl<'a> ListView<'a> {
                         WidgetInfo::selected(WidgetType::SelectableLabel, true, is_sel, &label)
                     });
                     if is_sel {
-                        ui.painter().rect_filled(rect, 0.0, NAVY);
+                        ui.painter().rect_filled(rect, 0.0, pal.selection);
                     }
                     let mut x = rect.left();
                     for (col, c) in self.columns.iter().zip(&cells) {
                         let r =
                             Rect::from_min_size(pos2(x, rect.top()), vec2(col.width, ROW_HEIGHT));
                         let color = match (is_sel, c.dimmed) {
-                            (true, _) => WHITE,
-                            (false, true) => GRAY,
-                            (false, false) => BLACK,
+                            (true, _) => pal.selection_text,
+                            (false, true) => pal.gray_text,
+                            (false, false) => pal.window_text,
                         };
                         ui.painter().with_clip_rect(r.shrink(1.0)).text(
                             r.left_center() + vec2(4.0, 0.0),

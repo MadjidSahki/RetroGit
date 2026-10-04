@@ -131,7 +131,10 @@ pub fn toolbar(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         }
         if !remotes.is_empty() {
             ui.separator();
-            ui.label(egui::RichText::new(s::REMOTE_BRANCHES).color(win95::theme::GRAY));
+            ui.label(
+                egui::RichText::new(s::REMOTE_BRANCHES)
+                    .color(win95::theme::palette(ui.ctx()).gray_text),
+            );
             for r in &remotes {
                 if ui.button(format!("   {}", r.name)).clicked() {
                     pick = Some(r.name.clone());

@@ -2,11 +2,11 @@ use egui::{Response, TextEdit, Ui};
 
 use crate::bevel::Bevel;
 use crate::panel::bevel_frame;
-use crate::theme::WHITE;
+use crate::theme;
 
 /// Single-line white sunken text box.
 pub fn text_field(ui: &mut Ui, text: &mut String, width: f32, password: bool) -> Response {
-    bevel_frame(ui, Bevel::Field, WHITE, 1, |ui| {
+    bevel_frame(ui, Bevel::Field, theme::palette(ui.ctx()).window, 1, |ui| {
         ui.add(
             TextEdit::singleline(text)
                 .frame(egui::Frame::NONE)

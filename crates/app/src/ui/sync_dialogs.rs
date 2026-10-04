@@ -155,7 +155,7 @@ fn name_dialog(
             if !name.is_empty()
                 && let Some(e) = &error
             {
-                ui.label(egui::RichText::new(e).color(egui::Color32::from_rgb(0x80, 0, 0)));
+                ui.label(egui::RichText::new(e).color(win95::theme::palette(ui.ctx()).error));
             }
             if old.is_none() {
                 checkbox(ui, &mut switch, s::SWITCH_TO_IT);

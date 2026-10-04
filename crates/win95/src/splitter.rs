@@ -1,7 +1,7 @@
 use egui::{CursorIcon, Id, Rect, Sense, Ui, UiBuilder, pos2, vec2};
 
 use crate::bevel::{self, Bevel};
-use crate::theme::SILVER;
+use crate::theme;
 
 /// Horizontal split: `add_top` above, `add_bottom` below, a draggable 6 px bar in between.
 /// `fraction` (0.1..=0.9) is the share of the height given to the top part. `state` is
@@ -29,7 +29,8 @@ pub fn splitter<S>(
     if resp.dragged() && rect.height() > bar_h {
         *fraction = ((top_h + resp.drag_delta().y) / (rect.height() - bar_h)).clamp(0.1, 0.9);
     }
-    ui.painter().rect_filled(bar, 0.0, SILVER);
+    ui.painter()
+        .rect_filled(bar, 0.0, theme::palette(ui.ctx()).face);
     bevel::paint(ui.painter(), bar.shrink2(vec2(0.0, 1.0)), Bevel::Raised);
 
     ui.scope_builder(

@@ -30,6 +30,8 @@ pub struct RetroGitApp {
     /// Pull request events from the watcher thread.
     pr_events: Option<std::sync::mpsc::Receiver<Vec<github::PrEvent>>>,
     _pr_watcher: Option<crate::pr_watch::PrWatcher>,
+    /// Appearance and zoom last applied to the egui context.
+    applied: Option<(win95::theme::Appearance, f32)>,
 }
 
 impl RetroGitApp {
@@ -41,7 +43,10 @@ impl RetroGitApp {
         ctx: egui::Context,
     ) -> RetroGitApp {
         worker.send(Command::ValidateToken);
+        // Cmd/Ctrl +, - and 0 are handled here (bounded steps, saved in the config).
+        ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let ides_ctx = ctx.clone();
+        let ides_ctx_for_appearance = ctx.clone();
         let (tx, highlighted) = std::sync::mpsc::channel();
         let highlighter = crate::highlight::Service::start(move |h| {
             let _ = tx.send(h);
@@ -54,7 +59,7 @@ impl RetroGitApp {
             let _ = ides_tx.send(crate::ide::detect());
             repaint.request_repaint();
         });
-        RetroGitApp {
+        let mut app = RetroGitApp {
             ides: Some(ides),
             notices_tx,
             notices,
@@ -70,7 +75,11 @@ impl RetroGitApp {
             geometry: None,
             watcher: None,
             was_focused: true,
-        }
+            applied: None,
+        };
+        // Saved scheme, font and zoom in place before the window first shows.
+        app.sync_appearance(&ides_ctx_for_appearance);
+        app
     }
 
     /// Accept folders from the `retrogit` command (single instance), and open `initial`.
@@ -148,6 +157,44 @@ impl RetroGitApp {
         });
     }
 
+    /// Apply the saved appearance when it changed (and at the first frame).
+    fn sync_appearance(&mut self, ctx: &egui::Context) {
+        let saved = &self.state.config.appearance;
+        let want = (saved.appearance(), saved.zoom());
+        if self.applied == Some(want) {
+            return;
+        }
+        let dark = want.0.scheme.palette().dark;
+        apply_appearance(ctx, &self.state.config.appearance);
+        self.highlighter.set_dark(dark);
+        if self.applied.map(|(a, _)| a.scheme.palette().dark) != Some(dark) {
+            self.state.forget_colors(dark);
+        }
+        self.applied = Some(want);
+    }
+
+    fn zoom_keys(&mut self, ctx: &egui::Context) {
+        use crate::state::ZoomStep;
+        let cmd = egui::Modifiers::COMMAND;
+        let step = ctx.input_mut(|i| {
+            if i.consume_key(cmd, egui::Key::Plus)
+                || i.consume_key(cmd, egui::Key::Equals)
+                || i.consume_key(cmd | egui::Modifiers::SHIFT, egui::Key::Equals)
+            {
+                Some(ZoomStep::In)
+            } else if i.consume_key(cmd, egui::Key::Minus) {
+                Some(ZoomStep::Out)
+            } else if i.consume_key(cmd, egui::Key::Num0) {
+                Some(ZoomStep::Reset)
+            } else {
+                None
+            }
+        });
+        if let Some(step) = step {
+            self.state.zoom_key(step);
+        }
+    }
+
     fn save_config(&mut self) {
         if let Some(g) = self.geometry {
             self.state.config.window = Some(g);
@@ -159,6 +206,30 @@ impl RetroGitApp {
         }
         self.state.config_dirty = false;
     }
+}
+
+/// Size and position of the window to save (`None` when maximized or unknown).
+pub fn viewport_geometry(ctx: &egui::Context) -> Option<WindowGeometry> {
+    // Read before `input`: egui's context lock is not reentrant.
+    let zoom = ctx.zoom_factor();
+    ctx.input(|i| {
+        let vp = i.viewport();
+        if vp.maximized == Some(true) {
+            return None;
+        }
+        vp.inner_rect
+            .map(|inner| WindowGeometry::from_viewport(inner, vp.outer_rect, zoom))
+    })
+}
+
+/// Scheme, font and zoom of `saved` on `ctx`; the minimum window size follows the zoom.
+/// Called before the first frame (fonts and zoom take effect at the next pass).
+pub fn apply_appearance(ctx: &egui::Context, saved: &crate::config::AppearanceConfig) {
+    win95::theme::apply(ctx, saved.appearance());
+    ctx.set_zoom_factor(saved.zoom());
+    ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::Vec2::from(
+        crate::config::MIN_WINDOW,
+    )));
 }
 
 impl eframe::App for RetroGitApp {
@@ -196,8 +267,11 @@ impl eframe::App for RetroGitApp {
                 target: h.target,
                 diff: h.diff,
                 colors: h.colors,
+                dark: h.dark,
             });
         }
+        self.zoom_keys(ctx);
+        self.sync_appearance(ctx);
         if self.state.config_dirty {
             self.save_config();
         }
@@ -207,20 +281,9 @@ impl eframe::App for RetroGitApp {
             self.worker.send(Command::RefreshStatus);
         }
         self.was_focused = focused;
-        ctx.input(|i| {
-            let vp = i.viewport();
-            if vp.maximized != Some(true)
-                && let Some(inner) = vp.inner_rect
-            {
-                let outer = vp.outer_rect;
-                self.geometry = Some(WindowGeometry {
-                    width: inner.width(),
-                    height: inner.height(),
-                    x: outer.map(|r| r.left()),
-                    y: outer.map(|r| r.top()),
-                });
-            }
-        });
+        if let Some(g) = viewport_geometry(ctx) {
+            self.geometry = Some(g);
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -236,6 +299,7 @@ impl eframe::App for RetroGitApp {
         ui::accounts::show(&egui_ctx, &mut cx);
         ui::sign_in::show(&egui_ctx, &mut cx);
         ui::about::show(&egui_ctx, &mut cx);
+        ui::appearance::show(&egui_ctx, &mut cx);
         ui::discard::show(&egui_ctx, &mut cx);
         ui::sync_dialogs::show(&egui_ctx, &mut cx);
         ui::pull_dialogs::show(&egui_ctx, &mut cx);

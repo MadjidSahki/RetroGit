@@ -12,9 +12,6 @@ use crate::state::{ConflictConfirm, ConflictEditor};
 use crate::strings as s;
 
 const ROW: f32 = 17.0;
-const BLOCK_BG: Color32 = Color32::from_rgb(0xFF, 0xF6, 0xC8);
-const CURRENT_BG: Color32 = Color32::from_rgb(0xFF, 0xD8, 0x90);
-const BASE_FG: Color32 = Color32::from_rgb(0x80, 0x80, 0x80);
 
 /// Titles of the mine and theirs panes: Git swaps "ours" and "theirs" during a rebase.
 pub fn pane_titles(op: Option<Operation>, segments: &[Segment]) -> (String, String) {
@@ -90,10 +87,19 @@ pub fn conflicts_left_text(n: usize) -> String {
 }
 
 /// Background of each line of `text`: conflict blocks pale, the current block stronger.
-pub fn line_backgrounds(blocks: &[(usize, usize)], current: usize, lines: usize) -> Vec<Color32> {
+pub fn line_backgrounds(
+    pal: &win95::Palette,
+    blocks: &[(usize, usize)],
+    current: usize,
+    lines: usize,
+) -> Vec<Color32> {
     let mut out = vec![Color32::TRANSPARENT; lines];
     for (i, (start, count)) in blocks.iter().enumerate() {
-        let color = if i == current { CURRENT_BG } else { BLOCK_BG };
+        let color = if i == current {
+            pal.conflict_current
+        } else {
+            pal.conflict_block
+        };
         let end = (start + count).min(lines);
         if *start < end {
             out[*start..end].fill(color);
@@ -110,28 +116,34 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         c.load_conflict = false;
         cx.worker.send(Command::LoadConflict(path));
     }
-    bevel_frame(ui, Bevel::Field, win95::theme::WHITE, 4, |ui| {
-        ui.set_min_size(ui.available_size());
-        // Taken out while drawing (no copy of large files every frame), then put back.
-        let Some(mut ed) = cx.state.changes.conflict.take() else {
-            ui.label(s::LOADING_CONFLICT);
-            return;
-        };
-        match ed.file.kind {
-            ConflictKind::Content | ConflictKind::AddedByBoth => content(ui, cx, &mut ed),
-            _ => whole_file_only(ui, cx, &ed),
-        }
-        if cx.state.changes.conflict.is_none() {
-            cx.state.changes.conflict = Some(ed);
-        }
-    });
+    bevel_frame(
+        ui,
+        Bevel::Field,
+        win95::theme::palette(ui.ctx()).window,
+        4,
+        |ui| {
+            ui.set_min_size(ui.available_size());
+            // Taken out while drawing (no copy of large files every frame), then put back.
+            let Some(mut ed) = cx.state.changes.conflict.take() else {
+                ui.label(s::LOADING_CONFLICT);
+                return;
+            };
+            match ed.file.kind {
+                ConflictKind::Content | ConflictKind::AddedByBoth => content(ui, cx, &mut ed),
+                _ => whole_file_only(ui, cx, &ed),
+            }
+            if cx.state.changes.conflict.is_none() {
+                cx.state.changes.conflict = Some(ed);
+            }
+        },
+    );
 }
 
 /// Binary files, and files deleted on one side: keep one version, or the deletion.
 fn whole_file_only(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &ConflictEditor) {
     let path = ed.file.path.clone();
     let names = side_names(ed.file.operation, &ed.segments);
-    ui.label(RichText::new(&path).color(win95::theme::NAVY));
+    ui.label(RichText::new(&path).color(win95::theme::palette(ui.ctx()).link));
     let keep = |pick| Command::ResolveConflictWith {
         path: path.clone(),
         pick,
@@ -192,7 +204,7 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor) {
     let names = side_names(ed.file.operation, &ed.segments);
     // Toolbar.
     ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(&ed.file.path).color(win95::theme::NAVY));
+        ui.label(RichText::new(&ed.file.path).color(win95::theme::palette(ui.ctx()).link));
         ui.label(conflicts_left_text(left));
         let b = |t: &str| Button95::new(t.to_string()).min_size(egui::vec2(70.0, 20.0));
         if ui
@@ -236,11 +248,14 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>, ed: &mut ConflictEditor) {
     });
     if ed.on_disk.is_some() {
         egui::Frame::NONE
-            .fill(Color32::from_rgb(0xFF, 0xFF, 0xC0))
+            .fill(win95::theme::palette(ui.ctx()).note_bg)
             .inner_margin(egui::Margin::same(3))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(s::CHANGED_ON_DISK).color(win95::theme::BLACK));
+                    ui.label(
+                        RichText::new(s::CHANGED_ON_DISK)
+                            .color(win95::theme::palette(ui.ctx()).text),
+                    );
                     if ui.add(Button95::new(s::RELOAD)).clicked() {
                         ed.reload();
                     }
@@ -320,9 +335,10 @@ fn side_pane(
     block: Option<(usize, usize)>,
     colors: &crate::highlight::Colors,
 ) {
-    ui.label(RichText::new(title).color(win95::theme::NAVY));
+    ui.label(RichText::new(title).color(win95::theme::palette(ui.ctx()).link));
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let bg = line_backgrounds(block.as_slice(), 0, lines.len());
+    let pal = win95::theme::palette(ui.ctx());
+    let bg = line_backgrounds(&pal, block.as_slice(), 0, lines.len());
     let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
     let mut area = ScrollArea::both()
         .id_salt(("conflict_side", id))
@@ -339,6 +355,7 @@ fn side_pane(
         ui.spacing_mut().item_spacing.y = 0.0;
         for i in range {
             let job = crate::highlight::colored_line(
+                &win95::theme::palette(ui.ctx()),
                 &format!("{:>5} ", i + 1),
                 lines[i].trim_end_matches(['\n', '\r']),
                 colors.line(0, i),
@@ -347,7 +364,7 @@ fn side_pane(
                 Color32::TRANSPARENT,
             );
             let bg = if bg[i] == Color32::TRANSPARENT {
-                win95::theme::WHITE
+                pal.window
             } else {
                 bg[i]
             };
@@ -358,7 +375,7 @@ fn side_pane(
 
 /// The editable result, conflict blocks highlighted (the ancestor's lines in gray).
 fn result_pane(ui: &mut egui::Ui, ed: &mut ConflictEditor) {
-    ui.label(RichText::new(s::PANE_RESULT).color(win95::theme::NAVY));
+    ui.label(RichText::new(s::PANE_RESULT).color(win95::theme::palette(ui.ctx()).link));
     let blocks = block_lines(&ed.segments, Pane::Result);
     let current = ed.current;
     let base_lines = base_line_set(&ed.segments);
@@ -366,9 +383,10 @@ fn result_pane(ui: &mut egui::Ui, ed: &mut ConflictEditor) {
     let path = ed.file.path.clone();
     let mut text = std::mem::take(&mut ed.result);
     let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap: f32| {
+        let pal = win95::theme::palette(ui.ctx());
         let s = buf.as_str();
         let lines: Vec<&str> = s.split_inclusive('\n').collect();
-        let bg = line_backgrounds(&blocks, current, lines.len().max(1));
+        let bg = line_backgrounds(&pal, &blocks, current, lines.len().max(1));
         let mut job = egui::text::LayoutJob::default();
         let font = egui::FontId::monospace(win95::theme::FONT_SIZE);
         let fmt = |color: Color32, background: Color32| egui::TextFormat {
@@ -395,13 +413,13 @@ fn result_pane(ui: &mut egui::Ui, ed: &mut ConflictEditor) {
                     for span in spans {
                         job.append(&span.text, 0.0, fmt(span.color, bg[i]));
                     }
-                    job.append(&line[body.len()..], 0.0, fmt(win95::theme::BLACK, bg[i]));
+                    job.append(&line[body.len()..], 0.0, fmt(pal.window_text, bg[i]));
                 }
                 _ => {
                     let color = if base_lines.contains(&i) {
-                        BASE_FG
+                        pal.gray_text
                     } else {
-                        win95::theme::BLACK
+                        pal.window_text
                     };
                     job.append(line, 0.0, fmt(color, bg[i]));
                 }
@@ -570,15 +588,17 @@ mod tests {
 
     #[test]
     fn blocks_are_highlighted_and_the_current_one_stands_out() {
-        let bg = line_backgrounds(&[(1, 2), (4, 1)], 1, 6);
+        let p = win95::palette::STANDARD;
+        let bg = line_backgrounds(&p, &[(1, 2), (4, 1)], 1, 6);
+        let (block, cur) = (p.conflict_block, p.conflict_current);
         assert_eq!(
             bg,
             [
                 Color32::TRANSPARENT,
-                BLOCK_BG,
-                BLOCK_BG,
+                block,
+                block,
                 Color32::TRANSPARENT,
-                CURRENT_BG,
+                cur,
                 Color32::TRANSPARENT
             ]
         );

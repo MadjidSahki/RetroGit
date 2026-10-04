@@ -3,7 +3,7 @@ use egui::{
 };
 
 use crate::bevel::{self, Bevel};
-use crate::theme::{self, BLACK, SILVER, WHITE};
+use crate::theme;
 
 /// Win95 drop-down list: white sunken field with the current value and an arrow button.
 /// `add_items` fills the popup; clicking an item closes it.
@@ -15,17 +15,18 @@ pub fn combo_box(
     add_items: impl FnOnce(&mut Ui),
 ) -> Response {
     let id = Id::new(id);
+    let pal = theme::palette(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(vec2(width, 21.0), Sense::click());
     let owned = selected_text.to_string();
     resp.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, &owned));
     let p = ui.painter();
-    p.rect_filled(rect, 0.0, WHITE);
+    p.rect_filled(rect, 0.0, pal.window);
     bevel::paint(p, rect, Bevel::Field);
     let arrow = Rect::from_min_max(
         pos2(rect.right() - 18.0, rect.top() + 2.0),
         rect.max - vec2(2.0, 2.0),
     );
-    p.rect_filled(arrow, 0.0, SILVER);
+    p.rect_filled(arrow, 0.0, pal.face);
     bevel::paint(p, arrow, Bevel::Raised);
     let c = arrow.center();
     p.add(egui::Shape::convex_polygon(
@@ -34,7 +35,7 @@ pub fn combo_box(
             c + vec2(4.0, -2.0),
             c + vec2(0.0, 2.0),
         ],
-        BLACK,
+        pal.window_text,
         Stroke::NONE,
     ));
     p.with_clip_rect(Rect::from_min_max(
@@ -46,7 +47,7 @@ pub fn combo_box(
         Align2::LEFT_CENTER,
         selected_text,
         theme::font(theme::FONT_SIZE),
-        BLACK,
+        pal.window_text,
     );
     Popup::from_toggle_button_response(&resp)
         .id(id.with("popup"))

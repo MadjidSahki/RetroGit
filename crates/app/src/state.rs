@@ -1,5 +1,6 @@
 //! All UI state, updated by the pure `apply` function.
 
+mod appearance;
 mod conflicts;
 mod git_ops;
 mod notifications;
@@ -7,6 +8,7 @@ mod pulls;
 mod pulls_more;
 mod sync;
 
+pub use appearance::{AppearanceDialog, SIZES, ZoomStep, next_zoom, size_label};
 pub use conflicts::{ConflictConfirm, ConflictEditor, text_as_diff};
 pub use git_ops::{GitDialog, HistoryAction, StashesView, move_item};
 pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};
@@ -173,6 +175,10 @@ pub struct AppState {
     pub sign_in: Option<SignInDialog>,
     pub clone: Option<CloneDialog>,
     pub about: bool,
+    /// View > Appearance window, when open.
+    pub appearance_dialog: Option<AppearanceDialog>,
+    /// Syntax colors in use are for a dark scheme.
+    pub colors_dark: bool,
     pub current: Option<RepoSummary>,
     /// Recent entries whose folder is gone.
     pub missing: HashSet<PathBuf>,
@@ -226,6 +232,8 @@ impl AppState {
             sign_in: None,
             clone: None,
             about: false,
+            appearance_dialog: None,
+            colors_dark: false,
             current: None,
             missing,
             messages: VecDeque::new(),

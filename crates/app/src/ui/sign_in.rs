@@ -19,15 +19,21 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             };
             tabs(ui, &mut dialog.tab, &[s::TAB_STANDARD, s::TAB_ADVANCED]);
             let tab = dialog.tab;
-            bevel_frame(ui, Bevel::Window, win95::theme::SILVER, 8, |ui| {
-                ui.set_min_height(150.0);
-                ui.set_width(ui.available_width());
-                if tab == 0 {
-                    standard_tab(ui, cx, &mut close);
-                } else {
-                    advanced_tab(ui, cx);
-                }
-            });
+            bevel_frame(
+                ui,
+                Bevel::Window,
+                win95::theme::palette(ui.ctx()).face,
+                8,
+                |ui| {
+                    ui.set_min_height(150.0);
+                    ui.set_width(ui.available_width());
+                    if tab == 0 {
+                        standard_tab(ui, cx, &mut close);
+                    } else {
+                        advanced_tab(ui, cx);
+                    }
+                },
+            );
         });
     if r.close_requested || close {
         cx.worker.cancel_device_flow();
@@ -48,7 +54,7 @@ fn standard_tab(ui: &mut egui::Ui, cx: &mut Ctx<'_>, close: &mut bool) {
                 ui.label(
                     RichText::new(&user_code)
                         .font(win95::theme::font(26.0))
-                        .color(win95::theme::BLACK),
+                        .color(win95::theme::palette(ui.ctx()).text),
                 );
             });
             ui.horizontal(|ui| {
@@ -95,7 +101,12 @@ fn advanced_tab(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     };
     ui.label(s::PAT_LABEL);
     let resp = text_field(ui, &mut dialog.pat, ui.available_width() - 8.0, true);
-    ui.add(egui::Label::new(RichText::new(s::PAT_HELP).color(win95::theme::GRAY)).wrap());
+    ui.add(
+        egui::Label::new(
+            RichText::new(s::PAT_HELP).color(win95::theme::palette(ui.ctx()).gray_text),
+        )
+        .wrap(),
+    );
     ui.add_space(8.0);
     let can_submit = !dialog.pat.trim().is_empty() && !dialog.pat_submitted;
     let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));

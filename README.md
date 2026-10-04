@@ -1,5 +1,7 @@
 # RetroGit
 
+<p align="center"><img src="docs/logo.png" alt="RetroGit logo" width="192"></p>
+
 **A fast, lightweight Git client for macOS and Windows — with the look and feel of Windows 95.**
 
 RetroGit is a native desktop Git client written in Rust. It is built for daily use:
@@ -74,6 +76,7 @@ and a pixel font.
 - Shown as system notifications and in the **Notifications** list (toolbar), which opens the pull request in its local clone, or on github.com
 
 **Everyday comfort**
+- View → Appearance: six color schemes in the Windows 95 spirit (Windows Standard, Dark, High Contrast Black, High Contrast White, Slate, Rainy Day) with a live preview; the interface font (the W95FA pixel font, or Atkinson Hyperlegible for easier reading); the size (Small 100 %, Medium 125 %, Large 150 %, or Cmd/Ctrl + / − / 0 by steps of 10 %). Syntax colors switch to a dark theme with the dark schemes; the choice is saved
 - **Open in IDE**: VS Code, Cursor, Visual Studio, Rider, IntelliJ IDEA, WebStorm, PyCharm, GoLand, RustRover, Zed, Sublime Text, Xcode — detected automatically, choice remembered per repository
 - **`retrogit` command**: open the repository of the current folder from a terminal, in the window already open
 - Recent repositories list; window size and position remembered
@@ -173,6 +176,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+The window and About icons are raw RGBA files made from the full logo (needs Pillow):
+`python3 scripts/make-icons.py path/to/retrogit.png`.
+
 Tests use temporary repositories, a local bare remote and a mock HTTP server: no network
 access is needed. Tests that need the `git` command line are skipped when it is not installed.
 
@@ -185,7 +191,10 @@ release `v<major>.<minor>.<run number>` with both binaries (only if both platfor
 Syntax highlighting uses [syntect](https://github.com/trishume/syntect) with the syntax
 definitions and theme of [bat](https://github.com/sharkdp/bat) (through
 [two-face](https://codeberg.org/CosmicHarper/two-face)). The pixel font is
-[W95FA](https://fontsarena.com/w95fa-by-alina-sava/) by Alina Sava (SIL OFL 1.1).
+[W95FA](https://fontsarena.com/w95fa-by-alina-sava/) by Alina Sava (SIL OFL 1.1); the
+readable font is [Atkinson Hyperlegible](https://www.brailleinstitute.org/freefont/) by the
+Braille Institute (SIL OFL 1.1). The logo includes the
+[Git logo](https://git-scm.com/downloads/logos) by Jason Long (CC BY 3.0).
 Licenses of embedded third-party data: [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## Known limitations

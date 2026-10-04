@@ -2,6 +2,7 @@
 
 pub mod about;
 pub mod accounts;
+pub mod appearance;
 pub mod changes;
 pub mod clone_dialog;
 pub mod conflict_view;
@@ -9,6 +10,7 @@ pub mod diff_view;
 pub mod discard;
 pub mod git_dialogs;
 pub mod history;
+pub mod logo;
 pub mod main_window;
 pub mod message;
 pub mod notifications;
