@@ -92,7 +92,10 @@ fn cherry_pick_revert_and_reset_reload_the_history() {
     let fix = commit(&dir, "b.txt", "b\n", "the fix");
     git(&dir, &["switch", "-q", "main"]);
     let w = start(&dir);
-    w.send(Command::CherryPick(fix));
+    w.send(Command::CherryPick {
+        id: fix,
+        mainline: None,
+    });
     let evs = until(&w, |e| matches!(e, Event::OpFinished { .. }));
     assert!(
         evs.iter().any(|e| matches!(e, Event::LogLoaded { .. })),
@@ -122,7 +125,10 @@ fn a_cherry_pick_that_conflicts_says_so() {
     git(&dir, &["switch", "-q", "main"]);
     commit(&dir, "a.txt", "mine\n", "mine");
     let w = start(&dir);
-    w.send(Command::CherryPick(theirs));
+    w.send(Command::CherryPick {
+        id: theirs,
+        mainline: None,
+    });
     let evs = until(&w, |e| matches!(e, Event::OpFinished { .. }));
     assert!(matches!(
         evs.last(),
@@ -220,7 +226,10 @@ fn an_operation_blocked_by_local_changes_offers_stash_and_retry() {
     git(&dir, &["switch", "-q", "main"]);
     std::fs::write(dir.join("a.txt"), "dirty\n").unwrap();
     let w = start(&dir);
-    let pick = Command::CherryPick(theirs);
+    let pick = Command::CherryPick {
+        id: theirs,
+        mainline: None,
+    };
     w.send(pick.clone());
     let evs = until(&w, |e| matches!(e, Event::OpBlocked { .. }));
     match evs.last() {
@@ -262,7 +271,10 @@ fn stash_and_retry_with_nothing_stashable_says_so_and_does_not_ask_again() {
     git(&dir, &["update-index", "--skip-worktree", "a.txt"]);
     std::fs::write(dir.join("a.txt"), "dirty\n").unwrap();
     let w = start(&dir);
-    let pick = Command::CherryPick(theirs);
+    let pick = Command::CherryPick {
+        id: theirs,
+        mainline: None,
+    };
     w.send(pick.clone());
     let evs = until(&w, |e| matches!(e, Event::OpBlocked { .. }));
     let Some(Event::OpBlocked { files, .. }) = evs.last() else {
@@ -312,7 +324,10 @@ fn stash_and_retry_blocked_again_gives_an_error_and_keeps_the_stash() {
     git(&dir, &["update-index", "--skip-worktree", "b.txt"]);
     std::fs::write(dir.join("b.txt"), "dirty\n").unwrap();
     let w = start(&dir);
-    let pick = Command::CherryPick(theirs);
+    let pick = Command::CherryPick {
+        id: theirs,
+        mainline: None,
+    };
     w.send(pick.clone());
     let evs = until(&w, |e| matches!(e, Event::OpBlocked { .. }));
     let Some(Event::OpBlocked { files, .. }) = evs.last() else {

@@ -516,6 +516,30 @@ pub const REVERT_MERGE_HELP: &str = "This is a merge commit: choose the side to 
 pub const KEEP_PARENT_1: &str = "Keep parent 1 (the branch merged into)";
 pub const KEEP_PARENT_2: &str = "Keep parent 2 (the branch that was merged)";
 pub const REVERT: &str = "Revert";
+pub const CHERRY_PICK_MERGE_TITLE: &str = "Cherry-pick a merge";
+pub const CHERRY_PICK_MERGE_HELP: &str =
+    "This is a merge commit: choose the parent to compare it with; the difference is copied.";
+pub const PICK_PARENT_1: &str = "Compare with parent 1 (the branch merged into)";
+pub const PICK_PARENT_2: &str = "Compare with parent 2 (the branch that was merged)";
+pub const CHERRY_PICK: &str = "Cherry-pick";
+
+/// Revert of a merge: label of parent `n` (1-based).
+pub fn keep_parent(n: u32) -> String {
+    match n {
+        1 => KEEP_PARENT_1.to_string(),
+        2 => KEEP_PARENT_2.to_string(),
+        n => format!("Keep parent {n} (a branch that was merged)"),
+    }
+}
+
+/// Cherry-pick of a merge: label of parent `n` (1-based).
+pub fn pick_parent(n: u32) -> String {
+    match n {
+        1 => PICK_PARENT_1.to_string(),
+        2 => PICK_PARENT_2.to_string(),
+        n => format!("Compare with parent {n} (a branch that was merged)"),
+    }
+}
 pub const CREATE_TAG_TITLE: &str = "Create tag";
 pub const TAG_NAME: &str = "Name:";
 pub const TAG_ANNOTATED: &str = "Annotated (with a message)";

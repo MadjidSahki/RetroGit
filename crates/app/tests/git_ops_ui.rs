@@ -170,7 +170,10 @@ fn the_tags_window_lists_tags() {
 fn the_stash_and_retry_dialog_lists_the_files_in_the_way() {
     let mut w = world();
     w.state.git_dialog = Some(GitDialog::StashRetry {
-        retry: Box::new(retrogit::protocol::Command::CherryPick("x".into())),
+        retry: Box::new(retrogit::protocol::Command::CherryPick {
+            id: "x".into(),
+            mainline: None,
+        }),
         files: vec!["src/in_the_way.rs".into()],
     });
     let mut h = harness(w);
@@ -370,4 +373,49 @@ fn tag_buttons_are_greyed_while_a_network_operation_runs() {
     h.state_mut().state.sync.running = None;
     h.run();
     assert!(!disabled(&h, s::DELETE), "usable again");
+}
+
+#[test]
+fn a_merge_dialog_offers_every_parent() {
+    let mut w = world();
+    w.state.git_dialog = Some(GitDialog::RevertMerge {
+        id: "abc".into(),
+        parent: 1,
+        parents: 3,
+    });
+    let mut h = harness(w);
+    h.run();
+    assert!(h.query_by_label(s::KEEP_PARENT_1).is_some());
+    assert!(h.query_by_label(s::KEEP_PARENT_2).is_some());
+    h.get_by_label(&s::keep_parent(3)).click();
+    h.run();
+    assert!(matches!(
+        h.state().state.git_dialog,
+        Some(GitDialog::RevertMerge { parent: 3, .. })
+    ));
+    h.get_by_label(s::REVERT).click();
+    h.run();
+    assert!(h.state().state.git_dialog.is_none(), "sent and closed");
+}
+
+#[test]
+fn cherry_picking_a_merge_asks_for_the_parent() {
+    let mut w = world();
+    w.state.git_dialog = Some(GitDialog::CherryPickMerge {
+        id: "abc".into(),
+        parent: 1,
+        parents: 3,
+    });
+    let mut h = harness(w);
+    h.run();
+    assert!(h.query_by_label(s::CHERRY_PICK_MERGE_HELP).is_some());
+    h.get_by_label(&s::pick_parent(3)).click();
+    h.run();
+    assert!(matches!(
+        h.state().state.git_dialog,
+        Some(GitDialog::CherryPickMerge { parent: 3, .. })
+    ));
+    h.get_by_label(s::CHERRY_PICK).click();
+    h.run();
+    assert!(h.state().state.git_dialog.is_none(), "sent and closed");
 }

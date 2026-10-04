@@ -54,10 +54,17 @@ impl Repo {
             .is_some_and(|up| up == id || self.is_ancestor(id, &up))
     }
 
-    /// Whether moving the current branch to `id` drops commits already pushed.
+    /// Whether moving the current branch to `id` drops commits already pushed: the pushed
+    /// commits still on the branch end at the merge base of HEAD and its upstream.
     pub fn reset_drops_pushed(&self, id: &str) -> bool {
         self.upstream_oid()
-            .is_some_and(|up| up != id && !self.is_ancestor(&up, id))
+            .and_then(|up| self.merge_base(&self.rev("HEAD")?, &up))
+            .is_some_and(|base| base != id && !self.is_ancestor(&base, id))
+    }
+
+    fn merge_base(&self, a: &str, b: &str) -> Option<String> {
+        let (a, b) = (git2::Oid::from_str(a).ok()?, git2::Oid::from_str(b).ok()?);
+        self.git().merge_base(a, b).ok().map(|o| o.to_string())
     }
 
     /// Whether `ancestor` is `id` or one of its ancestors.

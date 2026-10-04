@@ -16,8 +16,10 @@ impl Worker {
     /// an error: the retry after a stash must not ask again).
     fn git_op(&mut self, cmd: Command, offer: bool) {
         match cmd {
-            Command::CherryPick(ref id) => {
-                self.history_op(s::NOTE_CHERRY_PICKED, &cmd, offer, |r| r.cherry_pick(id))
+            Command::CherryPick { ref id, mainline } => {
+                self.history_op(s::NOTE_CHERRY_PICKED, &cmd, offer, |r| {
+                    r.cherry_pick(id, mainline)
+                })
             }
             Command::Revert { ref id, mainline } => {
                 self.history_op(s::NOTE_REVERTED, &cmd, offer, |r| r.revert(id, mainline))

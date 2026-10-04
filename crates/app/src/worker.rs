@@ -347,7 +347,7 @@ impl Worker {
             Command::ForcePush => self.force_push(),
             Command::AbortOperation => self.abort_operation(),
             Command::ContinueRebase => self.continue_rebase(),
-            op @ (Command::CherryPick(_)
+            op @ (Command::CherryPick { .. }
             | Command::Revert { .. }
             | Command::Reset { .. }
             | Command::LoadResetInfo(_)

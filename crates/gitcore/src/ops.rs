@@ -110,9 +110,16 @@ impl Repo {
         Ok(c.parent_count() > 1)
     }
 
-    /// Copy commit `id` onto the current branch.
-    pub fn cherry_pick(&self, id: &str) -> Result<OpOutcome, GitError> {
-        let out = self.run_git(&["cherry-pick", id])?;
+    /// Copy commit `id` onto the current branch; a merge needs the parent its changes are
+    /// taken against (`mainline`, 1-based).
+    pub fn cherry_pick(&self, id: &str, mainline: Option<u32>) -> Result<OpOutcome, GitError> {
+        let m = mainline.map(|m| m.to_string());
+        let mut args = vec!["cherry-pick"];
+        if let Some(m) = &m {
+            args.extend(["-m", m]);
+        }
+        args.push(id);
+        let out = self.run_git(&args)?;
         self.outcome(out, Operation::CherryPick)
     }
 

@@ -111,7 +111,10 @@ pub enum Command {
     AbortOperation,
     ContinueRebase,
     // --- Sub-project 6c ---
-    CherryPick(String),
+    CherryPick {
+        id: String,
+        mainline: Option<u32>,
+    },
     /// `mainline`: parent to keep when reverting a merge (1-based).
     Revert {
         id: String,
