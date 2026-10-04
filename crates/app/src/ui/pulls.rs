@@ -2,6 +2,7 @@
 
 use egui::{Align2, Color32, ScrollArea, Sense, pos2, vec2};
 use github::{ChecksState, PrFilter, PrState, PrSummary, ReviewDecision};
+use win95::FlatRows;
 use win95::{Bevel, Button95, bevel_frame, combo_box};
 
 use super::Ctx;
@@ -230,7 +231,7 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
             let mut clicked = None;
             ScrollArea::vertical()
                 .auto_shrink([false, false])
-                .show_rows(ui, ROW_HEIGHT, p.list.len(), |ui, range| {
+                .show_rows_flat(ui, ROW_HEIGHT, p.list.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for pr in &p.list[range] {
                         let (rect, resp) = ui.allocate_exact_size(

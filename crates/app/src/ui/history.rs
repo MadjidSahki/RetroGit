@@ -2,6 +2,7 @@
 
 use egui::{Align2, Color32, Pos2, Rect, RichText, ScrollArea, Sense, Stroke, pos2, vec2};
 use gitcore::{GraphRow, LineKind, RefKind, SignatureStatus};
+use win95::FlatRows;
 use win95::{Bevel, bevel_frame, splitter};
 
 use super::Ctx;
@@ -118,7 +119,7 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             let mut last_visible = 0;
             ScrollArea::vertical()
                 .auto_shrink([false, false])
-                .show_rows(ui, ROW_HEIGHT, entries.len(), |ui, range| {
+                .show_rows_flat(ui, ROW_HEIGHT, entries.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for i in range {
                         last_visible = i;
@@ -375,7 +376,7 @@ pub fn diff_rows(
     ScrollArea::both()
         .id_salt(salt)
         .auto_shrink([false, false])
-        .show_rows(ui, super::diff_view::ROW_HEIGHT, rows.len(), |ui, range| {
+        .show_rows_flat(ui, super::diff_view::ROW_HEIGHT, rows.len(), |ui, range| {
             ui.spacing_mut().item_spacing.y = 0.0;
             for row in &rows[range] {
                 match *row {

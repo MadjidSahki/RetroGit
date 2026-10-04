@@ -2,6 +2,7 @@
 
 use egui::{RichText, ScrollArea};
 use gitcore::{Change, FileDiff, LineKind, Selection, Side};
+use win95::FlatRows;
 use win95::{Bevel, Button95, bevel_frame, checkbox};
 
 use super::Ctx;
@@ -157,11 +158,9 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             }
             let all_rows = rows(diff);
             let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
-            ScrollArea::both().auto_shrink([false, false]).show_rows(
-                ui,
-                ROW_HEIGHT,
-                all_rows.len(),
-                |ui, range| {
+            ScrollArea::both()
+                .auto_shrink([false, false])
+                .show_rows_flat(ui, ROW_HEIGHT, all_rows.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for row in &all_rows[range] {
                         match *row {
@@ -262,8 +261,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                             }
                         }
                     }
-                },
-            );
+                });
         },
     );
 

@@ -1,6 +1,7 @@
 use egui::{Align2, Id, Rect, ScrollArea, Sense, Ui, WidgetInfo, WidgetType, pos2, vec2};
 
 use crate::bevel::{self, Bevel};
+use crate::rows::FlatRows;
 use crate::theme;
 
 pub struct Column {
@@ -123,7 +124,7 @@ impl<'a> ListView<'a> {
         ScrollArea::vertical()
             .id_salt(self.id.with("scroll"))
             .auto_shrink([false, false])
-            .show_rows(ui, ROW_HEIGHT, self.row_count, |ui, range| {
+            .show_rows_flat(ui, ROW_HEIGHT, self.row_count, |ui, range| {
                 for row in range {
                     let (rect, resp) = ui.allocate_exact_size(
                         vec2(ui.available_width(), ROW_HEIGHT),

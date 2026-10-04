@@ -3,6 +3,7 @@
 use egui::{Color32, RichText, ScrollArea};
 use gitcore::LineKind;
 use github::{CheckStatus, DiffSide, PrDetail, PrState, ReviewState, TimelineItem};
+use win95::FlatRows;
 use win95::{Bevel, Button95, bevel_frame, label_chip, markdown_view, text_area};
 
 use super::Ctx;
@@ -697,7 +698,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     ScrollArea::both()
         .id_salt(("pull_file_diff", d.summary.number, &diff.path))
         .auto_shrink([false, false])
-        .show_rows(ui, ROW_HEIGHT, rows.len(), |ui, range| {
+        .show_rows_flat(ui, ROW_HEIGHT, rows.len(), |ui, range| {
             ui.spacing_mut().item_spacing.y = 0.0;
             for row in &rows[range] {
                 match *row {
