@@ -75,7 +75,9 @@ query PullDetail($owner: String!, $name: String!, $number: Int!) {
           diffSide
           startLine
           startDiffSide
-          comments(first: 50) { nodes { databaseId author { login } body createdAt } }
+          comments(first: 50) {
+            nodes { databaseId author { login ... on User { databaseId } } body createdAt }
+          }
         }
       }
     }

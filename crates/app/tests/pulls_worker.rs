@@ -633,6 +633,103 @@ mod checkout {
         );
     }
 
+    fn fetch_shown(evs: &[Event]) -> bool {
+        use retrogit::protocol::SyncOp;
+        evs.iter().any(|e| {
+            matches!(
+                e,
+                Event::SyncStarted {
+                    op: SyncOp::Fetch,
+                    background: false
+                }
+            )
+        }) && evs.iter().any(|e| {
+            matches!(
+                e,
+                Event::SyncFinished {
+                    op: SyncOp::Fetch,
+                    ok: true
+                }
+            )
+        })
+    }
+
+    fn behind_warning(evs: &[Event]) -> Option<String> {
+        evs.iter().find_map(|e| match e {
+            Event::Error {
+                during: Op::PullAction,
+                error,
+            } if error.severity == Severity::Warning => Some(error.message.clone()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn checkout_fetches_with_progress_like_fetch() {
+        let Some((_tmp, work)) = env() else { return };
+        let server = mockito::Server::new();
+        let w = start(&server, TokenProvider::without_gh());
+        w.send(Command::OpenRepo(work.clone()));
+        until(&w, |e| matches!(e, Event::SyncFinished { .. }));
+        for (number, head) in [(1, None), (2, Some("feat/x".to_string()))] {
+            w.send(Command::CheckoutPull { number, head });
+            let evs = until(&w, |e| matches!(e, Event::PullActionDone { .. }));
+            assert!(fetch_shown(&evs), "{evs:?}");
+            assert_eq!(behind_warning(&evs), None, "nothing local");
+        }
+    }
+
+    #[test]
+    fn a_pull_request_branch_with_local_commits_says_it_was_not_moved() {
+        let Some((_tmp, work)) = env() else { return };
+        let seed = work.parent().unwrap().join("seed");
+        let server = mockito::Server::new();
+        let w = start(&server, TokenProvider::without_gh());
+        w.send(Command::OpenRepo(work.clone()));
+        until(&w, |e| matches!(e, Event::SyncFinished { .. }));
+        for (number, head, branch) in [(1, None, "pr/1"), (2, Some("feat/x"), "feat/x")] {
+            let checkout = || Command::CheckoutPull {
+                number,
+                head: head.map(str::to_string),
+            };
+            w.send(checkout());
+            until(&w, |e| matches!(e, Event::PullActionDone { .. }));
+            // A local commit, then the author pushes again.
+            std::fs::write(work.join(format!("mine-{number}.txt")), "mine\n").unwrap();
+            git(&work, &["add", "-A"]);
+            git(&work, &["commit", "-q", "-m", "mine"]);
+            let remote = match head {
+                Some(b) => b.to_string(),
+                None => "refs/pull/1/head".to_string(),
+            };
+            git(
+                &seed,
+                &[
+                    "fetch",
+                    "-q",
+                    "origin",
+                    &format!("{remote}:theirs-{number}"),
+                ],
+            );
+            git(&seed, &["switch", "-q", &format!("theirs-{number}")]);
+            std::fs::write(seed.join(format!("theirs-{number}.txt")), "t\n").unwrap();
+            git(&seed, &["add", "-A"]);
+            git(&seed, &["commit", "-q", "-m", "theirs"]);
+            git(&seed, &["push", "-q", "origin", &format!("HEAD:{remote}")]);
+            git(&work, &["switch", "-q", "main"]);
+            w.send(checkout());
+            let evs = until(&w, |e| matches!(e, Event::PullActionDone { .. }));
+            assert_eq!(head_branch(&evs).as_deref(), Some(branch));
+            assert_eq!(
+                behind_warning(&evs),
+                Some(retrogit::strings::pr_branch_behind(branch)),
+                "{evs:?}"
+            );
+            assert!(work.join(format!("mine-{number}.txt")).exists(), "kept");
+            assert!(!work.join(format!("theirs-{number}.txt")).exists());
+        }
+    }
+
     #[test]
     fn local_changes_in_the_way_ask_to_stash() {
         let Some((_tmp, work)) = env() else { return };
@@ -822,6 +919,7 @@ mod suggestions {
             expected: vec!["b".into()],
             replacement: "B\n".into(),
             author: "bob".into(),
+            author_id: None,
         };
         // Not the pull request's branch: refused.
         w.send(apply("feat/x", &head));
@@ -857,6 +955,7 @@ mod suggestions {
             expected: vec!["a".into()],
             replacement: "A\n".into(),
             author: "carol".into(),
+            author_id: None,
         });
         let evs = until(&w, |e| {
             matches!(e, Event::PullActionDone { .. } | Event::Error { .. })
@@ -866,5 +965,124 @@ mod suggestions {
             "{evs:?}"
         );
         assert_eq!(std::fs::read_to_string(dir.join("a.rs")).unwrap(), "A\nB\n");
+    }
+
+    /// A repository of `ada` (the signed-in account) with `a.rs` = "a\nb\nc\n", open in
+    /// the worker. Origin is set after opening: no fetch reaches github.com.
+    fn ada_repo(
+        server: &mut mockito::Server,
+    ) -> (tempfile::TempDir, std::path::PathBuf, WorkerHandle) {
+        let d = tempfile::tempdir().unwrap();
+        let dir = retrogit::watch::canonical(d.path());
+        git(&dir, &["-c", "init.defaultBranch=main", "init", "-q"]);
+        for (k, v) in [
+            ("user.name", "Ada"),
+            ("user.email", "ada@example.com"),
+            ("commit.gpgsign", "false"),
+            ("core.hooksPath", ".git/hooks"),
+            ("core.autocrlf", "false"),
+        ] {
+            git(&dir, &["config", k, v]);
+        }
+        std::fs::write(dir.join("a.rs"), "a\nb\nc\n").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-q", "-m", "base"]);
+        let w = signed_in(server, TokenProvider::without_gh());
+        w.send(Command::OpenRepo(dir.clone()));
+        until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+        git(
+            &dir,
+            &["remote", "add", "origin", "https://github.com/ada/r.git"],
+        );
+        (d, dir, w)
+    }
+
+    fn suggest(
+        dir: &Path,
+        line: u32,
+        from: &str,
+        to: &str,
+        author: &str,
+        id: Option<u64>,
+    ) -> Command {
+        Command::ApplySuggestion {
+            number: 7,
+            head_branch: "main".into(),
+            head_sha: git(dir, &["rev-parse", "HEAD"]).trim().to_string(),
+            path: "a.rs".into(),
+            start: line,
+            end: line,
+            expected: vec![from.into()],
+            replacement: format!("{to}\n"),
+            author: author.into(),
+            author_id: id,
+        }
+    }
+
+    fn co_authors(dir: &Path) -> String {
+        git(
+            dir,
+            &["log", "-1", "--format=%(trailers:key=Co-authored-by)"],
+        )
+        .trim()
+        .to_string()
+    }
+
+    #[test]
+    fn suggestion_commits_credit_their_author_but_not_yourself_or_a_bot() {
+        if !gitcore::git_available() {
+            return;
+        }
+        let mut server = mockito::Server::new();
+        let (_d, dir, w) = ada_repo(&mut server);
+        w.send(suggest(&dir, 1, "a", "A", "bob", Some(41)));
+        let evs = until(&w, |e| {
+            matches!(e, Event::PullActionDone { .. } | Event::Error { .. })
+        });
+        assert!(
+            matches!(evs.last(), Some(Event::PullActionDone { .. })),
+            "{evs:?}"
+        );
+        assert_eq!(
+            git(&dir, &["log", "-1", "--format=%B"]).trim(),
+            "Apply suggestion from @bob\n\nCo-authored-by: bob <41+bob@users.noreply.github.com>"
+        );
+        // The repository's own account, then a bot (no user id): no trailer.
+        for (line, from, author, id) in [(2, "b", "Ada", Some(42)), (3, "c", "copilot", None)] {
+            w.send(suggest(&dir, line, from, "X", author, id));
+            let evs = until(&w, |e| {
+                matches!(e, Event::PullActionDone { .. } | Event::Error { .. })
+            });
+            assert!(
+                matches!(evs.last(), Some(Event::PullActionDone { .. })),
+                "{evs:?}"
+            );
+            assert_eq!(
+                git(&dir, &["log", "-1", "--format=%s"]).trim(),
+                format!("Apply suggestion from @{author}")
+            );
+            assert_eq!(co_authors(&dir), "", "{author}");
+        }
+    }
+
+    #[test]
+    fn a_suggestion_already_applied_says_so() {
+        if !gitcore::git_available() {
+            return;
+        }
+        let mut server = mockito::Server::new();
+        let (_d, dir, w) = ada_repo(&mut server);
+        let before = git(&dir, &["rev-parse", "HEAD"]);
+        w.send(suggest(&dir, 2, "b", "b", "bob", Some(41)));
+        let evs = until(&w, |e| {
+            matches!(e, Event::PullActionDone { .. } | Event::Error { .. })
+        });
+        assert!(
+            matches!(evs.last(), Some(Event::Error { error, .. })
+                if error.severity == Severity::Info
+                    && error.message == retrogit::strings::SUGGESTION_ALREADY_APPLIED),
+            "{evs:?}"
+        );
+        assert_eq!(git(&dir, &["rev-parse", "HEAD"]), before);
     }
 }

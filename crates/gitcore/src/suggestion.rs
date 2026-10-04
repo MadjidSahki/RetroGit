@@ -58,7 +58,8 @@ pub fn replace_lines(
 impl Repo {
     /// Replace lines `start..=end` of `path` by `replacement` and commit with `message`
     /// (through `git`: hooks and signing apply). Refused when the lines are no longer
-    /// `expected` (`SuggestionOutdated`), or when there are local changes (the commit must
+    /// `expected` (`SuggestionOutdated`), already read as the suggestion (`SuggestionApplied`:
+    /// nothing written), or when there are local changes (the commit must
     /// hold the suggestion only). A refused commit puts the file back.
     pub fn apply_suggestion(
         &self,
@@ -80,6 +81,9 @@ impl Repo {
             .map_err(|e| GitError::Other(format!("cannot read {path}: {e}")))?;
         let new = replace_lines(&content, start, end, expected, replacement)
             .ok_or(GitError::SuggestionOutdated)?;
+        if new == content {
+            return Err(GitError::SuggestionApplied);
+        }
         std::fs::write(&file, &new)
             .map_err(|e| GitError::Other(format!("cannot write {path}: {e}")))?;
         let committed = self

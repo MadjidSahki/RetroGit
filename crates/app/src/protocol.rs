@@ -272,6 +272,8 @@ pub enum Command {
         expected: Vec<String>,
         replacement: String,
         author: String,
+        /// The author's GitHub user id (`None` for bots): credited as co-author.
+        author_id: Option<u64>,
     },
     /// A line comment posted at once, outside a review.
     AddLineComment {
@@ -618,6 +620,9 @@ impl AppError {
             GitError::GitMissing => AppError::new(Severity::Warning, s::ERR_GIT_MISSING),
             GitError::MessageRefused { output } => {
                 AppError::new(Severity::Warning, s::ERR_REBASE_MESSAGE_REFUSED).with_detail(output)
+            }
+            GitError::SuggestionApplied => {
+                AppError::new(Severity::Info, s::SUGGESTION_ALREADY_APPLIED)
             }
             GitError::SuggestionOutdated => {
                 AppError::new(Severity::Warning, s::ERR_SUGGESTION_OUTDATED)

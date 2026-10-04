@@ -443,6 +443,24 @@ pub const NOTE_READY: &str = "Ready for review";
 pub const NOTE_DRAFT: &str = "Converted to draft";
 pub const NOTE_SUGGESTION_APPLIED: &str = "Suggestion applied - push to publish";
 pub const SUGGESTION_COMMIT: &str = "Apply suggestion from @{author}";
+pub const SUGGESTION_ALREADY_APPLIED: &str = "This suggestion is already applied.";
+
+/// Commit message of a suggestion: its author is credited as co-author, unless it is
+/// `viewer` (the repository's account) or has no GitHub user id (a bot).
+pub fn suggestion_commit(author: &str, author_id: Option<u64>, viewer: Option<&str>) -> String {
+    let subject = SUGGESTION_COMMIT.replace("{author}", author);
+    match author_id {
+        Some(id) if !viewer.is_some_and(|v| v.eq_ignore_ascii_case(author)) => format!(
+            "{subject}\n\nCo-authored-by: {author} <{id}+{author}@users.noreply.github.com>"
+        ),
+        _ => subject,
+    }
+}
+
+/// Checkout of a pull request whose local branch has commits of its own.
+pub fn pr_branch_behind(branch: &str) -> String {
+    format!("{branch} has local commits: it was not moved to the pull request's latest commit.")
+}
 pub const EDIT_PULL_TITLE: &str = "Edit pull request";
 pub const SAVE: &str = "Save";
 pub const EDIT_PULL: &str = "Edit";

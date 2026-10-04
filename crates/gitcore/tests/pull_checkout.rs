@@ -45,8 +45,11 @@ fn fetch_pull_creates_a_local_branch_from_refs_pull() {
     let Some(env) = Env::new() else { return };
     let head = push_pull_head(&env, 1, "a.txt", false);
     let r = env.repo();
-    let branch = r.fetch_pull(1, &NetAuth::default(), &no_cancel()).unwrap();
+    let (branch, behind) = r
+        .fetch_pull(1, &NetAuth::default(), |_| {}, &no_cancel())
+        .unwrap();
     assert_eq!(branch, "pr/1");
+    assert!(!behind);
     assert_eq!(rev(&env, "pr/1"), head);
     // Not switched: the user decides (local changes may need a stash).
     assert_eq!(r.current_branch().unwrap().name, "main");
@@ -57,10 +60,14 @@ fn fetch_pull_moves_an_existing_branch_forward_even_when_checked_out() {
     let Some(env) = Env::new() else { return };
     push_pull_head(&env, 2, "a.txt", false);
     let r = env.repo();
-    r.fetch_pull(2, &NetAuth::default(), &no_cancel()).unwrap();
+    r.fetch_pull(2, &NetAuth::default(), |_| {}, &no_cancel())
+        .unwrap();
     r.switch_branch("pr/2").unwrap();
     let newer = push_pull_head(&env, 2, "b.txt", false);
-    r.fetch_pull(2, &NetAuth::default(), &no_cancel()).unwrap();
+    let (_, behind) = r
+        .fetch_pull(2, &NetAuth::default(), |_| {}, &no_cancel())
+        .unwrap();
+    assert!(!behind, "moved forward");
     assert_eq!(rev(&env, "pr/2"), newer);
     assert!(env.work.join("b.txt").exists(), "working tree follows");
 }
@@ -70,17 +77,29 @@ fn a_force_pushed_pull_request_is_followed_unless_there_is_local_work() {
     let Some(env) = Env::new() else { return };
     push_pull_head(&env, 3, "a.txt", false);
     let r = env.repo();
-    r.fetch_pull(3, &NetAuth::default(), &no_cancel()).unwrap();
+    r.fetch_pull(3, &NetAuth::default(), |_| {}, &no_cancel())
+        .unwrap();
     // Force-push: history rewritten, nothing local on pr/3 -> follow.
     let rewritten = push_pull_head(&env, 3, "c.txt", true);
-    r.fetch_pull(3, &NetAuth::default(), &no_cancel()).unwrap();
+    let (_, behind) = r
+        .fetch_pull(3, &NetAuth::default(), |_| {}, &no_cancel())
+        .unwrap();
+    assert!(!behind, "followed");
     assert_eq!(rev(&env, "pr/3"), rewritten);
     // Local commit on pr/3, then another force-push: the local work is kept.
     r.switch_branch("pr/3").unwrap();
     env.local_commit("mine.txt", "mine\n");
     let mine = rev(&env, "pr/3");
+    // Not moved yet: local commits on top of the pull request are not "behind".
+    let (_, behind) = r
+        .fetch_pull(3, &NetAuth::default(), |_| {}, &no_cancel())
+        .unwrap();
+    assert!(!behind, "nothing new on the pull request");
     push_pull_head(&env, 3, "d.txt", true);
-    r.fetch_pull(3, &NetAuth::default(), &no_cancel()).unwrap();
+    let (_, behind) = r
+        .fetch_pull(3, &NetAuth::default(), |_| {}, &no_cancel())
+        .unwrap();
+    assert!(behind, "local commits kept pr/3 from following");
     assert_eq!(rev(&env, "pr/3"), mine);
 }
 
@@ -89,7 +108,7 @@ fn a_missing_pull_request_is_an_error() {
     let Some(env) = Env::new() else { return };
     assert!(
         env.repo()
-            .fetch_pull(99, &NetAuth::default(), &no_cancel())
+            .fetch_pull(99, &NetAuth::default(), |_| {}, &no_cancel())
             .is_err()
     );
 }

@@ -157,6 +157,8 @@ pub struct ThreadComment {
     /// REST id (replies are posted to it).
     pub id: u64,
     pub author: String,
+    /// The author's numeric user id (`None` for bots and deleted accounts).
+    pub author_id: Option<u64>,
     pub body: String,
     pub at: String,
 }
@@ -505,6 +507,7 @@ fn thread(t: &Value) -> ReviewThread {
             .map(|c| ThreadComment {
                 id: c["databaseId"].as_u64().unwrap_or_default(),
                 author: login(&c["author"]),
+                author_id: c["author"]["databaseId"].as_u64(),
                 body: text(&c["body"]),
                 at: text(&c["createdAt"]),
             })

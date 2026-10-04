@@ -275,6 +275,22 @@ fn a_long_title_keeps_edit_and_the_actions_on_screen() {
     }
 }
 
+#[test]
+fn checkout_is_greyed_while_a_network_operation_runs() {
+    use egui_kittest::kittest::NodeT;
+    let mut w = world(false);
+    w.state.sync.running = Some(retrogit::protocol::SyncOp::Fetch);
+    let mut h = harness(w);
+    h.run();
+    assert!(h.get_by_label(s::CHECKOUT).accesskit_node().is_disabled());
+    h.state_mut().state.sync.running = None;
+    h.run();
+    assert!(
+        !h.get_by_label(s::CHECKOUT).accesskit_node().is_disabled(),
+        "usable again"
+    );
+}
+
 fn fail_detail(w: &mut World, number: u64, message: &str) {
     w.state.apply(Event::Error {
         during: retrogit::protocol::Op::PullDetail(number),

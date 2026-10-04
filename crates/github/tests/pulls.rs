@@ -168,10 +168,12 @@ fn detail_json() -> serde_json::Value {
                       "isResolved": false, "isOutdated": false, "path": "src/a.rs",
                       "line": 12, "originalLine": 12, "diffSide": "RIGHT",
                       "comments": { "nodes": [
-                        { "databaseId": 991, "author": { "login": "bob" }, "body": "Why?",
-                          "createdAt": "2026-10-01T08:00:00Z" },
-                        { "databaseId": 992, "author": { "login": "ada" }, "body": "Because.",
-                          "createdAt": "2026-10-01T08:10:00Z" }
+                        { "databaseId": 991, "author": { "login": "bob", "databaseId": 41 },
+                          "body": "Why?", "createdAt": "2026-10-01T08:00:00Z" },
+                        { "databaseId": 992, "author": { "login": "ada", "databaseId": 42 },
+                          "body": "Because.", "createdAt": "2026-10-01T08:10:00Z" },
+                        { "databaseId": 993, "author": { "login": "copilot" }, "body": "Bot.",
+                          "createdAt": "2026-10-01T08:20:00Z" }
                       ] } },
                     { "isResolved": true, "isOutdated": true, "path": "src/b.rs",
                       "line": null, "originalLine": 3, "diffSide": "LEFT",
@@ -205,9 +207,12 @@ fn pull_detail_parses_timeline_threads_and_merge_options() {
     let mut server = mockito::Server::new();
     let m = server
         .mock("POST", "/graphql")
-        .match_body(Matcher::PartialJson(json!({
-            "variables": { "owner": "o", "name": "r", "number": 7 }
-        })))
+        .match_body(Matcher::AllOf(vec![
+            Matcher::PartialJson(json!({
+                "variables": { "owner": "o", "name": "r", "number": 7 }
+            })),
+            Matcher::Regex(r"author \{ login \.\.\. on User \{ databaseId \} \}".into()),
+        ]))
         .with_body(detail_json().to_string())
         .create();
     let d = client(&server).pull_detail("t", "o", "r", 7).unwrap();
@@ -247,6 +252,9 @@ fn pull_detail_parses_timeline_threads_and_merge_options() {
     assert_eq!(d.threads[0].line, Some(12));
     assert_eq!(d.threads[0].side, DiffSide::Right);
     assert_eq!(d.threads[0].comments[1].id, 992);
+    // Users have a numeric id (for Co-authored-by); bots are not users.
+    let ids: Vec<_> = d.threads[0].comments.iter().map(|c| c.author_id).collect();
+    assert_eq!(ids, [Some(41), Some(42), None]);
     assert_eq!(d.threads[0].id, "PRRT_1");
     assert!(d.threads[0].can_resolve && !d.threads[0].can_unresolve);
     assert!(!d.threads[1].can_resolve, "missing fields: not allowed");

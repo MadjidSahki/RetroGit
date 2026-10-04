@@ -217,7 +217,7 @@ fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
             .add(
                 Button95::new(s::CHECKOUT)
                     .min_size(size)
-                    .enabled(open && !busy),
+                    .enabled(open && !busy && cx.state.sync.running.is_none()),
             )
             .clicked()
         {
@@ -973,6 +973,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                                         .next()
                                         .unwrap_or_default(),
                                     author: comment.author.clone(),
+                                    author_id: comment.author_id,
                                 });
                             }
                         });
@@ -1078,12 +1079,14 @@ mod tests {
                 ThreadComment {
                     id: 1,
                     author: "bob".into(),
+                    author_id: None,
                     body: "Why?".into(),
                     at: String::new(),
                 },
                 ThreadComment {
                     id: 2,
                     author: "ada".into(),
+                    author_id: None,
                     body: "Because".into(),
                     at: String::new(),
                 },

@@ -133,3 +133,23 @@ fn each_line_keeps_its_own_ending() {
         "new lines take the ending of the line they replace"
     );
 }
+
+#[test]
+fn a_suggestion_already_applied_says_so_and_commits_nothing() {
+    if !gitcore::git_available() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let r = repo(d.path(), b"a\nb\n");
+    let before = git(d.path(), &["rev-parse", "HEAD"]);
+    assert_eq!(
+        r.apply_suggestion("a.rs", 2, 2, &lines(&["b"]), "b\n", "s"),
+        Err(GitError::SuggestionApplied)
+    );
+    assert_eq!(
+        std::fs::read_to_string(d.path().join("a.rs")).unwrap(),
+        "a\nb\n"
+    );
+    assert_eq!(git(d.path(), &["rev-parse", "HEAD"]), before, "no commit");
+    assert!(git(d.path(), &["status", "--porcelain"]).is_empty());
+}
