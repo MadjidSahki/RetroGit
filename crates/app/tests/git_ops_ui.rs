@@ -310,3 +310,31 @@ fn pushing_tags_shows_progress_then_the_result_in_the_window() {
     h.run();
     assert!(h.query_by_label("Pushed all tags to origin").is_some());
 }
+
+#[test]
+fn changing_the_reset_mode_forgets_the_hard_confirmation() {
+    let mut w = world();
+    w.state.git_dialog = Some(GitDialog::Reset {
+        id: "abc".into(),
+        mode: gitcore::ResetMode::Hard,
+        hard_confirmed: true,
+        drops_pushed: false,
+        overwrites: Vec::new(),
+    });
+    let mut h = harness(w);
+    h.run();
+    h.get_by_label(s::RESET_MIXED).click();
+    h.run();
+    h.get_by_label(s::RESET_HARD).click();
+    h.run();
+    let Some(GitDialog::Reset {
+        mode,
+        hard_confirmed,
+        ..
+    }) = &h.state().state.git_dialog
+    else {
+        panic!("{:?}", h.state().state.git_dialog)
+    };
+    assert_eq!(*mode, gitcore::ResetMode::Hard);
+    assert!(!hard_confirmed, "Hard asks again");
+}

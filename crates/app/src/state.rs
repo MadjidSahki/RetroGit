@@ -15,7 +15,7 @@ pub use conflicts::{ConflictConfirm, ConflictEditor, added_cr_before, text_as_di
 pub use explore::{
     ExploreView, FileView, HistoryFilter, SearchForm, SearchView, TreeRow, age_ranks, tree_rows,
 };
-pub use git_ops::{GitDialog, HistoryAction, StashesView, move_item};
+pub use git_ops::{GitDialog, HistoryAction, StashesView, move_item, pick_action};
 pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};
 pub use pulls::{
     CHECKS_REFRESH, PullDialog, PullTab, PullsView, default_merge_method, merge_defaults,

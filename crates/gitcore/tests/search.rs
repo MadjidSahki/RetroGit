@@ -172,3 +172,19 @@ fn case_insensitive_searches_understand_accents() {
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].id, c);
 }
+
+#[test]
+fn searching_commits_of_an_empty_repository_finds_nothing() {
+    let Some((_d, r)) = repo() else { return };
+    for kind in [
+        LogSearch::Message,
+        LogSearch::Author,
+        LogSearch::Hash,
+        LogSearch::ChangedText,
+    ] {
+        assert_eq!(
+            r.search_log(kind, "fix", 100, &NO).unwrap(),
+            (vec![], false)
+        );
+    }
+}

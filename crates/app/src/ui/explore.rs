@@ -215,7 +215,8 @@ fn tree(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                     if resp.clicked() {
                         match row.kind {
                             EntryKind::Dir => toggle = Some(row.path.clone()),
-                            EntryKind::File => open = Some(row.path.clone()),
+                            // A link shows its target, as `git show` does.
+                            EntryKind::File | EntryKind::Symlink => open = Some(row.path.clone()),
                             _ => {}
                         }
                     }
@@ -418,14 +419,9 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             let mut area = ScrollArea::both()
                 .id_salt(("explore_content", &e.rev, &code.path))
                 .auto_shrink([false, false]);
-            let key = egui::Id::new("explore_scrolled_to");
-            if let Some(line) = e.goto_line
-                && ui.ctx().data(|d| d.get_temp::<(String, usize)>(key))
-                    != Some((code.path.clone(), line))
-            {
+            let scroll = e.goto_line.filter(|_| e.scroll_pending);
+            if let Some(line) = scroll {
                 area = area.vertical_scroll_offset(((line as f32 - 5.0) * CODE_ROW).max(0.0));
-                ui.ctx()
-                    .data_mut(|d| d.insert_temp(key, (code.path.clone(), line)));
             }
             area.show_rows_flat(ui, CODE_ROW, lines.len(), |ui, range| {
                 ui.spacing_mut().item_spacing.y = 0.0;
@@ -448,6 +444,9 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                     crate::highlight::diff_row(ui, job, CODE_ROW, bg);
                 }
             });
+            if scroll.is_some() {
+                cx.state.explore.scroll_pending = false;
+            }
         }
     }
 }

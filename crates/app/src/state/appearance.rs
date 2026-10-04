@@ -89,6 +89,11 @@ impl AppState {
     pub fn zoom_key(&mut self, step: ZoomStep) {
         let mut a = self.config.appearance.clone();
         a.zoom = next_zoom(a.zoom(), step);
+        // An open Appearance window keeps it, on OK as on Cancel.
+        if let Some(d) = &mut self.appearance_dialog {
+            d.zoom = a.zoom;
+            d.before.zoom = a.zoom;
+        }
         self.set_appearance(a);
     }
 

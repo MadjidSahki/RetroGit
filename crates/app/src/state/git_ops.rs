@@ -1,6 +1,6 @@
 //! State of sub-project 6c: stashes, tags, and the dialogs of history operations.
 
-use gitcore::{ChangedFile, FileDiff, OpOutcome, ResetMode, StashEntry, TodoItem};
+use gitcore::{ChangedFile, FileDiff, OpOutcome, ResetMode, StashEntry, TodoAction, TodoItem};
 
 use super::{AppState, Tab};
 use crate::protocol::{AppError, Command, Event, Severity};
@@ -69,6 +69,14 @@ pub fn move_item(items: &mut [TodoItem], i: usize, up: bool) {
         items.swap(i, i - 1);
     } else if !up && i + 1 < items.len() {
         items.swap(i, i + 1);
+    }
+}
+
+/// The action chosen in a rebase line's menu; choosing the current one again keeps
+/// its typed message.
+pub fn pick_action(item: &mut TodoItem, a: TodoAction) {
+    if std::mem::discriminant(&a) != std::mem::discriminant(&item.action) {
+        item.action = a;
     }
 }
 
@@ -187,11 +195,14 @@ impl AppState {
                 items,
                 pushed,
             } => {
-                self.git_dialog = Some(GitDialog::Rebase {
-                    base,
-                    items,
-                    pushed,
-                });
+                // Another window opened meanwhile wins.
+                if self.git_dialog.is_none() {
+                    self.git_dialog = Some(GitDialog::Rebase {
+                        base,
+                        items,
+                        pushed,
+                    });
+                }
             }
             Event::StashesLoaded(list) => {
                 let v = &mut self.stashes;

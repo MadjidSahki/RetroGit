@@ -5,7 +5,7 @@ use win95::{Button95, Dialog, checkbox, combo_box, text_area, text_field};
 
 use super::Ctx;
 use crate::protocol::Command;
-use crate::state::{GitDialog, move_item};
+use crate::state::{GitDialog, move_item, pick_action};
 use crate::strings as s;
 
 const BUTTON: egui::Vec2 = egui::vec2(110.0, 23.0);
@@ -211,8 +211,10 @@ fn reset(
                 (ResetMode::Mixed, s::RESET_MIXED),
                 (ResetMode::Hard, s::RESET_HARD),
             ] {
-                if ui.selectable_label(mode == m, label).clicked() {
+                if ui.selectable_label(mode == m, label).clicked() && mode != m {
                     mode = m;
+                    // Hard asks again each time it is chosen.
+                    hard_confirmed = false;
                 }
             }
             if mode == ResetMode::Hard {
@@ -294,7 +296,7 @@ fn rebase(
                                 },
                             );
                             if let Some(a) = picked {
-                                item.action = a;
+                                pick_action(item, a);
                             }
                             let short: String = item.id.chars().take(7).collect();
                             ui.label(egui::RichText::new(short).monospace());

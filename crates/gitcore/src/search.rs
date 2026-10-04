@@ -123,6 +123,8 @@ impl Repo {
                 let id = hex.then(|| self.resolve(query)).flatten();
                 (id.into_iter().map(|id| self.entry(&id)).collect(), false)
             }
+            // An empty repository (HEAD not born yet): no commits to search.
+            _ if self.resolve("HEAD").is_none() => (Vec::new(), false),
             _ => {
                 let filter = match kind {
                     LogSearch::Message => format!("--grep={query}"),
