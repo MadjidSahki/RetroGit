@@ -120,8 +120,12 @@ fn world(draft: bool) -> World {
 }
 
 fn harness(w: World) -> Harness<'static, World> {
+    harness_sized(w, 1100.0)
+}
+
+fn harness_sized(w: World, width: f32) -> Harness<'static, World> {
     Harness::builder()
-        .with_size(egui::vec2(1100.0, 700.0))
+        .with_size(egui::vec2(width, 700.0))
         .build_ui_state(
             |ui, w: &mut World| {
                 let ctx = ui.ctx().clone();
@@ -245,6 +249,28 @@ fn a_hovered_commit_stays_readable_in_high_contrast_white() {
             win95::palette::contrast(c, p.selection) >= 4.5,
             "hovered row text {c:?} on {:?}",
             p.selection
+        );
+    }
+}
+
+#[test]
+fn a_long_title_keeps_edit_and_the_actions_on_screen() {
+    let mut w = world(false);
+    {
+        let pulls = &mut w.state.pulls;
+        let mut d = (**pulls.detail.as_ref().unwrap()).clone();
+        d.summary.title = "A very long pull request title that goes on and on ".repeat(6);
+        pulls.detail = Some(Arc::new(d));
+    }
+    // Narrow window (or Large size): the minimum window is 520 points wide.
+    let mut h = harness_sized(w, 760.0);
+    h.run();
+    let screen = h.ctx.content_rect();
+    for label in [s::EDIT_PULL, s::CHECKOUT, s::MERGE_PULL] {
+        let r = h.get_by_label(label).rect();
+        assert!(
+            r.right() <= screen.right() && r.left() >= screen.left(),
+            "{label} at {r:?}, screen {screen:?}"
         );
     }
 }

@@ -2,6 +2,7 @@
 
 mod appearance;
 mod conflicts;
+mod explore;
 mod git_ops;
 mod notifications;
 mod pulls;
@@ -10,6 +11,9 @@ mod sync;
 
 pub use appearance::{AppearanceDialog, SIZES, ZoomStep, next_zoom, size_label};
 pub use conflicts::{ConflictConfirm, ConflictEditor, text_as_diff};
+pub use explore::{
+    ExploreView, FileView, HistoryFilter, SearchForm, SearchView, TreeRow, age_ranks, tree_rows,
+};
 pub use git_ops::{GitDialog, HistoryAction, StashesView, move_item};
 pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};
 pub use pulls::{
@@ -210,6 +214,8 @@ pub struct AppState {
     // --- Sub-project 6c ---
     pub git_dialog: Option<GitDialog>,
     pub stashes: StashesView,
+    // --- Sub-project 6e ---
+    pub explore: ExploreView,
     pub tags: Vec<gitcore::Tag>,
     /// The Stashes tab asked for the list once (since the repository was opened).
     pub stashes_loaded: bool,
@@ -250,6 +256,7 @@ impl AppState {
             notifications: NotificationsView::default(),
             git_dialog: None,
             stashes: StashesView::default(),
+            explore: ExploreView::default(),
             tags: Vec::new(),
             stashes_loaded: false,
             accounts: Vec::new(),
@@ -429,6 +436,7 @@ impl AppState {
             | Event::StashFileDiffLoaded { .. }
             | Event::TagsLoaded(_)
             | Event::TagsStatus(_)) => self.apply_git_ops(ev),
+            Event::ExploreLoaded { repo, result } => self.explore_loaded(repo, result),
             Event::Error { during, error } => {
                 self.on_error(during);
                 self.messages.push_back(error);
@@ -486,6 +494,10 @@ impl AppState {
     /// Show `summary` as the current repo; the Changes screen restarts if it is another repo.
     fn switch_repo(&mut self, summary: RepoSummary) {
         self.remember(&summary);
+        if self.current.as_ref().map(|c| &c.path) == Some(&summary.path) {
+            // Same repository after a commit, checkout, pull...: Explore checks its version.
+            self.explore.refresh();
+        }
         if self.current.as_ref().map(|c| &c.path) != Some(&summary.path) {
             let warned = self.changes.warned_no_cli;
             self.changes = ChangesView {
@@ -501,6 +513,7 @@ impl AppState {
             self.repo_account = None;
             self.git_dialog = None;
             self.stashes = StashesView::default();
+            self.explore = ExploreView::default();
             self.tags.clear();
             self.stashes_loaded = false;
             let slug = summary

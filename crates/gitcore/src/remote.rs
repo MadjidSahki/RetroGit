@@ -336,7 +336,7 @@ impl Repo {
 }
 
 /// Kill git and every helper it started.
-fn kill_tree(child: &mut std::process::Child) {
+pub(crate) fn kill_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
     {
         // The child leads its own process group (see `process_group(0)`).

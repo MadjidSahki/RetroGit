@@ -138,11 +138,25 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
 fn header(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     let navy = win95::theme::palette(ui.ctx()).link;
     let busy = cx.state.pulls.busy;
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(format!("#{} {}", d.summary.number, d.summary.title))
-                .size(win95::theme::FONT_SIZE + 3.0)
-                .color(navy),
+    ui.horizontal_top(|ui| {
+        // The title wraps in the room left by the Edit button (a label in a horizontal
+        // layout never wraps: a long title used to push Edit off screen).
+        let reserve = if d.viewer_can_update { 70.0 } else { 0.0 };
+        let width = (ui.available_width() - reserve).max(80.0);
+        ui.allocate_ui_with_layout(
+            egui::vec2(width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_max_width(width);
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!("#{} {}", d.summary.number, d.summary.title))
+                            .size(win95::theme::FONT_SIZE + 3.0)
+                            .color(navy),
+                    )
+                    .wrap(),
+                );
+            },
         );
         if d.viewer_can_update && ui.add(Button95::new(s::EDIT_PULL).enabled(!busy)).clicked() {
             cx.state.pulls.dialog = Some(PullDialog::EditPull {

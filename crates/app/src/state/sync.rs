@@ -19,6 +19,7 @@ pub enum Tab {
     History,
     PullRequests,
     Stashes,
+    Explore,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +40,8 @@ pub struct HistoryView {
     pub detail_colors: crate::highlight::Colors,
     /// Share of the height given to the commit list.
     pub split: f32,
+    /// Search in: message, author, hash or changed text (6e).
+    pub filter: super::HistoryFilter,
 }
 
 impl Default for HistoryView {
@@ -56,6 +59,7 @@ impl Default for HistoryView {
             detail_diff: None,
             detail_colors: crate::highlight::Colors::NotRequested,
             split: 0.55,
+            filter: super::HistoryFilter::default(),
         }
     }
 }
@@ -202,6 +206,15 @@ impl AppState {
                     }
                     Target::History if self.stashes.diff.as_ref() == Some(&diff) => {
                         self.stashes.colors = value
+                    }
+                    Target::Explore if self.explore.code.as_ref() == Some(&diff) => {
+                        self.explore.colors = value
+                    }
+                    Target::ExploreBlame if self.explore.blame_code.as_ref() == Some(&diff) => {
+                        self.explore.blame_colors = value
+                    }
+                    Target::ExploreHistory if self.explore.history_diff.as_ref() == Some(&diff) => {
+                        self.explore.history_colors = value
                     }
                     Target::Pull if self.pulls.file_diff.as_ref() == Some(&diff) => {
                         self.pulls.file_colors = value

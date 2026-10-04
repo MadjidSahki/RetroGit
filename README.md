@@ -1,89 +1,127 @@
 # RetroGit
 
-<p align="center"><img src="docs/logo.png" alt="RetroGit logo" width="192"></p>
+<p align="center">
+  <img src="docs/logo.png" alt="RetroGit logo" width="192">
+</p>
 
-**A fast, lightweight Git client for macOS and Windows — with the look and feel of Windows 95.**
+<p align="center">
+  <b>A fast, lightweight Git client for macOS and Windows — with the look and feel of Windows 95.</b>
+</p>
 
-RetroGit is a native desktop Git client written in Rust. It is built for daily use:
-browse and clone your GitHub repositories, stage exactly the lines you want, commit with
-your hooks and signature, explore history on a commit graph, sync with GitHub, and
-review and merge pull requests — all in grey bevelled windows, a blue gradient title bar
-and a pixel font.
+<p align="center">
+  <a href="https://github.com/MadjidSahki/RetroGit/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/MadjidSahki/RetroGit/ci.yml?branch=main&label=CI" alt="CI"></a>
+  <a href="https://github.com/MadjidSahki/RetroGit/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-590%20passed-brightgreen" alt="Tests"></a>
+  <a href="https://github.com/MadjidSahki/RetroGit/releases/latest"><img src="https://img.shields.io/github/v/release/MadjidSahki/RetroGit?label=release" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows-blue" alt="Platforms">
+  <img src="https://img.shields.io/badge/rust-1.95%2B-orange" alt="Rust 1.95+">
+</p>
+
+RetroGit is a native desktop Git client written in Rust, built for daily use: clone your
+GitHub repositories, stage exactly the lines you want, commit with your hooks and signature,
+explore history, review and merge pull requests — all in grey bevelled windows, with a blue
+gradient title bar and a pixel font.
 
 > Screenshot: _coming soon_
 
-- Single native binary (~16 MB), no webview, no runtime
-- Idle CPU ≈ 0 % (redraws only when something changes)
-- macOS (Apple Silicon) and Windows (x86-64)
+- **Small and native** — a single ~16 MB binary, no webview, no runtime
+- **Quiet** — idle CPU ≈ 0 %: it redraws only when something changes
+- **Everywhere you work** — macOS (Apple Silicon) and Windows (x86-64)
+
+---
+
+## Contents
+
+- [Features](#features)
+- [Install](#install)
+- [Sign in to GitHub](#sign-in-to-github)
+- [Open from a terminal and in your IDE](#open-from-a-terminal-and-in-your-ide)
+- [Build from source](#build-from-source)
+- [Architecture](#architecture)
+- [Development](#development)
+- [Credits](#credits)
+
+---
 
 ## Features
 
-**GitHub accounts**
-- Sign in with GitHub in your browser (OAuth Device Flow), or paste a personal access token
-- Several accounts at once (e.g. personal and work): **File > Accounts...** to add or remove them
-- Each repository uses the right account automatically (one that can see it: its owner, a
-  member of its organization, or the first that has access), shown in the status bar and
-  changeable with **Repository > Account...**; pull requests, fetch, pull and push all use it
-- Tokens are stored in the macOS Keychain / Windows Credential Manager (one entry per
-  account), never on disk, never in logs
-- List the repositories of all your accounts in one list (with the accounts that see each),
-  filter, and clone with progress and cancel — or clone from an HTTPS URL (github.com SSH
-  URLs are cloned over HTTPS with the right account)
-- SSO-aware: tells you when an organization needs you to authorize the app, with the link
-- Organizations that restrict third-party OAuth apps: fetch, pull and push retry with your own git
-  credentials; pull requests use the [GitHub CLI](https://cli.github.com/) token of the same account
+### GitHub accounts
 
-**Local work**
-- Status with staged / unstaged / untracked files, refreshed automatically when files change
-- Unified diff with syntax highlighting (200+ languages) and per-line check boxes: stage or unstage a whole file, a hunk or single lines
-- Discard changes (file, hunk or lines), with confirmation; untracked files go to the trash
-- Commit through your installed `git`: hooks (`pre-commit`, husky, …) and GPG/SSH signing just work
-- Amend the last commit, add files or extensions to `.gitignore`
-- Shows whether your next commit will be signed; never creates an unsigned commit when signing is required
+- Sign in with your browser (OAuth Device Flow), or paste a personal access token.
+- **Several accounts at once** (personal and work): **File → Accounts…**.
+- Each repository picks the account that can see it automatically; change it with
+  **Repository → Account…**.
+- Tokens live in the macOS Keychain / Windows Credential Manager — never on disk, never in logs.
+- One list of the repositories of all your accounts: filter, then clone with progress and cancel.
+- SSO-aware, and works with organizations that restrict OAuth apps (see [below](#sign-in-to-github)).
 
-**History and sync**
-- Commit graph of all branches with colored lanes and ref labels, paged for large histories
-- Commit details: full message, signature status, changed files next to the colored diff of the selected file
-- Branches: create, switch (with stash-and-reapply when local changes are in the way), rename, delete, check out remote branches, publish new ones
-- Fetch (also automatically when a repository is opened), pull (fast-forward, or Merge / Rebase when branches diverged) and push, with progress and cancel
-- Conflicts are shown with Abort / Continue; force push is only offered after amending a pushed commit, and is protected by a lease
-- Resolve conflicts in RetroGit (merge, pull, rebase, stash and switch): conflicted files are listed apart in the Changes tab and open in a three-pane editor (Mine | Result | Theirs) with syntax colors
-  - per block: Use mine / theirs / both, Previous / Next, conflicts left; or keep one side for the whole file
-  - the result stays freely editable; Mark resolved stages it and opens the next conflicted file, then tells you to commit the merge or continue the rebase
-  - the sides are named after what they are: upstream / my commit during a rebase, current / my stash after a stash
-  - binary files and files deleted on one side offer the simple choices
-  - your edits are never lost silently: changes on disk are offered with Reload, and leaving the file, switching repository or aborting asks first
-- Right-click a commit in History to cherry-pick it, revert it (choosing the side to keep for a merge), reset the branch to it (soft, mixed, or hard after a confirmation, with a warning when pushed commits are dropped), start an interactive rebase from it, or tag it
-- Interactive rebase: reorder commits with Up / Down and pick, reword, squash (with an optional new message), fixup or drop each one; Start explains why it is disabled, and pushed commits are flagged. Repository → Interactive rebase rewrites the commits not yet pushed
-- Cherry-pick, revert and rebase in progress get Continue / Skip / Abort; their conflicts open in the conflict editor. When local changes are in the way, Stash and retry puts them aside first
-- Stashes tab: stash changes (optionally with untracked files), browse each stash's files and diff, apply, pop or drop it (the id of a dropped stash is shown to recover it)
-- Repository → Tags: list and filter tags, create lightweight or annotated tags, delete them (also on origin), push one or all
+### Local work
 
-**Pull requests** (github.com repositories)
-- List open, mine, review-requested or closed pull requests, with checks, review status, labels, author, target branch and age
-- Read the description (Markdown) and the conversation, the commits, the changed files with colored diffs and their line comments, and the checks with links to their runs
-- Create a pull request from the current branch: title, description, target branch, draft, labels, and publish the branch first if needed (an existing pull request for the branch is opened instead)
-- Comment on diff lines (right-click a line): post the comment at once, or add it to a review
-- Review: comment, approve or request changes (approving your own pull request is disabled, as on GitHub); reply to threads; resolve or unresolve conversations
-- Comment in the conversation; add and remove labels
-- Edit the title and description; see and change reviewers (with their review state) and assignees; mark a draft ready for review, or convert it back to a draft
-- Comment on several lines (click, then Shift+click, then right-click), and suggest changes: suggestions you receive show as a small diff and can be applied as a local commit on the checked-out pull request, ready to push
-- Merge, squash or rebase (as the repository allows), with editable commit title and message and optional branch deletion; the button is disabled with the reason when GitHub would refuse (draft, conflicts, required reviews or checks, out of date, no permission)
-- Check out a pull request: as its branch when it lives in the repository (brought up to date), or as `pr/<number>` for forks
+- Staged, unstaged and untracked files, refreshed as files change.
+- Colored diffs (200+ languages) with **line-level staging**: a file, a hunk or single lines.
+- Discard a file, a hunk or lines (with confirmation; untracked files go to the trash).
+- Commits go through your `git`: **hooks and GPG/SSH signing just work**.
+- Amend the last commit; add files or extensions to `.gitignore`.
 
-**Notifications**
-- While RetroGit is open, the pull requests of all your accounts are checked every 2 minutes: checks passed or failed, review received, new comment, merged or closed
-- Shown as system notifications and in the **Notifications** list (toolbar), which opens the pull request in its local clone, or on github.com
+### History and branches
 
-**Everyday comfort**
-- View → Appearance: six color schemes in the Windows 95 spirit (Windows Standard, Dark, High Contrast Black, High Contrast White, Slate, Rainy Day) with a live preview; the interface font (the W95FA pixel font, or Atkinson Hyperlegible for easier reading); the size (Small 100 %, Medium 125 %, Large 150 %, or Cmd/Ctrl + / − / 0 by steps of 10 %). Syntax colors switch to a dark theme with the dark schemes; the choice is saved
-- **Open in IDE**: VS Code, Cursor, Visual Studio, Rider, IntelliJ IDEA, WebStorm, PyCharm, GoLand, RustRover, Zed, Sublime Text, Xcode — detected automatically, choice remembered per repository
-- **`retrogit` command**: open the repository of the current folder from a terminal, in the window already open
-- Recent repositories list; window size and position remembered
+- Commit graph of all branches, with colored lanes and ref labels.
+- Commit details: message, signature status, changed files and their diff.
+- Branches: create, switch (stashing your changes if needed), rename, delete, publish.
+- Fetch, pull (fast-forward, merge or rebase) and push, with progress and cancel.
+- Right-click a commit to **cherry-pick, revert, reset, rebase interactively, tag it** or
+  **browse its files**.
+- **Interactive rebase**: reorder, pick, reword, squash, fixup or drop — pushed commits are flagged.
+- **Stashes** tab: stash, browse, apply, pop, drop.
+- **Tags**: create (lightweight or annotated), delete (also on origin), push.
+
+### Conflicts
+
+- A three-pane editor (**Mine | Result | Theirs**) for merges, pulls, rebases, stashes and switches.
+- Per block: use mine, theirs or both — or keep one side for the whole file.
+- The result stays editable; **Mark resolved** opens the next conflicted file.
+- Continue, Skip and Abort for merges, rebases, cherry-picks and reverts.
+- Your edits are never lost silently.
+
+### Explore the code
+
+- **Explore** tab: the files of any version — HEAD, a branch, a tag or a commit.
+- **Blame**: who changed each line, grouped by commit and shaded by age; go back with
+  **Blame the parent of this commit**.
+- **File history**, following renames, with the file's diff in each commit.
+- **Search in files**: exact text, match case, path filter; a click opens the file at the line.
+- **History filter**: find commits by message, author, hash or changed text.
+- Everything runs in the background and can be cancelled.
+
+### Pull requests
+
+- Lists: open, mine, review requested, closed — with checks, reviews and labels.
+- Read the description, the conversation, the commits, the files and the checks.
+- **Create** a pull request from the current branch (publishing it first if needed).
+- **Review**: comment on lines or ranges, approve, request changes, reply, resolve.
+- **Suggestions**: write them, and apply the ones you receive as a local commit.
+- Edit the title, description, reviewers, assignees, labels; draft ↔ ready for review.
+- **Merge, squash or rebase** — the button tells you why when GitHub would refuse.
+- Check out a pull request, forks included.
+
+### Notifications
+
+- Checks passed or failed, reviews, comments, merged or closed — for all your accounts.
+- As system notifications and in the **Notifications** list, which opens the pull request.
+
+### Comfort
+
+- **View → Appearance**: six color schemes in the Windows 95 spirit (including **Dark** and
+  two high-contrast schemes), the W95FA pixel font or **Atkinson Hyperlegible**, and the
+  size (Cmd/Ctrl + / − / 0).
+- **Open in IDE**: VS Code, Cursor, Visual Studio, JetBrains IDEs, Zed, Sublime Text, Xcode.
+- **`retrogit` command**: open the repository of the current folder from a terminal.
+- Recent repositories; window size and position remembered.
+
+---
 
 ## Install
 
-Download the latest build from the [Releases](../../releases) page.
+Download the latest build from the [Releases](../../releases) page:
 
 | Platform | File |
 |---|---|
@@ -92,53 +130,48 @@ Download the latest build from the [Releases](../../releases) page.
 
 The binaries are not code-signed yet:
 
-- **macOS**: unzip, then right-click `retrogit` → **Open** the first time, or run
-  `xattr -d com.apple.quarantine retrogit`.
-- **Windows**: if SmartScreen appears, click **More info** → **Run anyway**.
+- **macOS** — unzip, then right-click `retrogit` → **Open** the first time
+  (or run `xattr -d com.apple.quarantine retrogit`).
+- **Windows** — if SmartScreen appears, click **More info** → **Run anyway**.
 
 [Git](https://git-scm.com/) should be installed: RetroGit uses it for commits, branches and
-network operations (so your hooks, signing, SSH keys and credential helpers keep working).
-Without it, RetroGit can still browse history and stage files.
+network operations, so your hooks, signing, SSH keys and credential helpers keep working.
+
+---
+
+## Sign in to GitHub
+
+1. Open RetroGit: the **Sign in to GitHub** window appears.
+2. **Standard** tab → **Sign in**, then **Open browser**, enter the code and authorize RetroGit
+   (and your SSO organizations if needed).
+3. Or, in the **Advanced** tab, paste a personal access token (classic, scopes `repo` and `read:org`).
+
+> **Organizations that restrict OAuth apps.** Fetch, pull and push then retry with your own
+> git credentials, like `git` in a terminal. For pull requests, RetroGit uses the token of the
+> [GitHub CLI](https://cli.github.com/) when it is signed in (`gh auth login`) with the same
+> account — read when needed, never stored.
+
+---
 
 ## Open from a terminal and in your IDE
 
-**`retrogit` command.** Use **File → Install command line tool…** once (macOS asks for your
-administrator password to create `/usr/local/bin/retrogit`; Windows adds the command to your
-user `PATH`). Then, from any folder of a repository:
+Use **File → Install command line tool…** once, then from any folder of a repository:
 
 ```bash
 retrogit          # opens the repository of the current folder
 retrogit ../other # or another folder
 ```
 
-If RetroGit is already open, the repository opens in that window (and is added to the
-repository list); otherwise RetroGit starts. The terminal is not blocked.
+If RetroGit is already open, the repository opens in that window.
 
-**Open in IDE.** The toolbar button opens the repository in your editor. RetroGit detects
-installed IDEs (VS Code, Cursor, Visual Studio, Rider, IntelliJ IDEA, WebStorm, PyCharm,
-GoLand, RustRover, Zed, Sublime Text, Xcode) and remembers your choice for each repository.
+The **Open in IDE** toolbar button opens the repository in your editor; RetroGit detects the
+installed IDEs and remembers your choice per repository.
 
-## Sign in to GitHub
-
-1. Open RetroGit: the **Sign in to GitHub** window appears.
-2. **Standard** tab → **Sign in**: a code is shown. Click **Open browser**, enter the code and
-   authorize RetroGit (and the organizations you need, if they use SSO).
-3. Or use the **Advanced** tab to paste a personal access token (classic, scopes `repo` and
-   `read:org`, authorized for SSO if needed).
-
-**Organizations that restrict OAuth apps.** Some organizations block third-party OAuth apps
-until an owner approves them. RetroGit then cannot list or clone that organization's
-repositories with its sign-in. For fetch, pull and push on repositories you already have,
-RetroGit automatically retries with your own git credentials (Keychain, credential manager),
-like `git` in a terminal. For pull requests, RetroGit uses the token of the
-[GitHub CLI](https://cli.github.com/) when it is installed and signed in (`gh auth login`),
-since organizations usually approve it; the token is read from `gh` when needed and never
-stored. Otherwise, ask an organization owner to approve RetroGit, or sign in with a personal
-access token.
+---
 
 ## Build from source
 
-Requirements: [Rust](https://rustup.rs/) 1.95 or newer.
+Requires [Rust](https://rustup.rs/) 1.95 or newer.
 
 ```bash
 git clone https://github.com/MadjidSahki/RetroGit.git
@@ -153,20 +186,25 @@ To use your own GitHub OAuth App (Device Flow enabled, no client secret needed):
 RETROGIT_GITHUB_CLIENT_ID=<your client id> cargo build --release -p retrogit
 ```
 
+---
+
 ## Architecture
 
 A Cargo workspace with four crates:
 
 | Crate | Role |
 |---|---|
-| `crates/win95` | Windows 95 widget kit for [egui](https://github.com/emilk/egui): bevels, buttons, title bar, list view, dialogs, tabs, combo box, splitter… |
-| `crates/gitcore` | RetroGit's Git API: status, diff, line-level staging, commit, history and graph layout, branches, fetch/pull/push, cherry-pick/revert/reset, interactive rebase, stashes and tags. Reads with libgit2 ([git2](https://github.com/rust-lang/git2-rs)), writes with the `git` command line |
-| `crates/github` | GitHub client: REST (writes) and GraphQL (pull request reads), OAuth Device Flow, token storage, pull request watch |
-| `crates/app` | The application: state (a pure reducer), one background worker thread, and the screens |
+| `crates/win95` | Windows 95 widget kit for [egui](https://github.com/emilk/egui): bevels, buttons, title bar, lists, dialogs, tabs, color schemes |
+| `crates/gitcore` | Git API: status, diff, staging, commit, history, branches, sync, rebase, stashes, tags, blame, search. Reads with libgit2 ([git2](https://github.com/rust-lang/git2-rs)), writes with the `git` command line |
+| `crates/github` | GitHub client: REST and GraphQL, OAuth Device Flow, token storage, pull request watch |
+| `crates/app` | The application: state (a pure reducer), background workers and the screens |
 
-The UI thread never blocks: it sends commands to a single worker thread and applies the
-events it sends back. When RetroGit runs `git` for a github.com remote, it hands the token
-to git through `GIT_ASKPASS` (the RetroGit binary itself answers), never on the command line.
+- The UI thread never blocks: it sends commands to a worker thread and applies the events it
+  sends back; Explore requests run on their own threads.
+- For github.com remotes, the token reaches `git` through `GIT_ASKPASS` (answered by the
+  RetroGit binary itself), never on the command line.
+
+---
 
 ## Development
 
@@ -176,60 +214,19 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-The window and About icons are raw RGBA files made from the full logo (needs Pillow):
-`python3 scripts/make-icons.py path/to/retrogit.png`.
+- Tests use temporary repositories, a local bare remote and a mock HTTP server: no network needed.
+- `main` is protected: changes land through pull requests, each built and tested on macOS and Windows.
+- Each merge into `main` publishes a release `v<major>.<minor>.<run number>` with both binaries.
+- Icons are made from the full logo with `python3 scripts/make-icons.py path/to/retrogit.png` (needs Pillow).
 
-Tests use temporary repositories, a local bare remote and a mock HTTP server: no network
-access is needed. Tests that need the `git` command line are skipped when it is not installed.
-
-`main` is protected: changes land through pull requests only. Every pull request is built
-and tested on macOS and Windows; each merge into `main` is built again and publishes a new
-release `v<major>.<minor>.<run number>` with both binaries (only if both platforms pass).
+---
 
 ## Credits
 
-Syntax highlighting uses [syntect](https://github.com/trishume/syntect) with the syntax
-definitions and theme of [bat](https://github.com/sharkdp/bat) (through
-[two-face](https://codeberg.org/CosmicHarper/two-face)). The pixel font is
-[W95FA](https://fontsarena.com/w95fa-by-alina-sava/) by Alina Sava (SIL OFL 1.1); the
-readable font is [Atkinson Hyperlegible](https://www.brailleinstitute.org/freefont/) by the
-Braille Institute (SIL OFL 1.1). The logo includes the
-[Git logo](https://git-scm.com/downloads/logos) by Jason Long (CC BY 3.0).
+- Syntax highlighting: [syntect](https://github.com/trishume/syntect) with the syntaxes and
+  themes of [bat](https://github.com/sharkdp/bat) (through [two-face](https://codeberg.org/CosmicHarper/two-face)).
+- Fonts: [W95FA](https://fontsarena.com/w95fa-by-alina-sava/) by Alina Sava and
+  [Atkinson Hyperlegible](https://www.brailleinstitute.org/freefont/) by the Braille Institute (SIL OFL 1.1).
+- The logo includes the [Git logo](https://git-scm.com/downloads/logos) by Jason Long (CC BY 3.0).
+
 Licenses of embedded third-party data: [THIRD_PARTY.md](THIRD_PARTY.md).
-
-## Known limitations
-
-**Accounts and hosting**
-- The account of a repository is used for GitHub and Git network operations only: the
-  author of your commits is still your Git configuration (`user.name`, `user.email`).
-- github.com only: no GitHub Enterprise Server, GitLab or Bitbucket for sign-in, repository
-  lists and pull requests (plain Git operations work with any remote).
-- Without an account, the Pull Requests tab is unavailable (the GitHub CLI is only used for
-  your signed-in accounts). The GitHub CLI fallback needs `gh` 2.40 or newer, signed in
-  with the same account (`gh auth login`).
-
-**Pull requests**
-- Not supported: team reviewers, milestones, reactions; suggestions are applied one at a time
-  as local commits (not directly on GitHub).
-- Lists are limited to the 50 most recently updated pull requests, and a pull request to its
-  first 100 comments, reviews, review threads, commits and checks (repository labels: 100).
-- Markdown is simplified: no HTML, tables or inline images (images are shown as links).
-- Line comments waiting for a review are dropped when you select another pull request.
-- Commits of a fork's pull request open in History only after it has been checked out.
-- Checking out a pull request shows no progress and cannot be cancelled.
-
-**Notifications**
-- Only while RetroGit is open (no catch-up of what happened while it was closed).
-- macOS: they appear under "Script Editor", and clicking them does not open RetroGit (use the
-  Notifications list). Windows: they appear under "Windows PowerShell".
-
-**General**
-- Cloning works over HTTPS only (github.com SSH URLs are converted); fetch, pull and push
-  use your remotes as they are, SSH included.
-- Binaries are not code-signed or notarized. No Linux build.
-- The conflict editor has no word-level merge (blocks are Git's), no syntax colors above 5,000 lines, and inserts LF line endings when you type in a CRLF file.
-- Syntax highlighting is skipped for very large diffs (over 5,000 lines or 256 KB) and diffs
-  over 20,000 lines are only shown on request.
-- Interactive rebase refuses ranges containing merge commits, and cannot edit or split a commit (stop on it) nor exec commands.
-- Stashes cannot be applied partially, and tags cannot be signed from RetroGit.
-- History pages are recomputed on each reload; very large repositories (100k+ commits) may feel slow.

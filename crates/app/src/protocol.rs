@@ -450,6 +450,11 @@ pub enum Event {
         note: String,
     },
     /// Local changes prevent `retry` from starting (nothing was changed).
+    /// Answer of the explore service for the repository at `repo`.
+    ExploreLoaded {
+        repo: std::path::PathBuf,
+        result: ExploreResult,
+    },
     /// Result of a tag action, shown in the Tags window.
     TagsStatus(String),
     OpBlocked {
@@ -619,4 +624,86 @@ impl AppError {
     pub fn from_store(e: &TokenStoreError) -> AppError {
         AppError::new(Severity::Error, s::ERR_KEYCHAIN).with_detail(e)
     }
+}
+
+/// Requests to the explore service (its own threads: the worker stays free).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExploreRequest {
+    Refs,
+    Tree {
+        rev: String,
+    },
+    File {
+        rev: String,
+        path: String,
+    },
+    Blame {
+        rev: String,
+        path: String,
+    },
+    FileHistory {
+        rev: String,
+        path: String,
+    },
+    FileDiff {
+        commit: String,
+        path: String,
+    },
+    Grep {
+        rev: String,
+        text: String,
+        match_case: bool,
+        paths: String,
+    },
+    LogSearch {
+        kind: gitcore::LogSearch,
+        query: String,
+    },
+    CancelSearch,
+    CancelLogSearch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExploreResult {
+    Refs(Vec<gitcore::ExploreRef>),
+    Tree {
+        rev: String,
+        commit: String,
+        entries: Vec<gitcore::TreeEntry>,
+    },
+    File {
+        rev: String,
+        path: String,
+        content: gitcore::FileContent,
+    },
+    Blame {
+        rev: String,
+        path: String,
+        blocks: Vec<gitcore::BlameBlock>,
+    },
+    FileHistory {
+        rev: String,
+        path: String,
+        commits: Vec<gitcore::FileCommit>,
+    },
+    FileDiff {
+        commit: String,
+        path: String,
+        diff: FileDiff,
+    },
+    Grep {
+        rev: String,
+        text: String,
+        result: gitcore::GrepResult,
+    },
+    LogSearch {
+        kind: gitcore::LogSearch,
+        query: String,
+        entries: Vec<LogEntry>,
+        truncated: bool,
+    },
+    Failed {
+        request: ExploreRequest,
+        message: String,
+    },
 }
