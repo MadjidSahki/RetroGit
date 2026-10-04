@@ -36,6 +36,8 @@ pub enum Command {
     OpenRepo(PathBuf),
     // --- Sub-project 2: all apply to the repository opened last. ---
     RefreshStatus,
+    /// HEAD or refs changed outside RetroGit: reload branches, history, status, stashes.
+    RefreshRefs,
     LoadDiff {
         path: String,
         side: Side,
