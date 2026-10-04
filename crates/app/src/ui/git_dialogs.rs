@@ -443,6 +443,7 @@ fn delete_tag(
     back_to_tags: bool,
 ) -> Option<GitDialog> {
     let (mut ok, mut cancel) = (false, false);
+    let idle = cx.state.sync.running.is_none();
     let r = Dialog::new("delete_tag", s::DELETE_TAG_TITLE)
         .width(380.0)
         .show(egui_ctx, |ui| {
@@ -450,7 +451,9 @@ fn delete_tag(
             checkbox(ui, &mut remote, s::DELETE_TAG_REMOTE);
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ok = ui.add(Button95::new(s::DELETE).min_size(BUTTON)).clicked();
+                ok = ui
+                    .add(Button95::new(s::DELETE).min_size(BUTTON).enabled(idle))
+                    .clicked();
                 cancel = ui.add(Button95::new(s::CANCEL).min_size(BUTTON)).clicked();
             });
         });
@@ -548,8 +551,14 @@ fn tags(
                     });
                 }
                 let has = selected.is_some();
+                // One network operation at a time (Cancel is in the progress window).
+                let idle = cx.state.sync.running.is_none();
                 if ui
-                    .add(Button95::new(s::DELETE).min_size(BUTTON).enabled(has))
+                    .add(
+                        Button95::new(s::DELETE)
+                            .min_size(BUTTON)
+                            .enabled(has && idle),
+                    )
                     .clicked()
                     && let Some(name) = selected.clone()
                 {
@@ -560,14 +569,22 @@ fn tags(
                     });
                 }
                 if ui
-                    .add(Button95::new(s::PUSH_TAG).min_size(BUTTON).enabled(has))
+                    .add(
+                        Button95::new(s::PUSH_TAG)
+                            .min_size(BUTTON)
+                            .enabled(has && idle),
+                    )
                     .clicked()
                 {
                     cx.worker.send(Command::PushTags(selected.clone()));
                     status = Some(s::PUSHING_TAGS.to_string());
                 }
                 if ui
-                    .add(Button95::new(s::PUSH_ALL_TAGS).min_size(BUTTON))
+                    .add(
+                        Button95::new(s::PUSH_ALL_TAGS)
+                            .min_size(BUTTON)
+                            .enabled(idle),
+                    )
                     .clicked()
                 {
                     cx.worker.send(Command::PushTags(None));

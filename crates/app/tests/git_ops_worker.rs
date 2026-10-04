@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use github::{Client, MemoryAccounts, TokenProvider};
-use retrogit::protocol::{Command, Event};
+use retrogit::protocol::{Command, Event, SyncOp};
 use retrogit::worker::{WorkerDeps, WorkerHandle, spawn};
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -432,4 +432,92 @@ fn pushing_a_tag_reports_in_the_tags_window() {
         evs.last()
     );
     assert!(git(&bare, &["tag"]).contains("v1"));
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            Event::SyncStarted {
+                op: SyncOp::Push,
+                background: false
+            }
+        )),
+        "progress shown: {evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            Event::SyncFinished {
+                op: SyncOp::Push,
+                ok: true
+            }
+        )),
+        "{evs:?}"
+    );
+}
+
+/// A server that refuses to delete a ref it does not have, with git's own message.
+fn refuse_deleting_missing_refs(bare: &Path) {
+    let hooks = bare.join("hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    let hook = hooks.join("pre-receive");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\nwhile read old new ref; do\n  case \"$old$new\" in\n    *[!0]*) ;;\n    *) echo \"error: unable to delete '$ref': remote ref does not exist\" >&2; exit 1 ;;\n  esac\ndone\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    git(bare, &["config", "core.hooksPath", hooks.to_str().unwrap()]);
+}
+
+#[test]
+fn deleting_on_origin_a_tag_never_pushed_deletes_it_locally() {
+    let Some((d, dir)) = repo() else { return };
+    let bare = d.path().join("origin.git");
+    git(d.path(), &["init", "-q", "--bare", bare.to_str().unwrap()]);
+    refuse_deleting_missing_refs(&bare);
+    git(&dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git(&dir, &["tag", "v1"]);
+    git(&dir, &["tag", "v2"]);
+    let w = start(&dir);
+    w.send(Command::DeleteTag {
+        name: "v1".into(),
+        remote: true,
+    });
+    let evs = until(&w, |e| matches!(e, Event::TagsLoaded(_)));
+    assert!(
+        matches!(evs.last(), Some(Event::TagsLoaded(t)) if t.len() == 1 && t[0].name == "v2"),
+        "{evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            Event::SyncStarted {
+                op: SyncOp::Push,
+                ..
+            }
+        )),
+        "{evs:?}"
+    );
+    // A real failure keeps the local tag.
+    git(
+        &dir,
+        &["remote", "set-url", "origin", "/nowhere/origin.git"],
+    );
+    w.send(Command::DeleteTag {
+        name: "v2".into(),
+        remote: true,
+    });
+    let evs = until(&w, |e| matches!(e, Event::TagsLoaded(_)));
+    assert!(
+        evs.iter().any(|e| matches!(e, Event::Error { .. })),
+        "{evs:?}"
+    );
+    assert!(
+        matches!(evs.last(), Some(Event::TagsLoaded(t)) if t.len() == 1),
+        "{evs:?}"
+    );
+    assert!(git(&dir, &["tag"]).contains("v2"));
 }

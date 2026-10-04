@@ -96,16 +96,58 @@ fn tags_are_created_listed_deleted_and_pushed() {
         ]
     );
     let auth = NetAuth::default();
-    r.push_tag(&auth, "v1.0", &no_cancel()).unwrap();
+    r.push_tag(&auth, "v1.0", |_| {}, &no_cancel()).unwrap();
     let remote = git(&env.root.join("origin.git"), &["tag"]);
     assert_eq!(remote.trim(), "v1.0");
-    r.push_tags(&auth, &no_cancel()).unwrap();
+    r.push_tags(&auth, |_| {}, &no_cancel()).unwrap();
     assert_eq!(
         git(&env.root.join("origin.git"), &["tag"]).lines().count(),
         2
     );
-    r.delete_remote_tag(&auth, "light", &no_cancel()).unwrap();
+    r.delete_remote_tag(&auth, "light", |_| {}, &no_cancel())
+        .unwrap();
     r.delete_tag("light").unwrap();
     assert_eq!(git(&env.root.join("origin.git"), &["tag"]).trim(), "v1.0");
     assert_eq!(r.tags().unwrap().len(), 1);
+}
+
+/// A server that refuses to delete a ref it does not have, with git's own message.
+fn refuse_deleting_missing_refs(bare: &std::path::Path) {
+    let hooks = bare.join("hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    let hook = hooks.join("pre-receive");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\nwhile read old new ref; do\n  case \"$old$new\" in\n    *[!0]*) ;;\n    *) echo \"error: unable to delete '$ref': remote ref does not exist\" >&2; exit 1 ;;\n  esac\ndone\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    git(bare, &["config", "core.hooksPath", hooks.to_str().unwrap()]);
+}
+
+#[test]
+fn deleting_on_origin_a_tag_never_pushed_succeeds() {
+    let Some(env) = Env::new() else { return };
+    let r = env.repo();
+    let head = git(&env.work, &["rev-parse", "HEAD"]).trim().to_string();
+    r.create_tag("local-only", &head, None).unwrap();
+    let auth = NetAuth::default();
+    r.delete_remote_tag(&auth, "local-only", |_| {}, &no_cancel())
+        .unwrap();
+    refuse_deleting_missing_refs(&env.root.join("origin.git"));
+    let result = r.delete_remote_tag(&auth, "local-only", |_| {}, &no_cancel());
+    assert!(result.is_ok(), "{result:?}");
+    git(
+        &env.work,
+        &["remote", "set-url", "origin", "/nowhere/origin.git"],
+    );
+    assert!(
+        r.delete_remote_tag(&auth, "local-only", |_| {}, &no_cancel())
+            .is_err(),
+        "a real failure is still reported"
+    );
 }

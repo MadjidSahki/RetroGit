@@ -338,3 +338,36 @@ fn changing_the_reset_mode_forgets_the_hard_confirmation() {
     assert_eq!(*mode, gitcore::ResetMode::Hard);
     assert!(!hard_confirmed, "Hard asks again");
 }
+
+/// Every button with this label is greyed (the toolbar has a Push button too).
+fn disabled(h: &Harness<'static, World>, label: &str) -> bool {
+    use egui_kittest::kittest::NodeT;
+    h.get_all_by_label(label)
+        .all(|n| n.accesskit_node().is_disabled())
+}
+
+#[test]
+fn tag_buttons_are_greyed_while_a_network_operation_runs() {
+    let mut w = tags_world();
+    w.state.git_dialog = Some(GitDialog::Tags {
+        filter: String::new(),
+        selected: Some("v1.0".into()),
+        status: None,
+    });
+    w.state.sync.running = Some(retrogit::protocol::SyncOp::Push);
+    let mut h = harness(w);
+    h.run();
+    for label in [s::PUSH_TAG, s::PUSH_ALL_TAGS, s::DELETE] {
+        assert!(disabled(&h, label), "{label}");
+    }
+    h.state_mut().state.git_dialog = Some(GitDialog::DeleteTag {
+        name: "v1.0".into(),
+        remote: true,
+        back_to_tags: true,
+    });
+    h.run();
+    assert!(disabled(&h, s::DELETE));
+    h.state_mut().state.sync.running = None;
+    h.run();
+    assert!(!disabled(&h, s::DELETE), "usable again");
+}

@@ -4,7 +4,7 @@
 use gitcore::{GitError, OpOutcome, Repo};
 
 use super::Worker;
-use crate::protocol::{AppError, Command, Event, Op, Severity};
+use crate::protocol::{AppError, Command, Event, Op, Severity, SyncOp};
 use crate::strings as s;
 
 impl Worker {
@@ -130,18 +130,30 @@ impl Worker {
                 }
             }
             Command::DeleteTag { name, remote } => {
-                let Some(r) = self.open_current(Op::History) else {
-                    return;
-                };
-                let auth = self.repo_net_auth();
-                let never = std::sync::atomic::AtomicBool::new(false);
-                let result = (if remote {
-                    r.delete_remote_tag(&auth, &name, &never)
+                let r = if remote {
+                    let Some((r, result)) = self.network(SyncOp::Push, false, |r, a, p, c| {
+                        r.delete_remote_tag(a, &name, p, c)
+                    }) else {
+                        return;
+                    };
+                    // Origin refused or the network failed: the local tag is kept.
+                    if let Err(e) = result {
+                        self.tag_net_failed(&e);
+                        self.send_tags();
+                        return;
+                    }
+                    self.emit(Event::SyncFinished {
+                        op: SyncOp::Push,
+                        ok: true,
+                    });
+                    r
                 } else {
-                    Ok(())
-                })
-                .and_then(|()| r.delete_tag(&name));
-                match result {
+                    let Some(r) = self.open_current(Op::History) else {
+                        return;
+                    };
+                    r
+                };
+                match r.delete_tag(&name) {
                     Ok(()) => {
                         self.note(s::NOTE_TAG_DELETED);
                         self.emit(Event::TagsStatus(
@@ -157,17 +169,20 @@ impl Worker {
                 self.send_tags();
             }
             Command::PushTags(name) => {
-                let Some(r) = self.open_current(Op::Sync) else {
+                let Some((_r, result)) =
+                    self.network(SyncOp::Push, false, |r, a, p, c| match &name {
+                        Some(n) => r.push_tag(a, n, p, c),
+                        None => r.push_tags(a, p, c),
+                    })
+                else {
                     return;
-                };
-                let auth = self.repo_net_auth();
-                let never = std::sync::atomic::AtomicBool::new(false);
-                let result = match &name {
-                    Some(n) => r.push_tag(&auth, n, &never),
-                    None => r.push_tags(&auth, &never),
                 };
                 match result {
                     Ok(()) => {
+                        self.emit(Event::SyncFinished {
+                            op: SyncOp::Push,
+                            ok: true,
+                        });
                         self.note(s::NOTE_TAGS_PUSHED);
                         let text = match &name {
                             Some(n) => s::TAG_PUSHED_STATUS.replace("{name}", n),
@@ -175,14 +190,21 @@ impl Worker {
                         };
                         self.emit(Event::TagsStatus(text));
                     }
-                    Err(e) => {
-                        self.emit(Event::TagsStatus(s::TAG_ACTION_FAILED.into()));
-                        self.fail(Op::Sync, AppError::from_git(&e));
-                    }
+                    Err(e) => self.tag_net_failed(&e),
                 }
             }
             _ => {}
         }
+    }
+
+    /// A tag push or remote delete failed (or was cancelled): say so in the Tags window too.
+    fn tag_net_failed(&mut self, e: &GitError) {
+        let status = match e {
+            GitError::Cancelled => s::CANCELLED,
+            _ => s::TAG_ACTION_FAILED,
+        };
+        self.emit(Event::TagsStatus(status.into()));
+        self.net_failed(SyncOp::Push, false, e);
     }
 
     fn note(&self, note: &str) {

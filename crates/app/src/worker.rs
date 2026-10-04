@@ -61,9 +61,11 @@ impl WorkerHandle {
         match cmd {
             Command::StartDeviceFlow => self.cancel_flow.store(false, Ordering::SeqCst),
             Command::Clone { .. } => self.cancel_clone.store(false, Ordering::SeqCst),
-            Command::Fetch { .. } | Command::Pull(_) | Command::Push(_) => {
-                self.cancel_net.store(false, Ordering::SeqCst)
-            }
+            Command::Fetch { .. }
+            | Command::Pull(_)
+            | Command::Push(_)
+            | Command::PushTags(_)
+            | Command::DeleteTag { .. } => self.cancel_net.store(false, Ordering::SeqCst),
             // At most one refresh of each kind waiting in the queue; a refs refresh also
             // refreshes the status.
             Command::RefreshRefs if self.refs_pending.swap(true, Ordering::SeqCst) => return,
