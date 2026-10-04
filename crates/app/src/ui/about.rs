@@ -14,7 +14,7 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                 let logo = super::logo::logo_texture(ui.ctx());
                 ui.add(egui::Image::new(&logo).fit_to_exact_size(egui::vec2(96.0, 96.0)));
                 ui.vertical(|ui| {
-                    ui.label(format!("{} {}", s::APP_NAME, env!("CARGO_PKG_VERSION")));
+                    ui.label(format!("{} {}", s::APP_NAME, crate::version::version()));
                     ui.label(s::ABOUT_TAGLINE);
                     ui.add(egui::Label::new(s::ABOUT_FONT).wrap());
                 });

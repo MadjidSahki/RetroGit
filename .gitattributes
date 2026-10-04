@@ -1,2 +1,4 @@
 # Raw RGBA images: never convert line endings.
 *.rgba binary
+*.icns binary
+*.ico binary

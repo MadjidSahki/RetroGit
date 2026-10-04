@@ -36,7 +36,7 @@ fn main() -> eframe::Result {
         logging::init(&dir.join("retrogit.log"));
     }
     logging::install_panic_hook();
-    log::info!("RetroGit {} starting", env!("CARGO_PKG_VERSION"));
+    log::info!("RetroGit {} starting", retrogit::version::version());
     if let Ok(exe) = std::env::current_exe() {
         gitcore::set_askpass_program(exe);
     }
