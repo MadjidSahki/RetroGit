@@ -51,6 +51,8 @@ gradient title bar and a pixel font.
 - Each repository picks the account that can see it automatically; change it with
   **Repository → Account…**.
 - Tokens live in the macOS Keychain / Windows Credential Manager — never on disk, never in logs.
+  On macOS they are stored through Apple's `security` tool, like the GitHub CLI: updates do
+  not ask for your Keychain password again.
 - One list of the repositories of all your accounts: filter, then clone with progress and cancel.
 - SSO-aware, and works with organizations that restrict OAuth apps (see [below](#sign-in-to-github)).
 
@@ -106,7 +108,8 @@ gradient title bar and a pixel font.
 ### Notifications
 
 - Checks passed or failed, reviews, comments, merged or closed — for all your accounts.
-- As system notifications and in the **Notifications** list, which opens the pull request.
+- As system notifications under RetroGit's name — **a click opens the pull request** — and in
+  the **Notifications** list.
 
 ### Comfort
 
@@ -125,14 +128,24 @@ Download the latest build from the [Releases](../../releases) page:
 
 | Platform | File |
 |---|---|
-| macOS (Apple Silicon) | `RetroGit-macos-arm64.zip` |
-| Windows (x86-64) | `RetroGit-windows-x64.zip` |
+| macOS (Apple Silicon) | `RetroGit-macos-arm64.zip` — the `RetroGit.app` application |
+| Windows (x86-64) | `RetroGit-windows-x64-setup.exe` — installer (recommended) |
+| Windows (x86-64) | `RetroGit-windows-x64.zip` — portable `retrogit.exe` |
 
-The binaries are not code-signed yet:
+**macOS**
 
-- **macOS** — unzip, then right-click `retrogit` → **Open** the first time
-  (or run `xattr -d com.apple.quarantine retrogit`).
-- **Windows** — if SmartScreen appears, click **More info** → **Run anyway**.
+1. Unzip and drag **RetroGit.app** into **Applications**.
+2. The app is not notarized by Apple: the first time, macOS refuses to open it. Open
+   **System Settings → Privacy & Security** and click **Open Anyway** (on macOS 14 and
+   earlier, right-click the app → **Open**).
+3. Allow notifications when asked: they open the pull request when clicked.
+
+**Windows**
+
+- Run the **installer**: it installs RetroGit for your user only (no administrator rights),
+  adds it to the Start menu and to *Installed apps* (to uninstall it).
+- Or unzip the **portable** `retrogit.exe` anywhere.
+- The files are not code-signed: if SmartScreen appears, click **More info** → **Run anyway**.
 
 [Git](https://git-scm.com/) should be installed: RetroGit uses it for commits, branches and
 network operations, so your hooks, signing, SSH keys and credential helpers keep working.
@@ -218,6 +231,9 @@ cargo test --workspace
 - `main` is protected: changes land through pull requests, each built and tested on macOS and Windows.
 - Each merge into `main` publishes a release `v<major>.<minor>.<run number>` with both binaries.
 - Icons are made from the full logo with `python3 scripts/make-icons.py path/to/retrogit.png` (needs Pillow).
+- `scripts/package-macos.sh <binary> <version> <dir>` builds and signs `RetroGit.app` (ad-hoc,
+  or `MACOS_SIGN_IDENTITY`); `installer/retrogit.iss` is the Windows installer (Inno Setup 6),
+  checked by `installer/test-install.ps1` in the CI.
 
 ---
 
