@@ -50,6 +50,78 @@ impl Repo {
         })
     }
 
+    /// Like `run_git`, but the process is killed (`GitError::Cancelled`) as soon as `cancel`
+    /// is set. For long reads: blame, log searches, grep.
+    pub(crate) fn run_git_cancel(
+        &self,
+        args: &[&str],
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<GitOutput, GitError> {
+        use std::io::Read;
+        use std::sync::atomic::Ordering;
+        if !crate::git_available() {
+            return Err(GitError::GitMissing);
+        }
+        if cancel.load(Ordering::Relaxed) {
+            return Err(GitError::Cancelled);
+        }
+        let mut cmd = crate::commit::git_command();
+        cmd.arg("-C")
+            .arg(self.workdir()?)
+            .args(args)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("LC_ALL", "C")
+            .env("LANGUAGE", "C");
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
+        let mut child = cmd
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| GitError::Other(format!("cannot run git: {e}")))?;
+        let mut stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| GitError::Other("no stdout".into()))?;
+        let mut stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| GitError::Other("no stderr".into()))?;
+        let out_reader = std::thread::spawn(move || {
+            let mut b = Vec::new();
+            let _ = stdout.read_to_end(&mut b);
+            b
+        });
+        let err_reader = std::thread::spawn(move || {
+            let mut b = Vec::new();
+            let _ = stderr.read_to_end(&mut b);
+            b
+        });
+        let status = loop {
+            if cancel.load(Ordering::Relaxed) {
+                crate::remote::kill_tree(&mut child);
+                let _ = child.wait();
+                return Err(GitError::Cancelled);
+            }
+            match child.try_wait() {
+                Ok(Some(s)) => break s,
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                Err(e) => return Err(GitError::Other(format!("git failed: {e}"))),
+            }
+        };
+        let stdout = String::from_utf8_lossy(&out_reader.join().unwrap_or_default()).into_owned();
+        let err = String::from_utf8_lossy(&err_reader.join().unwrap_or_default()).into_owned();
+        Ok(GitOutput {
+            success: status.success(),
+            text: format!("{stdout}{err}").trim().to_string(),
+            stdout,
+        })
+    }
+
     /// Like `run_git`, but a failure becomes `GitError::Other(output)`.
     pub(crate) fn git_ok(&self, args: &[&str]) -> Result<GitOutput, GitError> {
         let out = self.run_git(args)?;

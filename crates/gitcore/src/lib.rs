@@ -9,6 +9,7 @@ mod conflict;
 mod diff;
 mod discard;
 mod error;
+mod explore;
 mod github;
 mod graph;
 mod ignore;
@@ -54,6 +55,10 @@ pub use commit::{
 };
 pub use diff::{DiffLine, FileDiff, Hunk, LineKind, Side};
 pub use error::GitError;
+pub use explore::{
+    BlameBlock, EntryKind, FileCommit, FileContent, MAX_FILE_BYTES, TreeEntry,
+    parse_blame_porcelain,
+};
 pub use repo::{CommitInfo, Head, Repo, RepoSummary};
 pub use stage::{Direction, Selection, apply_selection, selectable_lines};
 pub use status::{Change, FileStatus};
