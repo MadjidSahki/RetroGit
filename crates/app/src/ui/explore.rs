@@ -3,6 +3,7 @@
 
 use egui::{Align2, Color32, Rect, RichText, ScrollArea, Sense, Stroke, pos2, vec2};
 use gitcore::{EntryKind, FileContent, LogSearch};
+use win95::FlatRows;
 use win95::{Bevel, Button95, Dialog, bevel_frame, checkbox, combo_box, text_field};
 
 use super::Ctx;
@@ -177,7 +178,7 @@ fn tree(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         ScrollArea::both()
             .id_salt("explore_tree_scroll")
             .auto_shrink([false, false])
-            .show_rows(ui, ROW, rows.len(), |ui, range| {
+            .show_rows_flat(ui, ROW, rows.len(), |ui, range| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for row in &rows[range] {
                     let indent = 4.0 + row.depth as f32 * 16.0;
@@ -426,7 +427,7 @@ fn content(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                 ui.ctx()
                     .data_mut(|d| d.insert_temp(key, (code.path.clone(), line)));
             }
-            area.show_rows(ui, CODE_ROW, lines.len(), |ui, range| {
+            area.show_rows_flat(ui, CODE_ROW, lines.len(), |ui, range| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for i in range {
                     let text = lines[i].text.trim_end_matches(['\n', '\r']);
@@ -515,7 +516,7 @@ fn blame(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         ScrollArea::both()
             .id_salt(("explore_blame", e.blame_target()))
             .auto_shrink([false, false])
-            .show_rows(ui, CODE_ROW, rows.len(), |ui, range| {
+            .show_rows_flat(ui, CODE_ROW, rows.len(), |ui, range| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for i in range {
                     let (b, l) = rows[i];

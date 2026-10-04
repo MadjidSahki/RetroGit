@@ -319,3 +319,36 @@ fn browse_files_at_a_commit_opens_explore_there() {
     assert_eq!(w.state.tab, Tab::Explore);
     assert_eq!(w.state.explore.rev, e.id);
 }
+
+#[test]
+fn code_rows_reach_the_bottom_of_their_frame() {
+    let mut w = world();
+    w.state.explore.open_file("README.md");
+    let text: String = (1..=400).map(|i| format!("line {i}\n")).collect();
+    loaded(
+        &mut w.state,
+        ExploreResult::File {
+            rev: "c0ffee1234".into(),
+            path: "README.md".into(),
+            content: FileContent::Text(text),
+        },
+    );
+    let mut h = harness(w);
+    h.run();
+    let mut clip = None;
+    let mut bottom = 0.0f32;
+    for c in &h.output().shapes {
+        if let egui::Shape::Text(t) = &c.shape
+            && t.galley.job.text.contains("  line ")
+        {
+            clip = Some(c.clip_rect);
+            bottom = bottom.max(t.pos.y + t.galley.size().y);
+        }
+    }
+    let clip = clip.unwrap();
+    assert!(
+        bottom >= clip.bottom() - 17.0,
+        "last row ends at {bottom}, the area at {}",
+        clip.bottom()
+    );
+}

@@ -4,6 +4,7 @@ use egui::{Color32, Panel, RichText, ScrollArea, TextEdit};
 #[cfg(test)]
 use gitcore::parse_conflicts;
 use gitcore::{Choice, ConflictKind, Operation, Pane, Pick, Segment, block_lines};
+use win95::FlatRows;
 use win95::{Bevel, Button95, Dialog, bevel_frame};
 
 use super::Ctx;
@@ -351,7 +352,7 @@ fn side_pane(
         }
         ui.ctx().data_mut(|d| d.insert_temp(key, target));
     }
-    area.show_rows(ui, ROW, lines.len(), |ui, range| {
+    area.show_rows_flat(ui, ROW, lines.len(), |ui, range| {
         ui.spacing_mut().item_spacing.y = 0.0;
         for i in range {
             let job = crate::highlight::colored_line(
