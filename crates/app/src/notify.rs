@@ -68,12 +68,31 @@ pub fn parse_pull_link(url: &str) -> Option<PullLink> {
             _ => {}
         }
     }
-    let repo = repo.filter(|r| r.contains('/'))?;
+    let repo = repo.filter(|r| valid_repo(r))?;
     Some(PullLink {
         repo,
-        number: number?,
+        number: number.filter(|n| *n >= 1)?,
         account,
     })
+}
+
+/// `owner/repo` as GitHub allows them: owner `[A-Za-z0-9-]{1,39}`, repository
+/// `[A-Za-z0-9._-]{1,100}` other than `.` and `..`.
+fn valid_repo(r: &str) -> bool {
+    let Some((owner, name)) = r.split_once('/') else {
+        return false;
+    };
+    let owner_ok = (1..=39).contains(&owner.len())
+        && owner
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-');
+    let name_ok = (1..=100).contains(&name.len())
+        && name != "."
+        && name != ".."
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+    owner_ok && name_ok
 }
 
 /// The link of a notification for `e`.

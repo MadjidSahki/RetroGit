@@ -58,8 +58,16 @@ pub fn reg_add_args(e: &RegEntry) -> Vec<String> {
     args
 }
 
+/// Escapes markup; characters XML 1.0 forbids (and tabs, line breaks) become a space, or
+/// Windows would refuse the whole toast.
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
+    s.chars()
+        .map(|c| match c {
+            '\u{0}'..='\u{1f}' | '\u{fffe}' | '\u{ffff}' => ' ',
+            c => c,
+        })
+        .collect::<String>()
+        .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")

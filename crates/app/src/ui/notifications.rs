@@ -109,7 +109,7 @@ pub fn open_links(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             crate::notify::parse_pull_link(&link),
         ) {
             (Some(target), Some(l)) => open_target(egui_ctx, cx, &l.repo, target),
-            _ => log::info!("ignored notification link {link}"),
+            _ => log::warn!("ignored notification link (not a valid pull request link): {link}"),
         }
     }
 }

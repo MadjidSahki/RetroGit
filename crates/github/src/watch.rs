@@ -27,6 +27,8 @@ pub struct PrSnapshot {
     pub url: String,
     pub state: PrState,
     pub merged_by: Option<String>,
+    /// Who closed it without merging (`None`: unknown, a bot or a deleted account).
+    pub closed_by: Option<String>,
     /// Last commit of the head branch.
     pub head: String,
     pub checks: ChecksState,
@@ -92,10 +94,13 @@ pub fn diff_snapshots(prev: &[PrSnapshot], next: &[PrSnapshot], me: &str) -> Vec
             })
         };
         if p.state == PrState::Open && n.state != PrState::Open {
-            let by_me = n.merged_by.as_deref().is_some_and(mine);
             match n.state {
-                PrState::Merged if !by_me => push(PrEventKind::Merged),
-                PrState::Closed => push(PrEventKind::Closed),
+                PrState::Merged if !n.merged_by.as_deref().is_some_and(mine) => {
+                    push(PrEventKind::Merged)
+                }
+                PrState::Closed if !n.closed_by.as_deref().is_some_and(mine) => {
+                    push(PrEventKind::Closed)
+                }
                 _ => {}
             }
             continue;
@@ -176,6 +181,9 @@ fn snapshot(n: &serde_json::Value) -> PrSnapshot {
         url: text(&n["url"]),
         state: pr_state(&n["state"]),
         merged_by: n["mergedBy"]["login"].as_str().map(str::to_string),
+        closed_by: n["timelineItems"]["nodes"][0]["actor"]["login"]
+            .as_str()
+            .map(str::to_string),
         head: text(&n["commits"]["nodes"][0]["commit"]["oid"]),
         checks: checks_state(rollup),
         failed_checks,
@@ -215,6 +223,7 @@ mod tests {
             url: format!("https://github.com/o/r/pull/{n}"),
             state: PrState::Open,
             merged_by: None,
+            closed_by: None,
             head: "h1".into(),
             checks: ChecksState::Pending,
             failed_checks: 0,

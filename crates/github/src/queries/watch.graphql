@@ -9,6 +9,7 @@ query WatchPulls($q: String!) {
         repository { nameWithOwner }
         author { login }
         mergedBy { login }
+        timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) { nodes { ... on ClosedEvent { actor { login } } } }
         comments(last: 1) { totalCount nodes { author { login } } }
         reviews(last: 1) { totalCount nodes { author { login } state } }
         commits(last: 1) {
