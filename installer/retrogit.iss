@@ -56,3 +56,11 @@ Root: HKCU; Subkey: "Software\Classes\retrogit\shell\open\command"; ValueType: s
 
 [Run]
 Filename: "{app}\retrogit.exe"; Description: "{cm:LaunchProgram,RetroGit}"; Flags: nowait postinstall skipifsilent
+; Updates from RetroGit run the installer silently with /RELAUNCH: start the new version.
+Filename: "{app}\retrogit.exe"; Flags: nowait; Check: IsRelaunch
+
+[Code]
+function IsRelaunch: Boolean;
+begin
+  Result := Pos('/RELAUNCH', UpperCase(GetCmdTail)) > 0;
+end;

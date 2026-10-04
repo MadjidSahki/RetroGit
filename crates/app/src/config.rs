@@ -52,6 +52,26 @@ pub struct Config {
     pub repo_accounts: std::collections::BTreeMap<String, github::RepoAccount>,
     /// View > Appearance.
     pub appearance: AppearanceConfig,
+    /// Update checks (6g).
+    pub updates: UpdatesConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdatesConfig {
+    /// Check for a new version at start and every day.
+    pub check: bool,
+    /// Version the user chose to skip.
+    pub skipped: Option<String>,
+}
+
+impl Default for UpdatesConfig {
+    fn default() -> Self {
+        UpdatesConfig {
+            check: true,
+            skipped: None,
+        }
+    }
 }
 
 /// Saved appearance, by name (unknown names fall back to the defaults).

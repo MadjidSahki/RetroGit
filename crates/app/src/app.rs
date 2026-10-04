@@ -9,6 +9,12 @@ use crate::ui::{self, Ctx};
 use crate::watch::Watcher;
 use crate::worker::WorkerHandle;
 
+enum InstallMsg {
+    Progress(u64, Option<u64>),
+    Downloaded,
+    Done(Result<Option<Vec<String>>, String>),
+}
+
 pub struct RetroGitApp {
     state: AppState,
     worker: WorkerHandle,
@@ -30,6 +36,17 @@ pub struct RetroGitApp {
     /// Pull request events from the watcher thread.
     pr_events: Option<std::sync::mpsc::Receiver<Vec<github::PrEvent>>>,
     _pr_watcher: Option<crate::pr_watch::PrWatcher>,
+    /// Update checks (6g) and their answers.
+    updates: Option<crate::update::Checker>,
+    update_results:
+        Option<std::sync::mpsc::Receiver<(Result<crate::update::Release, String>, bool)>>,
+    /// Follows the "Check for updates automatically" setting.
+    updates_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The installation running: its progress and result, and how to cancel it.
+    installing: Option<(
+        std::sync::mpsc::Receiver<InstallMsg>,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+    )>,
     /// Appearance and zoom last applied to the egui context.
     applied: Option<(win95::theme::Appearance, f32)>,
 }
@@ -81,6 +98,10 @@ impl RetroGitApp {
             watcher: None,
             was_focused: true,
             applied: None,
+            updates: None,
+            update_results: None,
+            updates_enabled: Default::default(),
+            installing: None,
         };
         // Saved scheme, font and zoom in place before the window first shows.
         app.sync_appearance(&ides_ctx_for_appearance);
@@ -109,6 +130,34 @@ impl RetroGitApp {
             }
             Err(e) => log::warn!("single-instance listener not started: {e}"),
         }
+        self
+    }
+
+    /// Check GitHub for a newer RetroGit 30 s after start, then every day (if enabled).
+    pub fn with_updates(mut self, api: &str, ctx: egui::Context) -> RetroGitApp {
+        if let Ok(exe) = std::env::current_exe() {
+            let kind = crate::update::install_kind(std::env::consts::OS, &exe, |p| p.exists());
+            // What an earlier update left behind (the old copy, the work folder).
+            crate::update::cleanup(&kind);
+            self.state.update.can_replace = crate::update::can_replace(&kind);
+            self.state.update.kind = kind;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let enabled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            self.state.config.updates.check,
+        ));
+        self.updates_enabled = enabled.clone();
+        self.updates = Some(crate::update::Checker::start(
+            api.to_string(),
+            std::time::Duration::from_secs(30),
+            std::time::Duration::from_secs(24 * 3600),
+            move || enabled.load(std::sync::atomic::Ordering::SeqCst),
+            move |result, manual| {
+                let _ = tx.send((result, manual));
+                ctx.request_repaint();
+            },
+        ));
+        self.update_results = Some(rx);
         self
     }
 
@@ -160,6 +209,77 @@ impl RetroGitApp {
             };
             (path, w)
         });
+    }
+
+    /// Start the installation when asked (and the worker is free), follow it, and quit once
+    /// the new version runs.
+    fn drive_install(&mut self, ctx: &egui::Context) {
+        use std::sync::atomic::Ordering;
+        if self.state.take_install(self.worker.is_busy())
+            && let Some(release) = self.state.update.available.clone()
+        {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let (kind, stop, wake) = (self.state.update.kind.clone(), cancel.clone(), ctx.clone());
+            std::thread::spawn(move || {
+                let progress_tx = tx.clone();
+                let progress_wake = wake.clone();
+                let downloaded_tx = tx.clone();
+                let result = crate::update::install(
+                    &kind,
+                    &release,
+                    &stop,
+                    |done, total| {
+                        let _ = progress_tx.send(InstallMsg::Progress(done, total));
+                        progress_wake.request_repaint();
+                    },
+                    move || {
+                        let _ = downloaded_tx.send(InstallMsg::Downloaded);
+                    },
+                );
+                let _ = tx.send(InstallMsg::Done(result));
+                wake.request_repaint();
+            });
+            self.installing = Some((rx, cancel));
+        }
+        if self.state.update.waiting {
+            // Ask again soon: the worker may be free.
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        }
+        if let Some((rx, cancel)) = &self.installing {
+            if self.state.update.cancel_requested {
+                cancel.store(true, Ordering::SeqCst);
+            }
+            let msgs: Vec<InstallMsg> = rx.try_iter().collect();
+            for m in msgs {
+                match m {
+                    InstallMsg::Progress(done, total) => self.state.update_progress(done, total),
+                    InstallMsg::Downloaded => self.state.update_downloaded(),
+                    InstallMsg::Done(result) => {
+                        if let Err(e) = &result {
+                            log::warn!("update failed: {e}");
+                        }
+                        self.state.update_finished(result);
+                        self.installing = None;
+                        break;
+                    }
+                }
+            }
+        }
+        if self.state.update.relaunch.is_some() {
+            if let Some(argv) = self.state.take_relaunch(self.worker.is_busy()) {
+                // Saved first: the new copy reads the settings at start.
+                self.save_config();
+                let result = crate::update::start(&argv);
+                self.state.relaunched(result);
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(500));
+            }
+        }
+        if self.state.update.quit {
+            self.save_config();
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
     }
 
     /// A folder to open, or a `retrogit://` notification link (from the command line or the
@@ -278,6 +398,25 @@ impl eframe::App for RetroGitApp {
         for events in pr_events {
             self.state.apply(crate::protocol::Event::PrEvents(events));
         }
+        let answers: Vec<_> = self
+            .update_results
+            .as_ref()
+            .map(|rx| rx.try_iter().collect())
+            .unwrap_or_default();
+        for (result, manual) in answers {
+            self.state
+                .update_checked(crate::version::version(), result, manual);
+        }
+        if std::mem::take(&mut self.state.update.check_requested)
+            && let Some(c) = &self.updates
+        {
+            c.check_now();
+        }
+        self.drive_install(ctx);
+        self.updates_enabled.store(
+            self.state.config.updates.check,
+            std::sync::atomic::Ordering::SeqCst,
+        );
         while let Ok(notice) = self.notices.try_recv() {
             self.state.messages.push_back(notice);
         }
@@ -319,6 +458,7 @@ impl eframe::App for RetroGitApp {
         ui::sign_in::show(&egui_ctx, &mut cx);
         ui::about::show(&egui_ctx, &mut cx);
         ui::appearance::show(&egui_ctx, &mut cx);
+        ui::update::show(&egui_ctx, &mut cx);
         ui::discard::show(&egui_ctx, &mut cx);
         ui::sync_dialogs::show(&egui_ctx, &mut cx);
         ui::pull_dialogs::show(&egui_ctx, &mut cx);

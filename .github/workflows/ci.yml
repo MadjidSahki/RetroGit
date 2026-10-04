@@ -107,11 +107,14 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Checksums
+        # Checked by RetroGit before installing an update.
+        run: (cd dist && sha256sum RetroGit-* > SHA256SUMS.txt && cat SHA256SUMS.txt)
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.version.outputs.tag }}" dist/*.zip dist/*.exe \
+          gh release create "${{ steps.version.outputs.tag }}" dist/*.zip dist/*.exe dist/SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
             --title "RetroGit ${{ steps.version.outputs.tag }}" \
             --generate-notes

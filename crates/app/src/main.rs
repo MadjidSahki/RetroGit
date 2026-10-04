@@ -114,7 +114,8 @@ fn main() -> eframe::Result {
             let app = RetroGitApp::new(state, worker, config_path, cc.egui_ctx.clone());
             let app = app
                 .with_instance(data_dir.as_deref(), cc.egui_ctx.clone(), initial)
-                .with_pr_watch(github::Client::github_com(), tokens, cc.egui_ctx.clone());
+                .with_pr_watch(github::Client::github_com(), tokens, cc.egui_ctx.clone())
+                .with_updates("https://api.github.com", cc.egui_ctx.clone());
             Ok(Box::new(app))
         }),
     )

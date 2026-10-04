@@ -234,6 +234,15 @@ fn menu(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             }
         });
         ui.menu_button(s::MENU_HELP, |ui| {
+            if ui
+                .add_enabled(
+                    !cx.state.update.checking,
+                    egui::Button::new(s::CHECK_FOR_UPDATES),
+                )
+                .clicked()
+            {
+                cx.state.request_update_check();
+            }
             if ui.button(s::ABOUT_MENU).clicked() {
                 cx.state.about = true;
             }
@@ -254,6 +263,7 @@ fn toolbar(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         super::sync_toolbar::toolbar(ui, cx);
         ui.separator();
         super::notifications::toolbar_button(ui, cx);
+        super::update::toolbar_button(ui, cx);
     });
 }
 

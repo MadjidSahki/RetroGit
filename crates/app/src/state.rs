@@ -8,6 +8,7 @@ mod notifications;
 mod pulls;
 mod pulls_more;
 mod sync;
+mod update;
 
 pub use appearance::{AppearanceDialog, SIZES, ZoomStep, next_zoom, size_label};
 pub use conflicts::{ConflictConfirm, ConflictEditor, text_as_diff};
@@ -27,6 +28,7 @@ pub use pulls_more::{
 pub use sync::{
     HistoryView, LOG_PAGE, PendingDialog, SyncView, Tab, branch_name_error, tag_name_error,
 };
+pub use update::UpdateView;
 
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -219,6 +221,8 @@ pub struct AppState {
     // --- Sub-project 6f ---
     /// Clicked notification links waiting to be opened by the UI.
     pub links: Vec<String>,
+    // --- Sub-project 6g ---
+    pub update: UpdateView,
     pub tags: Vec<gitcore::Tag>,
     /// The Stashes tab asked for the list once (since the repository was opened).
     pub stashes_loaded: bool,
@@ -261,6 +265,7 @@ impl AppState {
             stashes: StashesView::default(),
             explore: ExploreView::default(),
             links: Vec::new(),
+            update: UpdateView::default(),
             tags: Vec::new(),
             stashes_loaded: false,
             accounts: Vec::new(),

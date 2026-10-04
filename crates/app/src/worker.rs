@@ -71,6 +71,11 @@ impl WorkerHandle {
         }
     }
 
+    /// The worker is running a command (an update waits for it).
+    pub fn is_busy(&self) -> bool {
+        self.busy.load(Ordering::SeqCst)
+    }
+
     /// The signed-in accounts, kept up to date by the worker (read by the watcher).
     pub fn accounts(&self) -> github::Accounts {
         self.accounts.clone()

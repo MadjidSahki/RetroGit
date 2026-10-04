@@ -16,6 +16,7 @@ pub mod protocol;
 pub mod state;
 pub mod strings;
 pub mod ui;
+pub mod update;
 pub mod version;
 pub mod watch;
 pub mod worker;
