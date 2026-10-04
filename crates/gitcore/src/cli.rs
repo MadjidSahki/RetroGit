@@ -57,8 +57,21 @@ impl Repo {
         args: &[&str],
         cancel: &std::sync::atomic::AtomicBool,
     ) -> Result<GitOutput, GitError> {
-        use std::io::Read;
-        use std::sync::atomic::Ordering;
+        self.run_git_capped(args, cancel, usize::MAX)
+            .map(|(out, _)| out)
+    }
+
+    /// [`Repo::run_git_cancel`] keeping the first `max_lines` lines of stdout: git is stopped
+    /// once more arrive (`true`: the output was cut).
+    pub(crate) fn run_git_capped(
+        &self,
+        args: &[&str],
+        cancel: &std::sync::atomic::AtomicBool,
+        max_lines: usize,
+    ) -> Result<(GitOutput, bool), GitError> {
+        use std::io::{BufRead, Read};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
         if !crate::git_available() {
             return Err(GitError::GitMissing);
         }
@@ -83,7 +96,7 @@ impl Repo {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| GitError::Other(format!("cannot run git: {e}")))?;
-        let mut stdout = child
+        let stdout = child
             .stdout
             .take()
             .ok_or_else(|| GitError::Other("no stdout".into()))?;
@@ -91,10 +104,22 @@ impl Repo {
             .stderr
             .take()
             .ok_or_else(|| GitError::Other("no stderr".into()))?;
+        let enough = Arc::new(AtomicBool::new(false));
+        let full = enough.clone();
         let out_reader = std::thread::spawn(move || {
-            let mut b = Vec::new();
-            let _ = stdout.read_to_end(&mut b);
-            b
+            let mut reader = std::io::BufReader::new(stdout);
+            let mut kept = Vec::new();
+            let mut line = Vec::new();
+            let mut lines = 0;
+            while reader.read_until(b'\n', &mut line).unwrap_or(0) > 0 {
+                if lines == max_lines {
+                    full.store(true, Ordering::Relaxed);
+                    break;
+                }
+                kept.append(&mut line);
+                lines += 1;
+            }
+            kept
         });
         let err_reader = std::thread::spawn(move || {
             let mut b = Vec::new();
@@ -107,19 +132,33 @@ impl Repo {
                 let _ = child.wait();
                 return Err(GitError::Cancelled);
             }
+            if enough.load(Ordering::Relaxed) {
+                crate::remote::kill_tree(&mut child);
+                break child.wait().ok();
+            }
             match child.try_wait() {
-                Ok(Some(s)) => break s,
+                Ok(Some(s)) => break Some(s),
                 Ok(None) => std::thread::sleep(std::time::Duration::from_millis(10)),
                 Err(e) => return Err(GitError::Other(format!("git failed: {e}"))),
             }
         };
+        let truncated = enough.load(Ordering::Relaxed);
         let stdout = String::from_utf8_lossy(&out_reader.join().unwrap_or_default()).into_owned();
-        let err = String::from_utf8_lossy(&err_reader.join().unwrap_or_default()).into_owned();
-        Ok(GitOutput {
-            success: status.success(),
-            text: format!("{stdout}{err}").trim().to_string(),
-            stdout,
-        })
+        let err = if truncated {
+            Vec::new()
+        } else {
+            err_reader.join().unwrap_or_default()
+        };
+        let err = String::from_utf8_lossy(&err).into_owned();
+        let success = truncated || status.is_some_and(|s| s.success());
+        Ok((
+            GitOutput {
+                success,
+                text: format!("{stdout}{err}").trim().to_string(),
+                stdout,
+            },
+            truncated,
+        ))
     }
 
     /// Like `run_git`, but a failure becomes `GitError::Other(output)`.

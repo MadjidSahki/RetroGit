@@ -67,7 +67,7 @@ impl Repo {
     }
 
     /// Commit id -> refs pointing at it (HEAD first, then branches, then tags).
-    fn ref_labels(&self) -> Result<HashMap<String, Vec<RefLabel>>, GitError> {
+    pub(crate) fn ref_labels(&self) -> Result<HashMap<String, Vec<RefLabel>>, GitError> {
         let repo = self.git();
         let mut labels: HashMap<String, Vec<RefLabel>> = HashMap::new();
         if let Ok(head) = repo.head()
