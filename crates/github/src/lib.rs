@@ -33,7 +33,10 @@ pub use pulls_write::{
 pub use token::{
     GhTokenSource, TokenProvider, gh_auth_token, hidden_by_restriction, parse_gh_token,
 };
-pub use token_store::{KeyringStore, MemoryStore, TokenStore, TokenStoreError};
+pub use token_store::{
+    KeyringStore, MemoryStore, SECURITY_MARKER, TokenStore, TokenStoreError,
+    parse_security_comment, security_add_command,
+};
 pub use watch::{PrEvent, PrEventKind, PrSnapshot, date_days_before, diff_snapshots};
 
 /// OAuth scopes requested by RetroGit.
