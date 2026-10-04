@@ -67,6 +67,9 @@ pub enum Target {
     ConflictMine,
     ConflictTheirs,
     ConflictResult,
+    /// Explore: the file (or a commit's diff of it), and its blame.
+    Explore,
+    ExploreBlame,
 }
 
 /// A finished highlighting job.

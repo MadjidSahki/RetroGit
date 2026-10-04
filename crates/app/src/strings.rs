@@ -574,3 +574,4 @@ pub const PREVIEW_LINK: &str = "Link";
 pub const FONT_SAMPLE: &str = "The quick brown fox jumps over the lazy dog. 0O 1lI";
 pub const ZOOM_HINT: &str = "Cmd/Ctrl + and - change the size, 0 resets it.";
 pub const PREVIEW_BUTTON: &str = "Button";
+pub const ERR_EXPLORE_REF_GONE: &str = "{rev} no longer exists: showing HEAD.";

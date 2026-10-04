@@ -3,6 +3,7 @@
 mod accounts;
 mod changes;
 mod conflicts;
+mod explore;
 mod git_ops;
 mod pulls;
 mod sync;
@@ -45,9 +46,15 @@ pub struct WorkerHandle {
     busy: Arc<AtomicBool>,
     refresh_pending: Arc<AtomicBool>,
     cancel_net: Arc<AtomicBool>,
+    explore: explore::ExploreService,
 }
 
 impl WorkerHandle {
+    /// Ask the explore service (answered on its own threads, as `Event::ExploreLoaded`).
+    pub fn explore(&self, repo: &std::path::Path, req: crate::protocol::ExploreRequest) {
+        self.explore.request(repo, req);
+    }
+
     pub fn send(&self, cmd: Command) {
         match cmd {
             Command::StartDeviceFlow => self.cancel_flow.store(false, Ordering::SeqCst),
@@ -144,6 +151,15 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
     let refresh_pending = Arc::new(AtomicBool::new(false));
     let cancel_net = Arc::new(AtomicBool::new(false));
     let accounts = github::Accounts::default();
+    // Both the worker and the explore service send events and wake the UI up.
+    let notify = Arc::new(std::sync::Mutex::new(notify));
+    let emit: Arc<dyn Fn(Event) + Send + Sync> = Arc::new(move |ev| {
+        let _ = etx.send(ev);
+        if let Ok(n) = notify.lock() {
+            n();
+        }
+    });
+    let worker_emit = emit.clone();
     let mut worker = Worker {
         accounts: accounts.clone(),
         repo_accounts: deps.repo_accounts.clone(),
@@ -159,10 +175,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
         refresh_pending: refresh_pending.clone(),
         cancel_flow: cancel_flow.clone(),
         cancel_clone: cancel_clone.clone(),
-        emit: Box::new(move |ev| {
-            let _ = etx.send(ev);
-            notify();
-        }),
+        emit: Box::new(move |ev| worker_emit(ev)),
     };
     let spawned = std::thread::Builder::new()
         .name("retrogit-worker".into())
@@ -196,6 +209,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
         busy,
         refresh_pending,
         cancel_net,
+        explore: explore::ExploreService::new(emit),
     }
 }
 

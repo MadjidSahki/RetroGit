@@ -106,6 +106,9 @@ impl AppState {
         self.history.detail_colors = Colors::NotRequested;
         self.stashes.colors = Colors::NotRequested;
         self.pulls.file_colors = Colors::NotRequested;
+        self.explore.colors = Colors::NotRequested;
+        self.explore.blame_colors = Colors::NotRequested;
+        self.explore.history_colors = Colors::NotRequested;
         if let Some(ed) = self.changes.conflict.as_mut() {
             ed.mine_colors = Colors::NotRequested;
             ed.theirs_colors = Colors::NotRequested;

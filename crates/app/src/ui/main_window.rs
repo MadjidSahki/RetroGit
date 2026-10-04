@@ -50,6 +50,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                         Tab::History => super::history::show(ui, cx),
                         Tab::PullRequests => super::pulls::show(ui, cx),
                         Tab::Stashes => super::stashes::show(ui, cx),
+                        Tab::Explore => {}
                     }
                 } else {
                     bevel_frame(
