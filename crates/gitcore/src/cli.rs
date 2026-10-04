@@ -86,7 +86,7 @@ impl Repo {
             .args(args)
             .env("GIT_TERMINAL_PROMPT", "0")
             .env_remove("LC_ALL")
-            .env("LC_CTYPE", "C.UTF-8")
+            .env("LC_CTYPE", utf8_locale())
             .env("LC_MESSAGES", "C")
             .env("LANGUAGE", "C");
         #[cfg(unix)]
@@ -176,9 +176,38 @@ impl Repo {
     }
 }
 
+/// First UTF-8 locale `exists` accepts: C.UTF-8 (Linux, macOS 15+, Git for Windows), else
+/// en_US.UTF-8 (every macOS). Defaults to C.UTF-8.
+pub(crate) fn pick_utf8_locale(exists: impl Fn(&str) -> bool) -> &'static str {
+    ["C.UTF-8", "en_US.UTF-8"]
+        .into_iter()
+        .find(|l| exists(l))
+        .unwrap_or("C.UTF-8")
+}
+
+/// UTF-8 locale for git's character classes (looked up once).
+fn utf8_locale() -> &'static str {
+    static LOCALE: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    LOCALE.get_or_init(|| {
+        if cfg!(target_os = "macos") {
+            pick_utf8_locale(|l| std::path::Path::new("/usr/share/locale").join(l).exists())
+        } else {
+            "C.UTF-8"
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
+
+    #[test]
+    fn a_utf8_locale_that_exists_is_chosen() {
+        assert_eq!(super::pick_utf8_locale(|_| true), "C.UTF-8");
+        // macOS 14 has no C.UTF-8 (git would fall back to C: no accent folding).
+        assert_eq!(super::pick_utf8_locale(|l| l != "C.UTF-8"), "en_US.UTF-8");
+        assert_eq!(super::pick_utf8_locale(|_| false), "C.UTF-8");
+    }
 
     #[test]
     fn git_runs_with_untranslated_messages() {
