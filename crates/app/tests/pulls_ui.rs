@@ -432,20 +432,26 @@ fn failed_files_say_why_in_the_files_tab() {
 
 fn pending_world() -> World {
     let mut w = world(false);
-    w.state.queue_line_comment(github::LineComment {
-        path: "a.rs".into(),
-        line: 1,
-        side: github::DiffSide::Right,
-        start: None,
-        body: "x".into(),
-    });
-    w.state.queue_line_comment(github::LineComment {
-        path: "a.rs".into(),
-        line: 2,
-        side: github::DiffSide::Right,
-        start: None,
-        body: "y".into(),
-    });
+    w.state.queue_line_comment(
+        7,
+        github::LineComment {
+            path: "a.rs".into(),
+            line: 1,
+            side: github::DiffSide::Right,
+            start: None,
+            body: "x".into(),
+        },
+    );
+    w.state.queue_line_comment(
+        7,
+        github::LineComment {
+            path: "a.rs".into(),
+            line: 2,
+            side: github::DiffSide::Right,
+            start: None,
+            body: "y".into(),
+        },
+    );
     w
 }
 

@@ -256,6 +256,7 @@ impl Worker {
     ) {
         match self.on_github(slug, call) {
             Ok(()) => self.emit(Event::PullActionDone {
+                slug: slug.clone(),
                 number,
                 note: note.to_string(),
             }),
@@ -314,10 +315,23 @@ impl Worker {
             }
             Err(e) => return self.github_failed(Op::PullAction, &e),
         };
+        // The pull request exists: labels that fail only warn.
+        let labelled = if pull.labels.is_empty() {
+            Ok(())
+        } else {
+            self.on_github(&slug, |c, t, o, r| {
+                c.set_labels(t, o, r, number, &[], &pull.labels)
+            })
+        };
         self.emit(Event::PullCreated {
             slug: slug.clone(),
             number,
         });
+        if let Err(e) = labelled {
+            let mut w = AppError::new(Severity::Warning, s::PULL_LABELS_FAILED);
+            w.detail = Some(e.to_string());
+            self.fail(Op::PullAction, w);
+        }
         self.load_pull(&slug, number);
     }
 
@@ -339,6 +353,7 @@ impl Worker {
                     self.fail(Op::PullAction, w);
                 }
                 self.emit(Event::PullActionDone {
+                    slug: slug.clone(),
                     number,
                     note: s::NOTE_MERGED.to_string(),
                 });
@@ -389,9 +404,10 @@ impl Worker {
                 AppError::new(Severity::Info, s::WHY_PULL_FIRST),
             );
         }
-        let viewer = repo
-            .github_slug()
-            .and_then(|slug| self.account_for(&slug))
+        let slug = repo.github_slug();
+        let viewer = slug
+            .as_ref()
+            .and_then(|slug| self.account_for(slug))
             .map(|a| a.login);
         let message = s::suggestion_commit(author, author_id, viewer.as_deref());
         let result = repo.apply_suggestion(
@@ -405,6 +421,8 @@ impl Worker {
         self.after_ref_change(&repo);
         match result {
             Ok(()) => self.emit(Event::PullActionDone {
+                // Not a github.com remote: no pull request view to answer.
+                slug: slug.unwrap_or_default(),
                 number,
                 note: s::NOTE_SUGGESTION_APPLIED.to_string(),
             }),
@@ -479,7 +497,12 @@ impl Worker {
                     AppError::new(Severity::Warning, &s::pr_branch_behind(branch)),
                 );
             }
+            let slug = repo
+                .as_ref()
+                .and_then(|r| r.github_slug())
+                .unwrap_or_default();
             self.emit(Event::PullActionDone {
+                slug,
                 number,
                 note: format!("{} {branch}", s::NOTE_CHECKED_OUT),
             });

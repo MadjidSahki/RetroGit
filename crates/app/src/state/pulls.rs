@@ -50,6 +50,9 @@ pub enum PullDialog {
     },
     /// New line comment, queued in the pending review.
     LineComment {
+        /// Pull request and head commit when the window opened (the selection may change).
+        number: u64,
+        head_sha: String,
         path: String,
         line: u32,
         side: github::DiffSide,
@@ -60,6 +63,8 @@ pub enum PullDialog {
         body: String,
     },
     Reply {
+        /// Pull request when the window opened.
+        number: u64,
         comment_id: u64,
         body: String,
     },
@@ -436,7 +441,11 @@ impl AppState {
                     p.assignable = users;
                 }
             }
-            Event::PullActionDone { number, note } => {
+            Event::PullActionDone { slug, number, note } => {
+                // Another repository's answer: not this view's.
+                if p.slug.as_ref() != Some(&slug) {
+                    return;
+                }
                 p.busy = false;
                 p.note = Some(note);
                 p.stale = true;
@@ -451,16 +460,22 @@ impl AppState {
                     }
                     p.dialog = None;
                 }
+                // A comment window keeps its pull request while another one is shown.
+                if matches!(p.dialog,
+                    Some(PullDialog::LineComment { number: n, .. } | PullDialog::Reply { number: n, .. })
+                        if n == number)
+                {
+                    p.dialog = None;
+                }
             }
             _ => {}
         }
     }
 
-    /// Queue a line comment in the pending review (from the line comment dialog).
-    pub fn queue_line_comment(&mut self, comment: LineComment) {
-        if let Some(n) = self.pulls.selected {
-            self.pulls.pending.entry(n).or_default().push(comment);
-        }
+    /// Queue a line comment in the pending review of `number` (from the line comment
+    /// dialog, which keeps the pull request it was opened on).
+    pub fn queue_line_comment(&mut self, number: u64, comment: LineComment) {
+        self.pulls.pending.entry(number).or_default().push(comment);
     }
 }
 

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use gitcore::{Head, RepoSummary};
 use github::{
     ChecksState, Client, DiffSide, MemoryAccounts, MergeMethod, Mergeable, PrDetail, PrFile,
@@ -23,6 +23,8 @@ struct World {
     worker: WorkerHandle,
     highlighter: retrogit::highlight::Service,
     notices: std::sync::mpsc::Sender<retrogit::protocol::AppError>,
+    /// The mock GitHub of the worker.
+    server: mockito::ServerGuard,
 }
 
 fn slug() -> (String, String) {
@@ -150,6 +152,7 @@ fn world(draft: bool) -> World {
         worker,
         highlighter: retrogit::highlight::Service::start(|_| {}),
         notices,
+        server,
     }
 }
 
@@ -308,13 +311,16 @@ fn hovering_a_multi_line_pending_comment_shows_all_of_it() {
     let mut w = world(false);
     w.state.pulls.sub_tab = PullTab::Files;
     w.state.pulls.open_file("a.rs");
-    w.state.queue_line_comment(github::LineComment {
-        path: "a.rs".into(),
-        line: 4,
-        side: DiffSide::Right,
-        start: None,
-        body: "First line\nsecond line here".into(),
-    });
+    w.state.queue_line_comment(
+        7,
+        github::LineComment {
+            path: "a.rs".into(),
+            line: 4,
+            side: DiffSide::Right,
+            start: None,
+            body: "First line\nsecond line here".into(),
+        },
+    );
     let mut h = harness(w);
     h.run();
     assert!(h.query_by_label_contains("second line here").is_none());
@@ -381,4 +387,162 @@ fn conversation_titles_show_line_ranges_old_side_and_outdated() {
     let mut done = titled(Some(3), None, DiffSide::Right);
     done.resolved = true;
     assert_eq!(thread_title(&done), "src/a.rs:3 (resolved)");
+}
+
+/// Right-click line 3 of `a.rs`, Add comment..., type "Nice".
+fn line_comment_open(h: &mut Harness<'static, World>) {
+    click_right_of(h, "3 + let c = 3;", egui::PointerButton::Secondary);
+    h.run();
+    h.get_by_label(s::ADD_COMMENT).click();
+    h.run();
+    match h.state_mut().state.pulls.dialog.as_mut() {
+        Some(PullDialog::LineComment {
+            number,
+            head_sha,
+            body,
+            ..
+        }) => {
+            assert_eq!((*number, head_sha.as_str()), (7, "abc"), "kept at opening");
+            *body = "Nice".into();
+        }
+        other => panic!("{other:?}"),
+    }
+    h.run();
+}
+
+/// Another pull request is selected while the window is open.
+fn select_another(h: &mut Harness<'static, World>) {
+    h.state_mut().state.pulls.select(8);
+    assert!(h.state().state.pulls.detail.is_none());
+    h.run();
+}
+
+#[test]
+fn a_line_comment_goes_to_the_pull_request_it_was_opened_on() {
+    let mut w = world(false);
+    w.state.pulls.sub_tab = PullTab::Files;
+    w.state.pulls.open_file("a.rs");
+    w.server
+        .mock("GET", "/user")
+        .with_body(r#"{"login":"ada","name":null}"#)
+        .create();
+    w.server
+        .mock("GET", "/user/orgs")
+        .match_query(mockito::Matcher::Any)
+        .with_body(r#"[{"login":"o"}]"#)
+        .create();
+    let posted = w
+        .server
+        .mock("POST", "/repos/o/r/pulls/7/comments")
+        .match_body(mockito::Matcher::PartialJson(
+            serde_json::json!({ "commit_id": "abc", "body": "Nice", "line": 3 }),
+        ))
+        .with_status(201)
+        .with_body("{}")
+        .create();
+    let wrong = w
+        .server
+        .mock("POST", "/repos/o/r/pulls/8/comments")
+        .expect(0)
+        .create();
+    w.worker
+        .send(retrogit::protocol::Command::SavePat("ghp_pat".into()));
+    let mut h = harness(w);
+    h.run();
+    line_comment_open(&mut h);
+    select_another(&mut h);
+    assert!(
+        !h.get_by_label(s::ADD_SINGLE_COMMENT)
+            .accesskit_node()
+            .is_disabled()
+    );
+    h.get_by_label(s::ADD_SINGLE_COMMENT).click();
+    h.run();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let done = loop {
+        assert!(std::time::Instant::now() < deadline, "comment not sent");
+        if let Ok(ev @ Event::PullActionDone { number: 7, .. }) = h
+            .state()
+            .worker
+            .events
+            .recv_timeout(std::time::Duration::from_millis(100))
+        {
+            break ev;
+        }
+    };
+    posted.assert();
+    wrong.assert();
+    h.state_mut().state.apply(done);
+    assert!(h.state().state.pulls.dialog.is_none(), "closed once posted");
+}
+
+#[test]
+fn a_line_comment_is_queued_on_the_pull_request_it_was_opened_on() {
+    let mut h = files_world();
+    line_comment_open(&mut h);
+    select_another(&mut h);
+    h.get_by_label(s::ADD_TO_REVIEW).click();
+    h.run();
+    let pending = &h.state().state.pulls.pending;
+    assert_eq!(pending.get(&7).map(Vec::len), Some(1), "{pending:?}");
+    assert!(!pending.contains_key(&8));
+}
+
+#[test]
+fn add_single_comment_is_disabled_without_a_commit() {
+    let mut h = files_world();
+    line_comment_open(&mut h);
+    if let Some(PullDialog::LineComment { head_sha, .. }) =
+        h.state_mut().state.pulls.dialog.as_mut()
+    {
+        head_sha.clear();
+    }
+    h.run();
+    assert!(
+        h.get_by_label(s::ADD_SINGLE_COMMENT)
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(
+        !h.get_by_label(s::ADD_TO_REVIEW)
+            .accesskit_node()
+            .is_disabled()
+    );
+    h.get_by_label(s::ADD_SINGLE_COMMENT).click();
+    h.run();
+    assert!(
+        h.state().state.pulls.pending.is_empty(),
+        "never queued instead"
+    );
+    assert!(h.state().state.pulls.dialog.is_some());
+}
+
+#[test]
+fn a_closed_pull_request_still_offers_resolve_in_files() {
+    let mut w = world(false);
+    {
+        let p = &mut w.state.pulls;
+        let mut d = (**p.detail.as_ref().unwrap()).clone();
+        d.summary.state = PrState::Closed;
+        p.detail = Some(Arc::new(d));
+        p.sub_tab = PullTab::Files;
+        p.open_file("a.rs");
+    }
+    let mut h = harness(w);
+    h.run();
+    // Right of the text (the row ends near the window edge).
+    let rect = h.get_by_label_contains("> carol: Simpler:").rect();
+    let pos = egui::pos2(rect.right() + 30.0, rect.center().y);
+    h.hover_at(pos);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    h.run();
+    assert!(h.query_by_label(s::RESOLVE).is_some());
+    assert!(h.query_by_label(s::REPLY).is_none(), "reply: open only");
 }

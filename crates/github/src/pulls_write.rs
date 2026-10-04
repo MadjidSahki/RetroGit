@@ -121,7 +121,8 @@ pub fn encode_segment(s: &str, keep_slash: bool) -> String {
 }
 
 impl Client {
-    /// Open a pull request and add its labels. `Rejected` with GitHub's reason on 422
+    /// Open a pull request, without its labels (`set_labels` adds them, so a failure there
+    /// keeps the number). `Rejected` with GitHub's reason on 422
     /// (e.g. "A pull request already exists for o:branch.").
     pub fn create_pull(
         &self,
@@ -143,11 +144,7 @@ impl Client {
             token,
             Some(&body),
         )?;
-        let number = resp.body_mut().read_json::<Created>()?.number;
-        if !pull.labels.is_empty() {
-            self.set_labels(token, owner, repo, number, &[], &pull.labels)?;
-        }
-        Ok(number)
+        Ok(resp.body_mut().read_json::<Created>()?.number)
     }
 
     /// Number of the open pull request whose head is `head_owner:branch`, if any.

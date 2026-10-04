@@ -11,7 +11,7 @@ fn client(server: &mockito::Server) -> Client {
 }
 
 #[test]
-fn create_pull_then_sets_its_labels() {
+fn create_pull_leaves_its_labels_to_the_caller() {
     let mut server = mockito::Server::new();
     let create = server
         .mock("POST", "/repos/o/r/pulls")
@@ -22,12 +22,12 @@ fn create_pull_then_sets_its_labels() {
         .with_status(201)
         .with_body(r#"{"number": 12, "html_url": "https://github.com/o/r/pull/12"}"#)
         .create();
+    // Labels are set apart (`set_labels`), so a failure there keeps the number.
     let labels = server
         .mock("POST", "/repos/o/r/issues/12/labels")
-        .match_body(Matcher::Json(
-            json!({ "labels": ["bug", "good first issue"] }),
-        ))
-        .with_body("[]")
+        .with_status(422)
+        .with_body(r#"{"message":"Validation Failed"}"#)
+        .expect(0)
         .create();
     let put = server.mock("PUT", Matcher::Any).expect(0).create();
     let n = client(&server)

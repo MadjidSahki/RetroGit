@@ -329,6 +329,8 @@ pub const INFO_PULL_MOVED: &str =
 pub const ERR_OAUTH_RESTRICTED_HELP: &str = "Install the GitHub CLI and run 'gh auth login': RetroGit then uses it for this organization. Or ask an owner to approve RetroGit (link below).";
 pub const WARN_BRANCH_NOT_DELETED: &str =
     "The pull request was merged, but its branch could not be deleted.";
+pub const PULL_LABELS_FAILED: &str =
+    "The pull request was created, but its labels could not be set.";
 pub const ERR_FORK_GONE: &str =
     "The fork holding this pull request's branch was deleted: it cannot be checked out.";
 pub const NO_PATCH: &str = "Binary file, or a diff too large for GitHub to show.";

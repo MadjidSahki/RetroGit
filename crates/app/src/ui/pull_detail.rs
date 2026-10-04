@@ -914,12 +914,14 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             Some(full) => resp.on_hover_text(full),
                             None => resp,
                         };
-                        if can_comment {
+                        // Resolve as in Conversation, whatever the state; Reply: open only.
+                        let resolve_offer = resolve_action(thread);
+                        if can_comment || resolve_offer.is_some() {
                             resp.context_menu(|ui| {
-                                if ui.button(s::REPLY).clicked() {
+                                if can_comment && ui.button(s::REPLY).clicked() {
                                     reply_to = Some(comment.id);
                                 }
-                                if let Some(resolve) = resolve_action(thread)
+                                if let Some(resolve) = resolve_offer
                                     && ui
                                         .add_enabled(
                                             !busy,
@@ -1054,6 +1056,8 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     if let Some((path, line, side, quote, start, prefill)) = comment_on {
         let body = prefill.unwrap_or_default();
         p.dialog = Some(PullDialog::LineComment {
+            number: d.summary.number,
+            head_sha: d.head_sha.clone(),
             path,
             line,
             side,
@@ -1085,6 +1089,7 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     let p = &mut cx.state.pulls;
     if let Some(comment_id) = reply_to {
         p.dialog = Some(PullDialog::Reply {
+            number: d.summary.number,
             comment_id,
             body: String::new(),
         });

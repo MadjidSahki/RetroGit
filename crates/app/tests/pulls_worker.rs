@@ -497,6 +497,52 @@ fn creating_an_existing_pull_request_opens_it() {
 }
 
 #[test]
+fn a_created_pull_request_opens_even_when_its_labels_fail() {
+    let mut server = mockito::Server::new();
+    let w = signed_in(&mut server, TokenProvider::without_gh());
+    server
+        .mock("POST", "/repos/o/r/pulls")
+        .with_status(201)
+        .with_body(r#"{"number":12}"#)
+        .create();
+    let labels = server
+        .mock("POST", "/repos/o/r/issues/12/labels")
+        .match_body(Matcher::Json(json!({ "labels": ["bug"] })))
+        .with_status(422)
+        .with_body(r#"{"message":"Label does not exist"}"#)
+        .create();
+    let (_d, _f) = mock_detail(&mut server, 12);
+    w.send(Command::CreatePull {
+        slug: slug(),
+        pull: NewPull {
+            title: "Fix".into(),
+            body: String::new(),
+            head: "feat/x".into(),
+            base: "main".into(),
+            draft: false,
+            labels: vec!["bug".into()],
+        },
+        publish: false,
+    });
+    let evs = until(&w, |e| matches!(e, Event::PullFilesLoaded { .. }));
+    labels.assert();
+    let created = evs
+        .iter()
+        .position(|e| matches!(e, Event::PullCreated { number: 12, .. }))
+        .unwrap();
+    let warned = evs
+        .iter()
+        .position(|e| {
+            matches!(e, Event::Error { error, .. }
+                if error.severity == Severity::Warning
+                    && error.message == retrogit::strings::PULL_LABELS_FAILED
+                    && error.detail.as_deref().is_some_and(|d| d.contains("Label does not exist")))
+        })
+        .unwrap();
+    assert!(created < warned, "{evs:?}");
+}
+
+#[test]
 fn a_revoked_token_signs_out() {
     let mut server = mockito::Server::new();
     let w = signed_in(&mut server, TokenProvider::without_gh());

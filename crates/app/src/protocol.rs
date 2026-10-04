@@ -457,6 +457,8 @@ pub enum Event {
     },
     /// A change went through; the pull request is reloaded. `note` goes to the status bar.
     PullActionDone {
+        /// Repository of the pull request: another one's answer is ignored.
+        slug: Slug,
         number: u64,
         note: String,
     },
