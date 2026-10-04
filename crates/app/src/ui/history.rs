@@ -76,6 +76,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
 }
 
 fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
+    super::explore::history_filter(ui, cx);
     bevel_frame(
         ui,
         Bevel::Field,
@@ -84,7 +85,10 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         |ui| {
             ui.set_min_size(ui.available_size());
             let h = &cx.state.history;
-            if h.entries.is_empty() {
+            // A filter shows the commits it found, without the graph (it would not connect).
+            let filtered = h.filter.results.is_some();
+            let entries = h.shown();
+            if entries.is_empty() && !filtered {
                 ui.label(if h.loading {
                     s::LOADING_HISTORY
                 } else {
@@ -99,7 +103,11 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                 .max()
                 .unwrap_or(1)
                 .min(12);
-            let graph_w = lanes as f32 * LANE_WIDTH + 6.0;
+            let graph_w = if filtered {
+                4.0
+            } else {
+                lanes as f32 * LANE_WIDTH + 6.0
+            };
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
@@ -110,11 +118,11 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             let mut last_visible = 0;
             ScrollArea::vertical()
                 .auto_shrink([false, false])
-                .show_rows(ui, ROW_HEIGHT, h.entries.len(), |ui, range| {
+                .show_rows(ui, ROW_HEIGHT, entries.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for i in range {
                         last_visible = i;
-                        let e = &h.entries[i];
+                        let e = &entries[i];
                         let (rect, resp) = ui.allocate_exact_size(
                             vec2(ui.available_width(), ROW_HEIGHT),
                             Sense::click(),
@@ -125,7 +133,7 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                         if selected {
                             p.rect_filled(rect, 0.0, pal.selection);
                         }
-                        if let Some(row) = h.graph.get(i) {
+                        if !filtered && let Some(row) = h.graph.get(i) {
                             paint_graph(&p.with_clip_rect(rect), row, rect.left(), rect);
                         }
                         let text_color = if selected {
@@ -194,6 +202,7 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                                 (HistoryAction::Reset, s::MENU_RESET),
                                 (HistoryAction::RebaseFrom, s::MENU_REBASE_FROM),
                                 (HistoryAction::CreateTag, s::MENU_CREATE_TAG),
+                                (HistoryAction::Browse, s::MENU_BROWSE),
                             ] {
                                 if ui.button(label).clicked() {
                                     menu = Some((action, e.clone()));
@@ -203,7 +212,8 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                         });
                     }
                 });
-            let need_more = last_visible + PREFETCH_ROWS >= cx.state.history.entries.len()
+            let need_more = !filtered
+                && last_visible + PREFETCH_ROWS >= cx.state.history.entries.len()
                 && cx.state.wants_more_history();
             if need_more {
                 cx.state.history.loading = true;

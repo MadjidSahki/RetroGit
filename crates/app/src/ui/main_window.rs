@@ -36,13 +36,24 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             .show(ui, |ui| {
                 if cx.state.current.is_some() {
                     use crate::state::Tab;
-                    const TABS: [Tab; 4] =
-                        [Tab::Changes, Tab::History, Tab::PullRequests, Tab::Stashes];
+                    const TABS: [Tab; 5] = [
+                        Tab::Changes,
+                        Tab::History,
+                        Tab::Explore,
+                        Tab::PullRequests,
+                        Tab::Stashes,
+                    ];
                     let mut tab = TABS.iter().position(|t| *t == cx.state.tab).unwrap_or(0);
                     win95::tabs(
                         ui,
                         &mut tab,
-                        &[s::TAB_CHANGES, s::TAB_HISTORY, s::TAB_PULLS, s::TAB_STASHES],
+                        &[
+                            s::TAB_CHANGES,
+                            s::TAB_HISTORY,
+                            s::TAB_EXPLORE,
+                            s::TAB_PULLS,
+                            s::TAB_STASHES,
+                        ],
                     );
                     cx.state.tab = TABS[tab];
                     match cx.state.tab {
@@ -50,7 +61,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
                         Tab::History => super::history::show(ui, cx),
                         Tab::PullRequests => super::pulls::show(ui, cx),
                         Tab::Stashes => super::stashes::show(ui, cx),
-                        Tab::Explore => {}
+                        Tab::Explore => super::explore::show(ui, cx),
                     }
                 } else {
                     bevel_frame(

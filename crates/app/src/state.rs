@@ -12,7 +12,7 @@ mod sync;
 pub use appearance::{AppearanceDialog, SIZES, ZoomStep, next_zoom, size_label};
 pub use conflicts::{ConflictConfirm, ConflictEditor, text_as_diff};
 pub use explore::{
-    ExploreView, FileView, HistoryFilter, SearchView, TreeRow, age_ranks, tree_rows,
+    ExploreView, FileView, HistoryFilter, SearchForm, SearchView, TreeRow, age_ranks, tree_rows,
 };
 pub use git_ops::{GitDialog, HistoryAction, StashesView, move_item};
 pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};

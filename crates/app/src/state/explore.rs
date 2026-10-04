@@ -31,6 +31,14 @@ pub struct SearchView {
     pub result: Option<GrepResult>,
 }
 
+/// The Search in files window (what is typed, before Search).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SearchForm {
+    pub text: String,
+    pub match_case: bool,
+    pub paths: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExploreView {
     /// Version explored ("HEAD", a branch, a tag or a commit id) and its commit.
@@ -60,6 +68,8 @@ pub struct ExploreView {
     pub history_diff: Option<FileDiff>,
     pub history_colors: Colors,
     pub search: Option<SearchView>,
+    /// The Search in files window, when open.
+    pub search_form: Option<SearchForm>,
     /// The version changed: the open file waits for the new tree.
     tree_pending: bool,
     asked: Vec<ExploreRequest>,
@@ -89,6 +99,7 @@ impl Default for ExploreView {
             history_diff: None,
             history_colors: Colors::NotRequested,
             search: None,
+            search_form: None,
             tree_pending: false,
             asked: Vec::new(),
         }

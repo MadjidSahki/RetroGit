@@ -104,6 +104,8 @@ pub enum HistoryAction {
     Reset,
     RebaseFrom,
     CreateTag,
+    /// Explore the files of the commit (6e).
+    Browse,
 }
 
 impl AppState {
@@ -132,6 +134,10 @@ impl AppState {
                 Some(Command::LoadResetInfo(id))
             }
             HistoryAction::RebaseFrom => Some(Command::LoadRebaseList(Some(id))),
+            HistoryAction::Browse => {
+                self.browse_at(&id);
+                None
+            }
             HistoryAction::CreateTag => {
                 self.git_dialog = Some(GitDialog::CreateTag {
                     id,

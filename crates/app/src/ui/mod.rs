@@ -8,6 +8,7 @@ pub mod clone_dialog;
 pub mod conflict_view;
 pub mod diff_view;
 pub mod discard;
+pub mod explore;
 pub mod git_dialogs;
 pub mod history;
 pub mod logo;
