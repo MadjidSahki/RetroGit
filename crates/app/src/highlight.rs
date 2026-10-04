@@ -334,7 +334,8 @@ fn expand_tabs_from(text: &str, mut col: usize) -> (String, usize) {
 }
 
 /// One full-width diff row: `background` over the whole row, the text left-aligned,
-/// unwrapped and selectable (it can be copied).
+/// unwrapped and selectable (it can be copied). The response covers the whole row and
+/// senses clicks there too.
 pub fn diff_row(
     ui: &mut egui::Ui,
     job: egui::text::LayoutJob,
@@ -342,7 +343,7 @@ pub fn diff_row(
     background: Color32,
 ) -> egui::Response {
     let width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(0.0, height), egui::Sense::hover());
+    let (rect, row) = ui.allocate_exact_size(egui::vec2(0.0, height), egui::Sense::hover());
     ui.painter().rect_filled(
         egui::Rect::from_min_size(rect.min, egui::vec2(width, height)),
         0.0,
@@ -357,11 +358,16 @@ pub fn diff_row(
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     let resp = child.add(egui::Label::new(job).extend().selectable(true));
-    ui.allocate_exact_size(
-        egui::vec2(resp.rect.width().max(width) - 0.0, 0.0),
-        egui::Sense::hover(),
+    let row_width = resp.rect.width().max(width);
+    ui.allocate_exact_size(egui::vec2(row_width, 0.0), egui::Sense::hover());
+    // The row was registered before the label, so the label stays on top for drag selection
+    // and the rest of the row still reacts to clicks.
+    let row = ui.interact(
+        egui::Rect::from_min_size(rect.min, egui::vec2(row_width, height)),
+        row.id,
+        egui::Sense::click(),
     );
-    resp
+    resp.union(row)
 }
 
 /// A monospace label: `prefix` in the text color, then the line either in its syntax colors

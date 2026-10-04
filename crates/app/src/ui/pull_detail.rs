@@ -752,9 +752,8 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             bg
                         };
                         let resp = crate::highlight::diff_row(ui, job, ROW_HEIGHT, bg);
-                        let row_resp = resp.interact(egui::Sense::click());
-                        if row_resp.clicked() || row_resp.secondary_clicked() && !in_selection {
-                            let shift = ui.input(|i| i.modifiers.shift) && row_resp.clicked();
+                        if resp.clicked() || resp.secondary_clicked() && !in_selection {
+                            let shift = ui.input(|i| i.modifiers.shift) && resp.clicked();
                             select = Some((hi, li, shift));
                         }
                         if can_comment {

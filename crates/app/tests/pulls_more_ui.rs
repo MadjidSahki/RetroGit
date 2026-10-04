@@ -13,7 +13,7 @@ use github::{
 };
 use retrogit::config::Config;
 use retrogit::protocol::Event;
-use retrogit::state::{AppState, PeopleKind, PullDialog, PullTab, Tab};
+use retrogit::state::{AppState, LineSelection, PeopleKind, PullDialog, PullTab, Tab};
 use retrogit::strings as s;
 use retrogit::ui::Ctx;
 use retrogit::worker::{WorkerDeps, WorkerHandle, spawn};
@@ -233,4 +233,51 @@ fn typing_in_the_people_filter_searches_github() {
         h.state().state.pulls.assignable_query.as_deref(),
         Some("car")
     );
+}
+
+fn click_right_of(h: &Harness<'static, World>, text: &str, button: egui::PointerButton) {
+    let rect = h.get_by_label_contains(text).rect();
+    let pos = egui::pos2(rect.right() + 100.0, rect.center().y);
+    h.hover_at(pos);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+}
+
+fn files_world() -> Harness<'static, World> {
+    let mut w = world(false);
+    w.state.pulls.sub_tab = PullTab::Files;
+    w.state.pulls.open_file("a.rs");
+    let mut h = harness(w);
+    h.run();
+    h
+}
+
+#[test]
+fn clicking_right_of_a_diff_line_text_selects_the_line() {
+    let mut h = files_world();
+    click_right_of(&h, "3 + let c = 3;", egui::PointerButton::Primary);
+    h.run();
+    assert_eq!(
+        h.state().state.pulls.selection,
+        Some(LineSelection {
+            hunk: 0,
+            from: 3,
+            to: 3
+        })
+    );
+}
+
+#[test]
+fn right_clicking_right_of_a_diff_line_text_offers_a_comment() {
+    let mut h = files_world();
+    assert!(h.query_by_label(s::ADD_COMMENT).is_none());
+    click_right_of(&h, "3 + let c = 3;", egui::PointerButton::Secondary);
+    h.run();
+    assert!(h.query_by_label(s::ADD_COMMENT).is_some());
 }

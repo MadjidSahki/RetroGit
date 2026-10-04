@@ -52,6 +52,8 @@ pub fn combo_box(
     Popup::from_toggle_button_response(&resp)
         .id(id.with("popup"))
         .width(width)
+        .layout(egui::Layout::top_down_justified(egui::Align::Min))
+        .style(egui::containers::menu::menu_style)
         .show(|ui| {
             ui.set_min_width(width - 8.0);
             add_items(ui);
