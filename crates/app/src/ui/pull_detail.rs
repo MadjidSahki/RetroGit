@@ -326,13 +326,18 @@ fn people_row(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     let mut open: Option<crate::state::PeopleKind> = None;
     ui.horizontal_wrapped(|ui| {
         ui.label(s::REVIEWERS);
-        if d.reviewers.is_empty() {
+        if d.reviewers.is_empty() && d.team_reviewers.is_empty() {
             ui.label(RichText::new(s::NOBODY).color(win95::theme::palette(ui.ctx()).gray_text));
         }
         for r in &d.reviewers {
             ui.label(reviewer_text(r));
         }
-        if d.viewer_can_update
+        for team in &d.team_reviewers {
+            ui.label(format!("@{team}"));
+        }
+        // Requesting reviews and assigning take triage access, editing the text does not.
+        let can_edit = d.viewer_can_update && d.viewer_can_triage;
+        if can_edit
             && ui
                 .add(Button95::new(s::EDIT_REVIEWERS).enabled(!busy))
                 .clicked()
@@ -347,7 +352,7 @@ fn people_row(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
         for a in &d.assignees {
             ui.label(format!("@{a}"));
         }
-        if d.viewer_can_update
+        if can_edit
             && ui
                 .add(Button95::new(s::EDIT_ASSIGNEES).enabled(!busy))
                 .clicked()
@@ -594,19 +599,38 @@ pub enum FileRow {
 /// Title of a thread in the Conversation tab: `path:N` or `path lines a-b`, ` (old)`
 /// before the line on the old side, then outdated (no longer placed) or resolved.
 pub fn thread_title(t: &github::ReviewThread) -> String {
-    let side = if t.side == github::DiffSide::Left {
+    let side_name = |side| {
+        if side == github::DiffSide::Left {
+            s::OLD_SIDE
+        } else {
+            s::NEW_SIDE
+        }
+    };
+    let mixed = match (t.start_side, t.start_line, t.line) {
+        (Some(start_side), Some(a), Some(b)) if mixed_sides(t) => Some((start_side, a, b)),
+        _ => None,
+    };
+    let side = if t.side == github::DiffSide::Left && mixed.is_none() {
         format!(" ({})", s::OLD_SIDE)
     } else {
         String::new()
     };
-    let line = match thread_range(t).filter(|(a, b)| a < b) {
-        Some((a, b)) => format!(
+    let line = match (mixed, thread_range(t).filter(|(a, b)| a < b)) {
+        (Some((start_side, a, b)), _) => format!(
+            " {}",
+            s::MIXED_RANGE
+                .replace("{sa}", side_name(start_side))
+                .replace("{a}", &a.to_string())
+                .replace("{sb}", side_name(t.side))
+                .replace("{b}", &b.to_string())
+        ),
+        (None, Some((a, b))) => format!(
             " {}",
             s::LINES_RANGE
                 .replace("{a}", &a.to_string())
                 .replace("{b}", &b.to_string())
         ),
-        None => t
+        (None, None) => t
             .line
             .or(t.original_line)
             .map(|l| format!(":{l}"))
@@ -623,9 +647,18 @@ pub fn thread_title(t: &github::ReviewThread) -> String {
 }
 
 /// Lines `start..=end` (first..last) a thread is about.
+/// Lines of different sides do not make a range: only the last one counts.
 pub fn thread_range(t: &github::ReviewThread) -> Option<(u32, u32)> {
     let end = t.line?;
+    if mixed_sides(t) {
+        return Some((end, end));
+    }
     Some((t.start_line.filter(|s| *s <= end).unwrap_or(end), end))
+}
+
+/// The thread starts on one side of the diff and ends on the other.
+fn mixed_sides(t: &github::ReviewThread) -> bool {
+    t.start_side.is_some_and(|side| side != t.side)
 }
 
 /// Text of the new-side lines `start..=end` of `diff`, if all are shown in it.
@@ -657,7 +690,12 @@ pub fn file_rows(
                 let thread = &threads[t];
                 for (c, comment) in thread.comments.iter().enumerate() {
                     out.push(FileRow::Comment(t, c));
-                    let Some(code) = github::suggestions(&comment.body).into_iter().next() else {
+                    // Across both sides, the lines it replaces are not known: no Apply.
+                    let Some(code) = github::suggestions(&comment.body)
+                        .into_iter()
+                        .next()
+                        .filter(|_| !mixed_sides(thread))
+                    else {
                         continue;
                     };
                     let old = thread_range(thread)

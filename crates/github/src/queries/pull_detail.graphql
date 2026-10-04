@@ -10,7 +10,7 @@ query PullDetail($owner: String!, $name: String!, $number: Int!) {
       id
       viewerCanUpdate
       reviewRequests(first: 50) {
-        nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug } } }
+        nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug organization { login } } } }
       }
       latestReviews(first: 50) { nodes { author { login } state } }
       assignees(first: 50) { nodes { login } }

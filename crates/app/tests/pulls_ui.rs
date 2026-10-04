@@ -112,6 +112,8 @@ fn world(draft: bool) -> World {
                 state: None,
             }],
             assignees: vec!["ada".into()],
+            viewer_can_triage: true,
+            team_reviewers: vec![],
         }),
     });
     let (notices, _rx) = std::sync::mpsc::channel();

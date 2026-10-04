@@ -32,6 +32,11 @@ fn slug() -> (String, String) {
 }
 
 fn world(draft: bool) -> World {
+    world_with(draft, |_| {})
+}
+
+/// `world`, with the pull request detail changed by `edit` first.
+fn world_with(draft: bool, edit: impl FnOnce(&mut PrDetail)) -> World {
     let server = mockito::Server::new();
     let worker = spawn(
         WorkerDeps {
@@ -96,43 +101,47 @@ fn world(draft: bool) -> World {
             at: String::new(),
         }],
     };
+    let mut detail = PrDetail {
+        summary,
+        body: String::new(),
+        head_sha: "abc".into(),
+        head_repo: Some(("o".into(), "r".into())),
+        cross_repository: false,
+        commits: vec![],
+        commit_count: 0,
+        comments_total: 0,
+        reviews_total: 0,
+        threads_total: 0,
+        check_runs: vec![],
+        timeline: vec![],
+        threads: vec![thread],
+        mergeable: Mergeable::Mergeable,
+        merge_state: "CLEAN".into(),
+        allowed_methods: vec![MergeMethod::Squash],
+        viewer: "ada".into(),
+        viewer_is_author: false,
+        viewer_can_write: true,
+        repo_labels: vec![],
+        id: "PR_7".into(),
+        viewer_can_update: true,
+        reviewers: vec![
+            Reviewer {
+                login: "carol".into(),
+                state: None,
+            },
+            Reviewer {
+                login: "dan".into(),
+                state: Some(github::ReviewState::Approved),
+            },
+        ],
+        assignees: vec!["bob".into()],
+        viewer_can_triage: true,
+        team_reviewers: vec!["o/core".into()],
+    };
+    edit(&mut detail);
     state.apply(Event::PullLoaded {
         slug: slug(),
-        detail: Box::new(PrDetail {
-            summary,
-            body: String::new(),
-            head_sha: "abc".into(),
-            head_repo: Some(("o".into(), "r".into())),
-            cross_repository: false,
-            commits: vec![],
-            commit_count: 0,
-            comments_total: 0,
-            reviews_total: 0,
-            threads_total: 0,
-            check_runs: vec![],
-            timeline: vec![],
-            threads: vec![thread],
-            mergeable: Mergeable::Mergeable,
-            merge_state: "CLEAN".into(),
-            allowed_methods: vec![MergeMethod::Squash],
-            viewer: "ada".into(),
-            viewer_is_author: false,
-            viewer_can_write: true,
-            repo_labels: vec![],
-            id: "PR_7".into(),
-            viewer_can_update: true,
-            reviewers: vec![
-                Reviewer {
-                    login: "carol".into(),
-                    state: None,
-                },
-                Reviewer {
-                    login: "dan".into(),
-                    state: Some(github::ReviewState::Approved),
-                },
-            ],
-            assignees: vec!["bob".into()],
-        }),
+        detail: Box::new(detail),
     });
     state.apply(Event::PullFilesLoaded {
         slug: slug(),
@@ -182,12 +191,55 @@ fn the_header_shows_people_and_offers_edits() {
     assert!(h.query_by_label("@carol").is_some(), "requested reviewer");
     assert!(h.query_by_label_contains("@dan").is_some(), "reviewed");
     assert!(h.query_by_label("@bob").is_some(), "assignee");
+    assert!(h.query_by_label("@o/core").is_some(), "requested team");
+    assert!(h.query_by_label(s::EDIT_REVIEWERS).is_some());
+    assert!(h.query_by_label(s::EDIT_ASSIGNEES).is_some());
     assert!(h.query_by_label(s::READY_FOR_REVIEW).is_some());
     h.get_by_label(s::EDIT_PULL).click();
     h.run();
     assert!(
         matches!(&h.state().state.pulls.dialog, Some(PullDialog::EditPull { title, .. }) if title == "Fix login")
     );
+}
+
+#[test]
+fn without_triage_people_cannot_be_edited() {
+    let mut h = harness(world_with(true, |d| d.viewer_can_triage = false));
+    h.run();
+    assert!(
+        h.query_by_label(s::EDIT_PULL).is_some(),
+        "the author may edit"
+    );
+    assert!(h.query_by_label(s::EDIT_REVIEWERS).is_none());
+    assert!(h.query_by_label(s::EDIT_ASSIGNEES).is_none());
+}
+
+#[test]
+fn only_teams_requested_are_shown_and_kept_out_of_the_people_dialog() {
+    let mut h = harness(world_with(false, |d| d.reviewers.clear()));
+    h.run();
+    assert!(h.query_by_label("@o/core").is_some());
+    assert!(h.query_by_label(s::NOBODY).is_none(), "a team is somebody");
+    h.get_by_label(s::EDIT_REVIEWERS).click();
+    h.run();
+    assert!(matches!(
+        &h.state().state.pulls.dialog,
+        Some(PullDialog::People { kind: PeopleKind::Reviewers, checked, .. }) if checked.is_empty()
+    ));
+}
+
+#[test]
+fn a_suggestion_across_both_sides_cannot_be_applied() {
+    let mut w = world_with(false, |d| d.threads[0].start_side = Some(DiffSide::Left));
+    w.state.pulls.sub_tab = PullTab::Files;
+    w.state.pulls.open_file("a.rs");
+    let mut h = harness(w);
+    h.run();
+    assert!(
+        h.query_by_label_contains("Simpler:").is_some(),
+        "the comment"
+    );
+    assert!(h.query_by_label(s::APPLY_SUGGESTION).is_none());
 }
 
 #[test]
@@ -373,6 +425,14 @@ fn conversation_titles_show_line_ranges_old_side_and_outdated() {
     assert_eq!(
         thread_title(&titled(Some(5), Some(2), DiffSide::Left)),
         "src/a.rs (old) lines 2-5"
+    );
+    let mut mixed = titled(Some(5), Some(2), DiffSide::Right);
+    mixed.start_side = Some(DiffSide::Left);
+    assert_eq!(thread_title(&mixed), "src/a.rs old 2 - new 5");
+    assert_eq!(
+        retrogit::ui::pull_detail::thread_range(&mixed),
+        Some((5, 5)),
+        "old and new line numbers do not make a range"
     );
     let mut gone = titled(None, None, DiffSide::Right);
     gone.outdated = true;

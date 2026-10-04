@@ -155,14 +155,32 @@ impl Worker {
                 kind,
                 add,
                 remove,
-            } => self.pull_action(&slug, number, s::NOTE_PEOPLE, |c, t, o, r| match kind {
-                crate::state::PeopleKind::Reviewers => {
-                    c.set_reviewers(t, o, r, number, &add, &remove)
-                }
-                crate::state::PeopleKind::Assignees => {
-                    c.set_assignees(t, o, r, number, &add, &remove)
-                }
-            }),
+            } => {
+                let result = self.on_github(&slug, |c, t, o, r| match kind {
+                    crate::state::PeopleKind::Reviewers => {
+                        c.set_reviewers(t, o, r, number, &add, &remove)
+                    }
+                    crate::state::PeopleKind::Assignees => {
+                        c.set_assignees(t, o, r, number, &add, &remove)
+                    }
+                });
+                self.pull_result(&slug, number, s::NOTE_PEOPLE, result, |e| match e {
+                    GithubError::PeopleHalf {
+                        not_removed,
+                        reason,
+                    } => {
+                        let what = match kind {
+                            crate::state::PeopleKind::Reviewers => s::PEOPLE_REVIEWERS,
+                            crate::state::PeopleKind::Assignees => s::PEOPLE_ASSIGNEES,
+                        };
+                        Some(
+                            AppError::new(Severity::Warning, &s::people_partly(what, not_removed))
+                                .with_detail(reason),
+                        )
+                    }
+                    _ => None,
+                });
+            }
             Command::SetDraft {
                 slug,
                 number,
@@ -258,13 +276,30 @@ impl Worker {
         note: &str,
         call: impl Fn(&Client, &str, &str, &str) -> Result<(), GithubError>,
     ) {
-        match self.on_github(slug, call) {
+        let result = self.on_github(slug, call);
+        self.pull_result(slug, number, note, result, |_| None);
+    }
+
+    /// Report the `result` of an action on pull request `number` (`special` may word an
+    /// error its own way), then reload it.
+    fn pull_result(
+        &mut self,
+        slug: &Slug,
+        number: u64,
+        note: &str,
+        result: Result<(), GithubError>,
+        special: impl Fn(&GithubError) -> Option<AppError>,
+    ) {
+        match result {
             Ok(()) => self.emit(Event::PullActionDone {
                 slug: slug.clone(),
                 number,
                 note: note.to_string(),
             }),
-            Err(e) => self.github_failed(Op::PullAction, &e),
+            Err(e) => match special(&e) {
+                Some(error) => self.fail(Op::PullAction, error),
+                None => self.github_failed(Op::PullAction, &e),
+            },
         }
         self.load_pull(slug, number);
     }

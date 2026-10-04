@@ -94,6 +94,8 @@ fn detail(number: u64) -> PrDetail {
         viewer_can_update: true,
         reviewers: vec![],
         assignees: vec![],
+        viewer_can_triage: true,
+        team_reviewers: vec![],
     }
 }
 

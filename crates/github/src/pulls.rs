@@ -265,6 +265,10 @@ pub struct PrDetail {
     /// Requested reviewers first, then people who reviewed (latest state).
     pub reviewers: Vec<Reviewer>,
     pub assignees: Vec<String>,
+    /// The viewer may triage (request reviewers, assign): triage access or more.
+    pub viewer_can_triage: bool,
+    /// Teams asked to review, as "org/slug".
+    pub team_reviewers: Vec<String>,
 }
 
 /// A changed file of a pull request.
@@ -632,6 +636,20 @@ fn parse_detail(data: &Value) -> Result<PrDetail, GithubError> {
         assignees: nodes(&p["assignees"])
             .filter_map(|a| a["login"].as_str().map(str::to_string))
             .collect(),
+        viewer_can_triage: matches!(
+            repo["viewerPermission"].as_str(),
+            Some("ADMIN" | "MAINTAIN" | "WRITE" | "TRIAGE")
+        ),
+        team_reviewers: nodes(&p["reviewRequests"])
+            .filter_map(|r| {
+                let team = &r["requestedReviewer"];
+                Some(format!(
+                    "{}/{}",
+                    team["organization"]["login"].as_str()?,
+                    team["slug"].as_str()?
+                ))
+            })
+            .collect(),
     })
 }
 
@@ -643,9 +661,13 @@ fn reviewers(p: &Value) -> Vec<Reviewer> {
             state: None,
         })
         .collect();
+    let author = login(&p["author"]);
     for r in nodes(&p["latestReviews"]) {
         let login = login(&r["author"]);
-        if out.iter().any(|o| o.login.eq_ignore_ascii_case(&login)) {
+        // The author's own comments on the diff are not a review of it.
+        if login.eq_ignore_ascii_case(&author)
+            || out.iter().any(|o| o.login.eq_ignore_ascii_case(&login))
+        {
             continue;
         }
         out.push(Reviewer {

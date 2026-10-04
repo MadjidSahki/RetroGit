@@ -489,6 +489,15 @@ pub const EDIT_ASSIGNEES: &str = "Edit assignees";
 pub const REVIEWERS: &str = "Reviewers:";
 pub const ASSIGNEES: &str = "Assignees:";
 pub const NOBODY: &str = "nobody";
+pub const PEOPLE_REVIEWERS: &str = "Reviewers";
+pub const PEOPLE_ASSIGNEES: &str = "Assignees";
+
+/// People were added, then removing `who` failed: "Assignees added, but @bob could not be
+/// removed."
+pub fn people_partly(what: &str, who: &[String]) -> String {
+    let who: Vec<String> = who.iter().map(|w| format!("@{w}")).collect();
+    format!("{what} added, but {} could not be removed.", who.join(", "))
+}
 pub const READY_FOR_REVIEW: &str = "Ready for review";
 pub const CONVERT_TO_DRAFT: &str = "Convert to draft";
 pub const COMMENT_ON_LINES: &str = "Comment on lines {a}-{b}...";
@@ -497,6 +506,9 @@ pub const APPLY_SUGGESTION: &str = "Apply suggestion";
 pub const LINES_RANGE: &str = "lines {a}-{b}";
 /// A review thread on the old side of the diff, as in "path (old):12".
 pub const OLD_SIDE: &str = "old";
+pub const NEW_SIDE: &str = "new";
+/// A thread starting on one side of the diff and ending on the other: "old 2 - new 5".
+pub const MIXED_RANGE: &str = "{sa} {a} - {sb} {b}";
 pub const WHY_FORK_SUGGESTION: &str =
     "This pull request comes from a fork: apply its suggestions on github.com.";
 pub const WHY_CHECKS_RUNNING: &str = "Waiting for the required checks to finish.";

@@ -546,7 +546,7 @@ impl AppError {
         }
     }
 
-    fn with_detail(mut self, detail: impl ToString) -> AppError {
+    pub(crate) fn with_detail(mut self, detail: impl ToString) -> AppError {
         self.detail = Some(detail.to_string());
         self
     }

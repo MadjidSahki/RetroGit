@@ -267,15 +267,7 @@ impl Client {
         if !add.is_empty() {
             self.api_send("POST", &path, token, Some(&json!({ "reviewers": add })))?;
         }
-        if !remove.is_empty() {
-            self.api_send(
-                "DELETE",
-                &path,
-                token,
-                Some(&json!({ "reviewers": remove })),
-            )?;
-        }
-        Ok(())
+        self.remove_people(&path, token, "reviewers", remove, !add.is_empty())
     }
 
     pub fn set_assignees(
@@ -291,15 +283,30 @@ impl Client {
         if !add.is_empty() {
             self.api_send("POST", &path, token, Some(&json!({ "assignees": add })))?;
         }
-        if !remove.is_empty() {
-            self.api_send(
-                "DELETE",
-                &path,
-                token,
-                Some(&json!({ "assignees": remove })),
-            )?;
+        self.remove_people(&path, token, "assignees", remove, !add.is_empty())
+    }
+
+    /// DELETE `remove` (under `key`) from `path`; after an addition (`added`), a failure
+    /// says which half was done.
+    fn remove_people(
+        &self,
+        path: &str,
+        token: &str,
+        key: &str,
+        remove: &[String],
+        added: bool,
+    ) -> Result<(), GithubError> {
+        if remove.is_empty() {
+            return Ok(());
         }
-        Ok(())
+        match self.api_send("DELETE", path, token, Some(&json!({ key: remove }))) {
+            Ok(_) => Ok(()),
+            Err(e) if added && e != GithubError::Unauthorized => Err(GithubError::PeopleHalf {
+                not_removed: remove.to_vec(),
+                reason: e.to_string(),
+            }),
+            Err(e) => Err(e),
+        }
     }
 
     /// Turn the pull request (GraphQL id `pull_id`) into a draft, or mark it ready.

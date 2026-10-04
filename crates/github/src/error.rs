@@ -24,6 +24,12 @@ pub enum GithubError {
     NotFound(String),
     #[error("could not decode GitHub response: {0}")]
     Decode(String),
+    /// People were added, then removing `not_removed` failed (GitHub's `reason`).
+    #[error("{reason}")]
+    PeopleHalf {
+        not_removed: Vec<String>,
+        reason: String,
+    },
 }
 
 impl From<ureq::Error> for GithubError {

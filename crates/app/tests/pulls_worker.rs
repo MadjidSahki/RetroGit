@@ -947,6 +947,60 @@ mod more {
     }
 
     #[test]
+    fn a_half_done_people_change_says_which_half() {
+        let mut server = mockito::Server::new();
+        let w = signed_in(&mut server, TokenProvider::without_gh());
+        let add = server
+            .mock("POST", "/repos/o/r/issues/7/assignees")
+            .match_body(Matcher::Json(json!({ "assignees": ["carol"] })))
+            .with_status(201)
+            .with_body("{}")
+            .create();
+        let remove = server
+            .mock("DELETE", "/repos/o/r/issues/7/assignees")
+            .with_status(422)
+            .with_body(r#"{"message":"Validation Failed"}"#)
+            .create();
+        let (_d, _f) = mock_detail(&mut server, 7);
+        w.send(Command::SetPeople {
+            slug: slug(),
+            number: 7,
+            kind: retrogit::state::PeopleKind::Assignees,
+            add: vec!["carol".into()],
+            remove: vec!["bob".into(), "dan".into()],
+        });
+        let evs = until(&w, |e| matches!(e, Event::PullFilesLoaded { .. }));
+        add.assert();
+        remove.assert();
+        let message = evs.iter().find_map(|e| match e {
+            Event::Error {
+                during: Op::PullAction,
+                error,
+            } => Some(error.message.clone()),
+            _ => None,
+        });
+        assert_eq!(
+            message.as_deref(),
+            Some("Assignees added, but @bob, @dan could not be removed.")
+        );
+        assert_eq!(
+            message.unwrap(),
+            retrogit::strings::people_partly(
+                retrogit::strings::PEOPLE_ASSIGNEES,
+                &["bob".to_string(), "dan".to_string()]
+            )
+        );
+        assert!(
+            evs.iter().any(|e| matches!(e, Event::PullLoaded { .. })),
+            "reloaded"
+        );
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, Event::PullActionDone { .. }))
+        );
+    }
+
+    #[test]
     fn people_who_can_be_asked_are_loaded() {
         let mut server = mockito::Server::new();
         let w = signed_in(&mut server, TokenProvider::without_gh());
