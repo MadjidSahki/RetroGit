@@ -25,13 +25,19 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                         ui.hyperlink(link);
                     }
                     if let Some(detail) = &msg.detail {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(detail)
-                                    .color(win95::theme::palette(ui.ctx()).gray_text),
-                            )
-                            .wrap(),
-                        );
+                        // Git's output can be very long: it scrolls, OK stays on screen.
+                        egui::ScrollArea::vertical()
+                            .id_salt("message_detail")
+                            .max_height(220.0)
+                            .show(ui, |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(detail)
+                                            .color(win95::theme::palette(ui.ctx()).gray_text),
+                                    )
+                                    .wrap(),
+                                );
+                            });
                     }
                 });
             });

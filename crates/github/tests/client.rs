@@ -157,7 +157,7 @@ fn device_code_request_and_poll() {
         .match_header("accept", "application/json")
         .match_body(Matcher::AllOf(vec![
             Matcher::UrlEncoded("client_id".into(), "Iv1.test".into()),
-            Matcher::UrlEncoded("scope".into(), "repo read:org".into()),
+            Matcher::UrlEncoded("scope".into(), "repo read:org workflow".into()),
         ]))
         .with_body(r#"{"device_code":"dc1","user_code":"ABCD-1234","verification_uri":"https://github.com/login/device","expires_in":900,"interval":5}"#)
         .create();

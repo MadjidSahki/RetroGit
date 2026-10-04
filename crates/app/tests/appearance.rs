@@ -145,6 +145,7 @@ fn harness() -> Harness<'static, World> {
                     notices: &w.notices,
                 };
                 retrogit::ui::appearance::show(&ctx, &mut cx);
+                retrogit::ui::message::show(&ctx, &mut cx);
             },
             w,
         );
@@ -309,4 +310,20 @@ fn the_window_geometry_is_read_without_locking_egui_twice() {
     }
     let g = got.unwrap();
     assert_eq!((g.width, g.height), (900.0, 600.0));
+}
+
+#[test]
+fn a_huge_error_detail_keeps_the_ok_button_on_screen() {
+    let mut h = harness();
+    h.state_mut().state.appearance_dialog = None;
+    let detail = "remote: Resolving deltas:  66% (40/60)\n".repeat(400);
+    let mut msg =
+        retrogit::protocol::AppError::new(retrogit::protocol::Severity::Error, "Push failed");
+    msg.detail = Some(detail);
+    h.state_mut().state.messages.push_back(msg);
+    h.run();
+    h.run();
+    let screen = h.ctx.content_rect();
+    let ok = h.get_by_label(s::OK).rect();
+    assert!(screen.contains_rect(ok), "OK at {ok:?}, screen {screen:?}");
 }

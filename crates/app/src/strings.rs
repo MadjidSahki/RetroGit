@@ -46,7 +46,8 @@ pub const COPY_CODE: &str = "Copy code";
 pub const OPEN_BROWSER: &str = "Open browser";
 pub const WAITING_AUTH: &str = "Waiting for authorization...";
 pub const PAT_LABEL: &str = "Personal access token:";
-pub const PAT_HELP: &str = "Use a token with 'repo' and 'read:org' scopes, authorized for SSO.";
+pub const PAT_HELP: &str =
+    "Use a token with 'repo', 'read:org' and 'workflow' scopes, authorized for SSO.";
 pub const OK: &str = "OK";
 pub const CANCEL: &str = "Cancel";
 
@@ -613,3 +614,4 @@ pub const FIRST_SHOWN: &str = " (first 1000 shown)";
 pub const CANCEL_SEARCH: &str = "Cancel";
 pub const EXPLORE_SELECT_FILE: &str = "Select a file.";
 pub const NO_BLAME_BINARY: &str = "Binary or very large file: no blame.";
+pub const ERR_WORKFLOW_SCOPE: &str = "GitHub refused the push: it changes workflows (.github/workflows) and your sign-in does not allow that. Sign in again with this account (File > Accounts): RetroGit now asks for the 'workflow' permission.";

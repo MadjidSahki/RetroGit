@@ -43,6 +43,11 @@ impl RetroGitApp {
         ctx: egui::Context,
     ) -> RetroGitApp {
         worker.send(Command::ValidateToken);
+        #[cfg(target_os = "macos")]
+        {
+            let wake = ctx.clone();
+            crate::notify::macos::set_waker(move || wake.request_repaint());
+        }
         // Cmd/Ctrl +, - and 0 are handled here (bounded steps, saved in the config).
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let ides_ctx = ctx.clone();
@@ -90,7 +95,7 @@ impl RetroGitApp {
         initial: Option<PathBuf>,
     ) -> RetroGitApp {
         if let Some(path) = initial {
-            self.worker.send(Command::OpenRepo(path));
+            self.open_requested(path);
         }
         let Some(dir) = dir else { return self };
         let (tx, rx) = std::sync::mpsc::channel();
@@ -125,7 +130,7 @@ impl RetroGitApp {
                 let several = accounts.list().len() > 1;
                 for e in &events {
                     let (title, body) = crate::notify::notification_text(e, several);
-                    crate::notify::show(&title, &body);
+                    crate::notify::show(&title, &body, Some(crate::notify::event_link(e)));
                 }
                 let _ = tx.send(events);
                 ctx.request_repaint();
@@ -155,6 +160,15 @@ impl RetroGitApp {
             };
             (path, w)
         });
+    }
+
+    /// A folder to open, or a `retrogit://` notification link (from the command line or the
+    /// instance channel).
+    fn open_requested(&mut self, path: PathBuf) {
+        match crate::cli::route(path) {
+            crate::cli::Requested::Link(link) => self.state.open_link(&link),
+            crate::cli::Requested::Folder(path) => self.worker.send(Command::OpenRepo(path)),
+        }
     }
 
     /// Apply the saved appearance when it changed (and at the first frame).
@@ -243,8 +257,13 @@ impl eframe::App for RetroGitApp {
             .map(|rx| rx.try_iter().collect())
             .unwrap_or_default();
         for path in requested {
-            self.worker.send(Command::OpenRepo(path));
+            self.open_requested(path);
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+        #[cfg(target_os = "macos")]
+        for link in crate::notify::macos::take_clicked() {
+            self.state.open_link(&link);
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
         if let Some(found) = self.ides.as_ref().and_then(|rx| rx.try_recv().ok()) {
@@ -306,6 +325,7 @@ impl eframe::App for RetroGitApp {
         ui::git_dialogs::show(&egui_ctx, &mut cx);
         ui::explore::search_dialog(&egui_ctx, &mut cx);
         ui::notifications::show(&egui_ctx, &mut cx);
+        ui::notifications::open_links(&egui_ctx, &mut cx);
         ui::message::show(&egui_ctx, &mut cx);
     }
 

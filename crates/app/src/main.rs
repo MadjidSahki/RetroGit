@@ -24,6 +24,8 @@ fn main() -> eframe::Result {
     let initial = match retrogit::cli::parse(&std::env::args().collect::<Vec<_>>()) {
         retrogit::cli::Launch::Cli { target } => return run_cli(&target, data_dir.as_deref()),
         retrogit::cli::Launch::Gui { open } => open,
+        // A clicked notification link goes the way of a folder: to the open window if any.
+        retrogit::cli::Launch::Link { link } => Some(std::path::PathBuf::from(link)),
     };
     // `--open` (also used by the command when it starts a window): join a window that is
     // already open instead of starting a second one.
@@ -36,7 +38,12 @@ fn main() -> eframe::Result {
         logging::init(&dir.join("retrogit.log"));
     }
     logging::install_panic_hook();
-    log::info!("RetroGit {} starting", env!("CARGO_PKG_VERSION"));
+    // Before the window: the click that launched the app must find its handler.
+    #[cfg(target_os = "macos")]
+    retrogit::notify::macos::init();
+    #[cfg(windows)]
+    std::thread::spawn(retrogit::notify::winreg::register);
+    log::info!("RetroGit {} starting", retrogit::version::version());
     if let Ok(exe) = std::env::current_exe() {
         gitcore::set_askpass_program(exe);
     }

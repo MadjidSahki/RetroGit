@@ -9,10 +9,21 @@ pub enum Launch {
     Gui { open: Option<PathBuf> },
     /// From the installed `retrogit` command: `--cli <cwd> [path]`.
     Cli { target: PathBuf },
+    /// A clicked notification (`retrogit://...`, Windows): open its pull request.
+    Link { link: String },
 }
 
 /// Parse `std::env::args()` (unknown arguments, such as macOS `-psn_...`, are ignored).
 pub fn parse(args: &[String]) -> Launch {
+    // A `retrogit:` link (Windows hands it to us raw, quotes included) decides alone: the
+    // other arguments may have been smuggled into the link (`retrogit:" --open "\\host\x`).
+    if let Some(link) = args.iter().skip(1).find(|a| is_link(a)) {
+        return if link.to_ascii_lowercase().starts_with("retrogit://") {
+            Launch::Link { link: link.clone() }
+        } else {
+            Launch::Gui { open: None }
+        };
+    }
     let mut it = args.iter().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -33,6 +44,29 @@ pub fn parse(args: &[String]) -> Launch {
         }
     }
     Launch::Gui { open: None }
+}
+
+fn is_link(a: &str) -> bool {
+    a.get(..9)
+        .is_some_and(|p| p.eq_ignore_ascii_case("retrogit:"))
+}
+
+/// What another instance (or the command line) asked to open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Requested {
+    Folder(PathBuf),
+    /// A notification link (`retrogit://...`).
+    Link(String),
+}
+
+/// A link travels as the "folder" of the single-instance channel: tell them apart.
+pub fn route(path: PathBuf) -> Requested {
+    let text = path.to_string_lossy();
+    if is_link(&text) {
+        Requested::Link(text.into_owned())
+    } else {
+        Requested::Folder(path)
+    }
 }
 
 fn sh_quote(s: &str) -> String {

@@ -290,3 +290,130 @@ fn the_pull_request_opens_once_its_repository_is_open() {
     st.show_pull(9);
     assert_eq!(st.pulls.selected, Some(9));
 }
+
+#[test]
+fn notification_links_survive_any_repository_name() {
+    use retrogit::notify::{PullLink, parse_pull_link, pull_link};
+    let l = PullLink {
+        repo: "o-1/r.dot_x".into(),
+        number: 42,
+        account: "me & you".into(),
+    };
+    let url = pull_link(&l);
+    assert!(url.starts_with("retrogit://pull?"), "{url}");
+    assert!(!url.contains(' ') && !url.contains('&'.to_string().repeat(2).as_str()));
+    assert_eq!(parse_pull_link(&url), Some(l.clone()));
+    assert_eq!(
+        parse_pull_link(&pull_link(&PullLink {
+            repo: "a/b".into(),
+            number: 1,
+            account: String::new()
+        }))
+        .unwrap()
+        .repo,
+        "a/b"
+    );
+    for bad in [
+        "https://x",
+        "retrogit://pull?repo=o/r",
+        "retrogit://pull?repo=o/r&number=x",
+        "retrogit://other?number=1",
+    ] {
+        assert_eq!(parse_pull_link(bad), None, "{bad}");
+    }
+    let e = event("o/r", 7);
+    assert_eq!(
+        parse_pull_link(&retrogit::notify::event_link(&e)),
+        Some(PullLink {
+            repo: "o/r".into(),
+            number: 7,
+            account: e.account.clone()
+        })
+    );
+}
+
+#[test]
+fn a_clicked_link_opens_its_pull_request() {
+    let mut st = AppState::new(Config::default());
+    let here = std::env::temp_dir();
+    let a = here.join("a").display().to_string();
+    opened(&mut st, &a, "https://github.com/o/a.git");
+    let link = retrogit::notify::event_link(&event("o/a", 3));
+    st.open_link(&link);
+    assert_eq!(st.take_links(), [link.as_str()]);
+    assert!(st.take_links().is_empty());
+    let target = st.link_target(&link, |_| None);
+    assert_eq!(target, Some(NotificationTarget::Current(3)));
+    assert_eq!(
+        st.link_target(&retrogit::notify::event_link(&event("x/y", 5)), |_| None),
+        Some(NotificationTarget::Browser(
+            "https://github.com/x/y/pull/5".into()
+        ))
+    );
+    assert_eq!(st.link_target("retrogit://nope", |_| None), None);
+}
+
+#[test]
+fn a_link_on_the_command_line_opens_the_gui() {
+    let link = "retrogit://pull?repo=o%2Fr&number=7&account=me";
+    let args: Vec<String> = ["retrogit", link].iter().map(|s| s.to_string()).collect();
+    assert_eq!(
+        retrogit::cli::parse(&args),
+        retrogit::cli::Launch::Link {
+            link: link.to_string()
+        }
+    );
+}
+
+#[test]
+fn a_crafted_link_cannot_smuggle_options() {
+    use retrogit::cli::{Launch, parse};
+    let args = |a: &[&str]| -> Vec<String> { a.iter().map(|s| s.to_string()).collect() };
+    // Windows pastes the URL raw into `"exe" "%1"`: quotes in it split the arguments.
+    let smuggled = args(&["retrogit.exe", "retrogit:", "--open", r"\\host\share\repo"]);
+    assert_eq!(parse(&smuggled), Launch::Gui { open: None });
+    let cli = args(&["retrogit.exe", "retrogit:x", "--cli", "/tmp", "evil"]);
+    assert_eq!(parse(&cli), Launch::Gui { open: None });
+    let upper = args(&[
+        "retrogit.exe",
+        "RETROGIT://pull/?repo=o%2Fr&number=7&account=a",
+    ]);
+    assert!(matches!(parse(&upper), Launch::Link { .. }));
+}
+
+#[test]
+fn links_normalized_by_windows_still_open_their_pull_request() {
+    use retrogit::notify::parse_pull_link;
+    for url in [
+        "retrogit://pull/?repo=o%2Fr&number=7&account=a",
+        "RETROGIT://PULL?repo=o%2Fr&number=7&account=a",
+    ] {
+        let l = parse_pull_link(url).unwrap_or_else(|| panic!("{url}"));
+        assert_eq!((l.repo.as_str(), l.number), ("o/r", 7));
+    }
+}
+
+#[test]
+fn what_arrives_from_another_instance_is_routed_by_kind() {
+    use retrogit::cli::{Requested, route};
+    assert_eq!(
+        route(std::path::PathBuf::from("/w/repo")),
+        Requested::Folder(std::path::PathBuf::from("/w/repo"))
+    );
+    assert_eq!(
+        route(std::path::PathBuf::from(
+            "Retrogit://pull?repo=o%2Fr&number=1"
+        )),
+        Requested::Link("Retrogit://pull?repo=o%2Fr&number=1".into())
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn outside_retrogit_app_notifications_stay_on_osascript() {
+    retrogit::notify::macos::init();
+    assert!(
+        !retrogit::notify::macos::native(),
+        "tests do not run from an app bundle"
+    );
+}

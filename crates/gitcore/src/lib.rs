@@ -43,7 +43,7 @@ pub use ops::{OpOutcome, Operation, ResetMode};
 pub use rebase_todo::{TodoAction, TodoItem, TodoText, todo_text, validate_todo};
 pub use remote::{
     NetProgress, PullMode, PullOutcome, PushMode, classify_net_failure, parse_progress,
-    retry_without_token,
+    retry_without_token, strip_progress,
 };
 pub use signing::{SigningConfig, SigningFormat};
 pub use stash::StashEntry;
