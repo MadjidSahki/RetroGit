@@ -40,4 +40,5 @@ pub use token_store::{
 pub use watch::{PrEvent, PrEventKind, PrSnapshot, date_days_before, diff_snapshots};
 
 /// OAuth scopes requested by RetroGit.
-pub const SCOPES: &[&str] = &["repo", "read:org"];
+/// `workflow`: pushes that change `.github/workflows` are refused without it.
+pub const SCOPES: &[&str] = &["repo", "read:org", "workflow"];

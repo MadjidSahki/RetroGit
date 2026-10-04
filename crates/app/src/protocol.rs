@@ -569,6 +569,9 @@ impl AppError {
             }
             GitError::Cancelled => AppError::new(Severity::Info, s::INFO_CLONE_CANCELLED),
             GitError::Auth(d) => AppError::new(Severity::Error, s::ERR_GIT_AUTH).with_detail(d),
+            GitError::MissingWorkflowScope(d) => {
+                AppError::new(Severity::Warning, s::ERR_WORKFLOW_SCOPE).with_detail(d)
+            }
             GitError::Network(d) => {
                 AppError::new(Severity::Warning, s::ERR_NO_NETWORK).with_detail(d)
             }

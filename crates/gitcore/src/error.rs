@@ -44,6 +44,9 @@ pub enum GitError {
     /// SSO authorization, or an organization blocking the OAuth App.
     #[error("access denied: {0}")]
     AccessDenied(String),
+    /// A push changing `.github/workflows` with a token without the `workflow` scope.
+    #[error("the push changes GitHub workflows, which the token may not do")]
+    MissingWorkflowScope(String),
     /// The lines a suggestion replaces changed since it was written.
     #[error("the lines changed since the suggestion was written")]
     SuggestionOutdated,

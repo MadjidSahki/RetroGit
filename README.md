@@ -160,7 +160,7 @@ network operations, so your hooks, signing, SSH keys and credential helpers keep
 1. Open RetroGit: the **Sign in to GitHub** window appears.
 2. **Standard** tab → **Sign in**, then **Open browser**, enter the code and authorize RetroGit
    (and your SSO organizations if needed).
-3. Or, in the **Advanced** tab, paste a personal access token (classic, scopes `repo` and `read:org`).
+3. Or, in the **Advanced** tab, paste a personal access token (classic, scopes `repo`, `read:org` and `workflow`).
 
 > **Organizations that restrict OAuth apps.** Fetch, pull and push then retry with your own
 > git credentials, like `git` in a terminal. For pull requests, RetroGit uses the token of the

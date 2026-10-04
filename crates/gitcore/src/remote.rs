@@ -55,9 +55,25 @@ pub enum PushMode {
 }
 
 /// Map a failed network command's output to an error.
+/// `output` without git's progress lines (`remote: Resolving deltas: 66% ...`): they are
+/// noise in an error message.
+pub fn strip_progress(output: &str) -> String {
+    output
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty() && parse_progress(t).is_none() && !t.starts_with("Enumerating objects")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn classify_net_failure(output: &str) -> GitError {
+    let output = &strip_progress(output);
     let o = output.to_ascii_lowercase();
-    if o.contains("[rejected]")
+    if o.contains("without `workflow` scope") {
+        GitError::MissingWorkflowScope(output.trim().to_string())
+    } else if o.contains("[rejected]")
         && (o.contains("non-fast-forward") || o.contains("fetch first") || o.contains("stale info"))
     {
         GitError::PushRejected
@@ -95,6 +111,14 @@ pub fn retry_without_token<T>(
                     Err(GitError::AccessDenied(first))
                 }
                 other => other,
+            }
+        }
+        // The user's own credentials (often the GitHub CLI's) may be allowed to change
+        // workflows; if not, say what is missing.
+        Err(GitError::MissingWorkflowScope(first)) if auth.github_token.is_some() => {
+            match run(&NetAuth::default()) {
+                Err(_) => Err(GitError::MissingWorkflowScope(first)),
+                ok => ok,
             }
         }
         other => other,
@@ -384,6 +408,38 @@ mod tests {
         assert_eq!(parse_progress("From github.com:o/r"), None);
         assert_eq!(parse_progress("To github.com:o/r.git"), None);
         assert_eq!(parse_progress(""), None);
+    }
+
+    #[test]
+    fn a_push_changing_workflows_needs_the_workflow_scope() {
+        let out = "remote: Resolving deltas: 100% (60/60)\nTo https://github.com/o/r.git\n ! [remote rejected] feat -> feat (refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope)\nerror: failed to push some refs";
+        assert!(matches!(
+            classify_net_failure(out),
+            GitError::MissingWorkflowScope(_)
+        ));
+        // The user's own git credentials (often the GitHub CLI's) may have it.
+        let auth = NetAuth {
+            github_token: Some("gho_x".into()),
+        };
+        let mut calls = Vec::new();
+        let r = retry_without_token(&auth, |a| {
+            calls.push(a.github_token.is_some());
+            if a.github_token.is_some() {
+                Err(GitError::MissingWorkflowScope("x".into()))
+            } else {
+                Ok(1)
+            }
+        });
+        assert_eq!((r, calls), (Ok(1), vec![true, false]));
+    }
+
+    #[test]
+    fn progress_lines_are_left_out_of_error_details() {
+        let out = "Enumerating objects: 138, done.\nremote: Resolving deltas:  66% (40/60)        \nremote: Resolving deltas: 100% (60/60), completed with 23 local objects.        \nTo https://github.com/o/r.git\n ! [remote rejected] main -> main (protected)\nerror: failed to push some refs";
+        assert_eq!(
+            strip_progress(out),
+            "To https://github.com/o/r.git\n ! [remote rejected] main -> main (protected)\nerror: failed to push some refs"
+        );
     }
 
     #[test]
