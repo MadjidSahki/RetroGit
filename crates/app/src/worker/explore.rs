@@ -161,6 +161,8 @@ fn answer(
             result: repo.grep(&rev, &text, match_case, &paths, EXPLORE_LIMIT, cancel)?,
             rev,
             text,
+            match_case,
+            paths,
         },
         ExploreRequest::LogSearch { kind, query } => {
             let (entries, truncated) = repo.search_log(kind, &query, EXPLORE_LIMIT, cancel)?;

@@ -302,7 +302,8 @@ fn notification_links_survive_any_repository_name() {
     };
     let url = pull_link(&l);
     assert!(url.starts_with("retrogit://pull?"), "{url}");
-    assert!(!url.contains(' ') && !url.contains('&'.to_string().repeat(2).as_str()));
+    assert!(!url.contains(' '), "a space is escaped: {url}");
+    assert!(!url.contains("&&"), "an `&` in a value is escaped: {url}");
     assert_eq!(parse_pull_link(&url), Some(l.clone()));
     assert_eq!(
         parse_pull_link(&pull_link(&PullLink {
@@ -369,11 +370,12 @@ fn a_clicked_link_opens_its_pull_request() {
     assert_eq!(st.take_links(), [link.as_str()]);
     assert!(st.take_links().is_empty());
     let target = st.link_target(&link, |_| None);
-    assert_eq!(target, Some(NotificationTarget::Current(3)));
+    assert_eq!(target, Some(("o/a".into(), NotificationTarget::Current(3))));
     assert_eq!(
         st.link_target(&retrogit::notify::event_link(&event("x/y", 5)), |_| None),
-        Some(NotificationTarget::Browser(
-            "https://github.com/x/y/pull/5".into()
+        Some((
+            "x/y".into(),
+            NotificationTarget::Browser("https://github.com/x/y/pull/5".into())
         ))
     );
     assert_eq!(st.link_target("retrogit://nope", |_| None), None);

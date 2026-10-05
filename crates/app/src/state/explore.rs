@@ -508,9 +508,18 @@ impl ExploreView {
                 self.history_colors = Colors::NotRequested;
                 self.history_diff = Some(diff);
             }
-            ExploreResult::Grep { rev, text, result } => {
+            ExploreResult::Grep {
+                rev,
+                text,
+                match_case,
+                paths,
+                result,
+            } => {
+                // Only the answer of the search shown (an older one may arrive late).
                 if let Some(sv) = self.search.as_mut()
                     && sv.text == text
+                    && sv.match_case == match_case
+                    && sv.paths == paths
                     && rev == self.rev
                 {
                     sv.running = false;

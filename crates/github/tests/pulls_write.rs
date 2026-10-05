@@ -428,7 +428,7 @@ fn threads_are_resolved_and_unresolved_with_graphql() {
     let resolve = server
         .mock("POST", "/graphql")
         .match_body(Matcher::AllOf(vec![
-            Matcher::Regex("resolveReviewThread\\(input: \\{ threadId: \\$id \\}\\)".into()),
+            Matcher::Regex("\\bresolveReviewThread\\(input: \\{ threadId: \\$id \\}\\)".into()),
             Matcher::PartialJson(json!({ "variables": { "id": "PRRT_1" } })),
         ]))
         .with_body(r#"{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}"#)

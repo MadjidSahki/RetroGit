@@ -219,6 +219,8 @@ fn search_results_open_the_file_at_the_line() {
         ExploreResult::Grep {
             rev: "HEAD".into(),
             text: "needle".into(),
+            match_case: false,
+            paths: String::new(),
             result: GrepResult {
                 matches: vec![GrepMatch {
                     path: "src/main.rs".into(),

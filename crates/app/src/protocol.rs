@@ -472,7 +472,6 @@ pub enum Event {
         note: String,
         stash_kept: bool,
     },
-    /// Local changes prevent `retry` from starting (nothing was changed).
     /// Answer of the explore service for the repository at `repo`.
     ExploreLoaded {
         repo: std::path::PathBuf,
@@ -480,6 +479,7 @@ pub enum Event {
     },
     /// Result of a tag action, shown in the Tags window.
     TagsStatus(String),
+    /// Local changes prevent `retry` from starting (nothing was changed).
     OpBlocked {
         retry: Box<Command>,
         files: Vec<String>,
@@ -752,6 +752,8 @@ pub enum ExploreResult {
     Grep {
         rev: String,
         text: String,
+        match_case: bool,
+        paths: String,
         result: gitcore::GrepResult,
     },
     LogSearch {

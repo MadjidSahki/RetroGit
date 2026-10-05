@@ -146,8 +146,9 @@ impl Repo {
                 Err(e) => return Err(GitError::Other(format!("git failed: {e}"))),
             }
         };
-        let truncated = enough.load(Ordering::Relaxed);
+        // The reader may still be on the last lines once git has exited: wait for it.
         let stdout = String::from_utf8_lossy(&out_reader.join().unwrap_or_default()).into_owned();
+        let truncated = enough.load(Ordering::Relaxed);
         let err = if truncated {
             Vec::new()
         } else {

@@ -202,3 +202,22 @@ fn searching_commits_of_an_empty_repository_finds_nothing() {
         );
     }
 }
+
+#[test]
+fn a_capped_search_knows_it_was_capped_even_by_one_line() {
+    let Some((d, r)) = repo() else { return };
+    commit_as(d.path(), "Ada", "eleven.txt", &"x\n".repeat(11), "eleven");
+    commit_as(d.path(), "Ada", "ten.txt", &"x\n".repeat(10), "ten");
+    // The cap is read once git's output is fully read: repeat to catch a reader that is late.
+    for i in 0..50 {
+        let over = r.grep("HEAD", "x", true, "eleven.txt", 10, &NO).unwrap();
+        assert_eq!(over.matches.len(), 10, "run {i}");
+        assert!(over.truncated, "11 lines for a limit of 10 (run {i})");
+        let exact = r.grep("HEAD", "x", true, "ten.txt", 10, &NO).unwrap();
+        assert_eq!(exact.matches.len(), 10, "run {i}");
+        assert!(
+            !exact.truncated,
+            "exactly the limit is not capped (run {i})"
+        );
+    }
+}

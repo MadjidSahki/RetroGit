@@ -104,12 +104,9 @@ fn open_target(egui_ctx: &egui::Context, cx: &mut Ctx<'_>, repo: &str, target: N
 /// Open the pull requests of clicked notifications (links left by the system).
 pub fn open_links(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
     for link in cx.state.take_links() {
-        match (
-            cx.state.link_target(&link, slug_of),
-            crate::notify::parse_pull_link(&link),
-        ) {
-            (Some(target), Some(l)) => open_target(egui_ctx, cx, &l.repo, target),
-            _ => log::warn!("ignored notification link (not a valid pull request link): {link}"),
+        match cx.state.link_target(&link, slug_of) {
+            Some((repo, target)) => open_target(egui_ctx, cx, &repo, target),
+            None => log::warn!("ignored notification link (not a valid pull request link): {link}"),
         }
     }
 }

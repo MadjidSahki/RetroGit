@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use crate::{GitError, OpOutcome, Operation, Refusal, Repo};
+use crate::{GitError, OpOutcome, Refusal, Repo};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TodoAction {
@@ -181,6 +181,6 @@ impl Repo {
         // The environment variable wins over any user setting (config or environment).
         let editor = format!("cp {}", quote(&todo));
         let out = self.run_git_env(&["rebase", "-i", base], &[("GIT_SEQUENCE_EDITOR", &editor)])?;
-        self.outcome(out, Operation::Rebase)
+        self.outcome(out)
     }
 }

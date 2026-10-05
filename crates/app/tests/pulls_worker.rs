@@ -397,7 +397,7 @@ fn a_thread_is_resolved_then_the_pull_request_reloaded() {
     let w = signed_in(&mut server, TokenProvider::without_gh());
     let resolve = server
         .mock("POST", "/graphql")
-        .match_body(Matcher::Regex("resolveReviewThread".into()))
+        .match_body(Matcher::Regex("\\bresolveReviewThread\\(".into()))
         .with_body(r#"{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}"#)
         .create();
     let (_d, _f) = mock_detail(&mut server, 7);
