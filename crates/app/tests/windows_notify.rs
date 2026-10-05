@@ -4,7 +4,9 @@
 
 use std::path::Path;
 
-use retrogit::notify::winreg::{AUMID, RegEntry, reg_add_args, registry_entries, toast_xml};
+use retrogit::notify::winreg::{
+    AUMID, RegEntry, reg_add_args, registry_entries, should_register, toast_xml,
+};
 
 #[test]
 fn the_toast_opens_its_link_and_escapes_text() {
@@ -81,6 +83,39 @@ fn the_app_is_registered_for_notifications_and_links() {
         named,
         ["add", "HKCU\\K", "/v", "N", "/t", "REG_SZ", "/d", "", "/f"]
     );
+}
+
+#[test]
+fn a_copy_run_from_the_temporary_folder_registers_nothing() {
+    let temp = Path::new(r"C:\Users\Ada\AppData\Local\Temp");
+    // Downloaded update or uninstaller copy: same folder, any case or separator.
+    for exe in [
+        r"C:\Users\Ada\AppData\Local\Temp\retrogit-update\retrogit.exe",
+        r"c:\users\ada\appdata\local\temp\retrogit.exe",
+        "C:/Users/Ada/AppData/Local/Temp/x/retrogit.exe",
+    ] {
+        assert!(!should_register(Path::new(exe), temp), "{exe}");
+    }
+    assert!(!should_register(
+        Path::new(r"C:\Users\Ada\AppData\Local\Temp\x\retrogit.exe"),
+        Path::new(r"C:\Users\Ada\AppData\Local\Temp\"),
+    ));
+    // A sibling whose name only starts like the temporary folder is not inside it.
+    for exe in [
+        r"C:\Users\Ada\AppData\Local\Temporary\retrogit.exe",
+        r"C:\Users\Ada\AppData\Local\Programs\RetroGit\retrogit.exe",
+        r"D:\tools\retrogit.exe",
+    ] {
+        assert!(should_register(Path::new(exe), temp), "{exe}");
+    }
+    assert!(!should_register(
+        Path::new("/tmp/x/retrogit"),
+        Path::new("/tmp")
+    ));
+    assert!(should_register(
+        Path::new("/opt/retrogit"),
+        Path::new("/tmp")
+    ));
 }
 
 #[cfg(windows)]

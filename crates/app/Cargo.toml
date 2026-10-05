@@ -38,7 +38,8 @@ objc2-foundation.workspace = true
 objc2-user-notifications.workspace = true
 block2.workspace = true
 
-[target.'cfg(windows)'.build-dependencies]
+# Unconditional: the resources follow the target, not the machine building (cross builds).
+[build-dependencies]
 winresource = "0.1"
 
 [target.'cfg(windows)'.dependencies]

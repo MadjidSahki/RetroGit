@@ -11,7 +11,7 @@ pub struct Ide {
     /// Stable id stored in the config, e.g. `rider`.
     pub id: String,
     pub name: String,
-    /// macOS: the `.app` bundle; Windows: an `.exe` or a `.cmd` launcher.
+    /// macOS: the `.app` bundle; Windows: an `.exe`.
     pub program: PathBuf,
 }
 
@@ -242,8 +242,17 @@ fn vswhere_devenv() -> Option<PathBuf> {
     (!path.is_empty()).then(|| PathBuf::from(path))
 }
 
+/// `rel` (a `/`-separated path from git) under `repo`, joined one segment at a time so that
+/// Windows gets only its own separator.
+pub fn file_arg(repo: &Path, rel: &str) -> PathBuf {
+    rel.split('/')
+        .filter(|seg| !seg.is_empty())
+        .fold(repo.to_path_buf(), |path, seg| path.join(seg))
+}
+
 /// Program and arguments that open `repo` in `ide` (`mac`: use `open -a`), and `file` (relative
-/// to `repo`) in it when given.
+/// to `repo`) in it when given. Windows IDEs are always `.exe` files (see `detect_windows`),
+/// started directly.
 pub fn launch_args(
     ide: &Ide,
     repo: &Path,
@@ -251,20 +260,11 @@ pub fn launch_args(
     mac: bool,
 ) -> (PathBuf, Vec<String>) {
     let mut paths = vec![repo.display().to_string()];
-    paths.extend(file.map(|f| repo.join(f).display().to_string()));
+    paths.extend(file.map(|f| file_arg(repo, &f.to_string_lossy()).display().to_string()));
     let (program, mut args) = if mac {
         (
             PathBuf::from("open"),
             vec!["-a".into(), ide.program.display().to_string()],
-        )
-    } else if ide
-        .program
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
-    {
-        (
-            PathBuf::from("cmd"),
-            vec!["/C".into(), ide.program.display().to_string()],
         )
     } else {
         (ide.program.clone(), Vec::new())

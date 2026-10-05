@@ -36,7 +36,7 @@ pub use token::{
 };
 pub use token_store::{
     KeyringStore, MemoryStore, SECURITY_MARKER, TokenStore, TokenStoreError, keep_after_migration,
-    parse_security_comment, security_add_command,
+    parse_security_comment, parse_security_password, security_add_command,
 };
 pub use watch::{PrEvent, PrEventKind, PrSnapshot, date_days_before, diff_snapshots};
 

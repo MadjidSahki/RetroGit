@@ -1,11 +1,13 @@
 #![allow(clippy::unwrap_used)]
 //! macOS tokens through `/usr/bin/security` (no Keychain prompt after an update).
 
-use github::{SECURITY_MARKER, parse_security_comment, security_add_command};
+use github::{
+    SECURITY_MARKER, parse_security_comment, parse_security_password, security_add_command,
+};
 
 #[test]
 fn the_token_never_appears_as_an_argument() {
-    let cmd = security_add_command("RetroGit", "github.com:ada", "gho_Secret\"1");
+    let cmd = security_add_command("RetroGit", "github.com:ada", "gho_Secret\"1").unwrap();
     assert!(!cmd.contains("gho_Secret"), "{cmd}");
     assert_eq!(
         cmd,
@@ -15,7 +17,7 @@ fn the_token_never_appears_as_an_argument() {
         )
     );
     // Quotes in names cannot end the argument.
-    let odd = security_add_command("Retro\"Git", "a\\b", "t");
+    let odd = security_add_command("Retro\"Git", "a\\b", "t").unwrap();
     assert!(
         odd.contains("-s \"Retro\\\"Git\"") && odd.contains("-a \"a\\\\b\""),
         "{odd}"
@@ -38,6 +40,49 @@ attributes:
     assert_eq!(parse_security_comment(old), None);
 }
 
+#[test]
+fn a_line_break_or_nul_cannot_start_another_command() {
+    for bad in ["a\nb", "a\rb", "a\0b"] {
+        assert!(security_add_command(bad, "acct", "t").is_err(), "{bad:?}");
+        assert!(
+            security_add_command("RetroGit", bad, "t").is_err(),
+            "{bad:?}"
+        );
+        assert!(
+            security_add_command("RetroGit", "acct", bad).is_err(),
+            "{bad:?}"
+        );
+    }
+    assert!(security_add_command("RetroGit", "acct", "gho_é ").is_ok());
+}
+
+#[test]
+fn the_password_is_read_in_both_forms_security_prints() {
+    // Printable ASCII: quoted as is (security switches to hex for `"` and `\` too).
+    let plain = "password: \"gho_abc\"\nkeychain: \"/k\"\n";
+    assert_eq!(parse_security_password(plain).as_deref(), Some("gho_abc"));
+    assert_eq!(
+        parse_security_password("password: \"gho_abc \"\n").as_deref(),
+        Some("gho_abc "),
+        "a trailing space is kept"
+    );
+    // Anything else: hex bytes, then a lossy quoted rendering.
+    let hex = "password: 0x67686F5FC3A920  \"gho_\\303\\251 \"\n";
+    assert_eq!(parse_security_password(hex).as_deref(), Some("gho_é "));
+    let quote = "keychain: \"/k\"\npassword: 0x615C62226320  \"a\\134b\"c \"\n";
+    assert_eq!(parse_security_password(quote).as_deref(), Some("a\\b\"c "));
+    let newline = "password: 0x610A62  \"a\\012b\"\n";
+    assert_eq!(parse_security_password(newline).as_deref(), Some("a\nb"));
+    // No password, or something unreadable.
+    assert_eq!(
+        parse_security_password("password: \nkeychain: \"/k\"\n"),
+        None
+    );
+    assert_eq!(parse_security_password("keychain: \"/k\"\n"), None);
+    assert_eq!(parse_security_password("password: 0x6G  \"?\"\n"), None);
+    assert_eq!(parse_security_password("password: 0xFF  \"?\"\n"), None);
+}
+
 /// Uses the real login Keychain: run by hand with `cargo test -- --ignored`.
 #[cfg(target_os = "macos")]
 #[test]
@@ -51,6 +96,9 @@ fn real_keychain_round_trip_and_migration() {
     assert_eq!(store.load().unwrap().as_deref(), Some("gho_first"));
     store.save("gho_second").unwrap();
     assert_eq!(store.load().unwrap().as_deref(), Some("gho_second"));
+    // Non-ASCII and a trailing space come back exactly.
+    store.save("gho_é ").unwrap();
+    assert_eq!(store.load().unwrap().as_deref(), Some("gho_é "));
     // An entry from an older RetroGit (no marker) is re-created with it.
     store.clear().unwrap();
     let status = std::process::Command::new("/usr/bin/security")
