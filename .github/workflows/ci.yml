@@ -42,7 +42,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - name: Tests
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace 2>&1 | tee test-output.txt
+      - name: Count tests (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        # Total of the "N passed" lines, published as the README badge by the release job.
+        run: |
+          n=$(grep -o 'test result: ok\. [0-9]* passed' test-output.txt | awk '{s+=$4} END {print s}')
+          test -n "$n"
+          echo "$n" > tests-count.txt
+          echo "$n tests passed"
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: tests-count
+          path: tests-count.txt
+          if-no-files-found: error
       - name: Version
         id: version
         shell: bash
@@ -118,3 +137,23 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "RetroGit ${{ steps.version.outputs.tag }}" \
             --generate-notes
+      - uses: actions/download-artifact@v4
+        with:
+          name: tests-count
+          path: badge
+      - name: Tests badge
+        # shields.io endpoint JSON on the orphan branch `badges` (created on first push).
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          n=$(cat badge/tests-count.txt)
+          mkdir "$RUNNER_TEMP/badges" && cd "$RUNNER_TEMP/badges"
+          git init -q
+          git checkout -q -b badges
+          printf '{"schemaVersion":1,"label":"tests","message":"%s passed","color":"brightgreen"}\n' "$n" > tests.json
+          cat tests.json
+          git add tests.json
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "tests badge: $n passed"
+          git push -q -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}" badges

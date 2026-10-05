@@ -123,3 +123,61 @@ fn github_slug_reads_origin() {
     );
     assert_eq!(env.repo().github_slug(), Some(("o".into(), "r".into())));
 }
+
+/// origin/main one commit ahead of the local main (fetched, not merged).
+fn remote_ahead(env: &Env, file: &str) -> String {
+    env.remote_commit(file, "remote\n");
+    git(&env.work, &["fetch", "-q", "origin"]);
+    rev(env, "origin/main")
+}
+
+#[test]
+fn fast_forward_moves_a_branch_that_is_behind() {
+    let Some(env) = Env::new() else { return };
+    let target = remote_ahead(&env, "new.txt");
+    assert!(env.repo().fast_forward("origin/main").unwrap());
+    assert_eq!(rev(&env, "HEAD"), target);
+    assert!(env.work.join("new.txt").exists(), "working tree follows");
+}
+
+#[test]
+fn fast_forward_onto_the_same_commit_does_nothing() {
+    let Some(env) = Env::new() else { return };
+    let head = rev(&env, "HEAD");
+    assert!(!env.repo().fast_forward("origin/main").unwrap());
+    assert_eq!(rev(&env, "HEAD"), head);
+}
+
+#[test]
+fn fast_forward_leaves_a_diverged_branch_alone() {
+    let Some(env) = Env::new() else { return };
+    remote_ahead(&env, "theirs.txt");
+    env.local_commit("mine.txt", "mine\n");
+    let head = rev(&env, "HEAD");
+    assert!(!env.repo().fast_forward("origin/main").unwrap());
+    assert_eq!(rev(&env, "HEAD"), head);
+    assert!(!env.work.join("theirs.txt").exists());
+}
+
+#[test]
+fn fast_forward_onto_an_unknown_ref_does_nothing() {
+    let Some(env) = Env::new() else { return };
+    let head = rev(&env, "HEAD");
+    assert!(!env.repo().fast_forward("origin/no-such-branch").unwrap());
+    assert_eq!(rev(&env, "HEAD"), head);
+}
+
+#[test]
+fn fast_forward_over_a_conflicting_local_file_is_an_error() {
+    let Some(env) = Env::new() else { return };
+    remote_ahead(&env, "new.txt");
+    // Not committed here, and the incoming commit creates it: git refuses to overwrite.
+    std::fs::write(env.work.join("new.txt"), "local work\n").unwrap();
+    let head = rev(&env, "HEAD");
+    assert!(env.repo().fast_forward("origin/main").is_err());
+    assert_eq!(rev(&env, "HEAD"), head);
+    assert_eq!(
+        std::fs::read_to_string(env.work.join("new.txt")).unwrap(),
+        "local work\n"
+    );
+}

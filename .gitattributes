@@ -2,3 +2,5 @@
 *.rgba binary
 *.icns binary
 *.ico binary
+# Shell scripts run by tests and CI: LF even on a Windows checkout.
+*.sh text eol=lf

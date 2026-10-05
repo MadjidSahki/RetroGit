@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/MadjidSahki/RetroGit/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/MadjidSahki/RetroGit/ci.yml?branch=main&label=CI" alt="CI"></a>
-  <a href="https://github.com/MadjidSahki/RetroGit/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-590%20passed-brightgreen" alt="Tests"></a>
+  <a href="https://github.com/MadjidSahki/RetroGit/actions/workflows/ci.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/MadjidSahki/RetroGit/badges/tests.json" alt="Tests"></a>
   <a href="https://github.com/MadjidSahki/RetroGit/releases/latest"><img src="https://img.shields.io/github/v/release/MadjidSahki/RetroGit?label=release" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows-blue" alt="Platforms">
   <img src="https://img.shields.io/badge/rust-1.95%2B-orange" alt="Rust 1.95+">

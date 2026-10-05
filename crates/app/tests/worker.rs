@@ -829,6 +829,34 @@ mod sync {
     }
 
     #[test]
+    fn a_branch_created_outside_the_app_is_seen_by_the_watcher_and_listed() {
+        let Some((_tmp, work)) = remote_env() else {
+            return;
+        };
+        let server = mockito::Server::new();
+        let w = start(&server, Arc::new(MemoryAccounts::default()), "");
+        w.send(Command::OpenRepo(work.clone()));
+        until(&w, |e| {
+            matches!(
+                e,
+                Event::SyncFinished {
+                    op: SyncOp::Fetch,
+                    ..
+                }
+            )
+        });
+        until(&w, |e| matches!(e, Event::LogLoaded { .. }));
+        // The real chain: file system event -> watcher -> refresher -> RefreshRefs.
+        let _watcher = retrogit::watch::Watcher::start(&work, w.refresher()).unwrap();
+        std::thread::sleep(Duration::from_millis(700)); // let the watcher settle
+        git(&work, &["branch", "made-outside"]);
+        until(
+            &w,
+            |e| matches!(e, Event::BranchesLoaded(b) if b.iter().any(|b| b.name == "made-outside")),
+        );
+    }
+
+    #[test]
     fn diverged_pull_asks_then_rebase_succeeds() {
         let Some((_tmp, work)) = remote_env() else {
             return;

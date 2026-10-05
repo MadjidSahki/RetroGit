@@ -375,6 +375,18 @@ fn clicking_a_symbolic_link_opens_it() {
     h.get_by_label("link").click();
     h.run();
     assert_eq!(h.state().state.explore.file.as_deref(), Some("link"));
+    assert!(!row_shown(&h, "target"), "not loaded yet");
+    // A link's blob is the path it points to: shown as the file's text.
+    loaded(
+        &mut h.state_mut().state,
+        ExploreResult::File {
+            rev: "c0ffee1234".into(),
+            path: "link".into(),
+            content: FileContent::Text("target".into()),
+        },
+    );
+    h.run();
+    assert!(row_shown(&h, "target"), "the link's target is shown");
 }
 
 /// Whether the row of `text` is drawn (only the visible rows are).

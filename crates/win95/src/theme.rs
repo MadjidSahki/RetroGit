@@ -17,6 +17,14 @@ static W95FA: &[u8] = include_bytes!("../assets/W95FA.otf");
 static ATKINSON: &[u8] = include_bytes!("../assets/AtkinsonHyperlegible-Regular.ttf");
 pub const ATKINSON_NAME: &str = "Atkinson Hyperlegible";
 
+/// The embedded font file of `font` (glyph checks build contexts with it alone).
+pub fn font_bytes(font: Font) -> &'static [u8] {
+    match font {
+        Font::W95fa => W95FA,
+        Font::Atkinson => ATKINSON,
+    }
+}
+
 /// Interface font (code and diffs always use egui's monospace font).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Font {

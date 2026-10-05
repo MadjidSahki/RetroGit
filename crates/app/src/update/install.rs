@@ -23,6 +23,7 @@ pub struct Fetcher {
     agent: ureq::Agent,
     allow: fn(&str) -> bool,
     stall: Duration,
+    max: u64,
 }
 
 impl Fetcher {
@@ -31,7 +32,14 @@ impl Fetcher {
             agent: super::check::agent(None, Some(Duration::from_secs(30))),
             allow,
             stall: Duration::from_secs(60),
+            max: MAX_DOWNLOAD,
         }
+    }
+
+    /// Largest file accepted, in bytes (`MAX_DOWNLOAD` by default).
+    pub fn with_max(mut self, max: u64) -> Fetcher {
+        self.max = max;
+        self
     }
 
     /// How long without data before giving up (60 s by default).
@@ -202,7 +210,7 @@ pub fn download_verified(
         let mut hasher = Sha256::new();
         fetcher.get(
             &asset.url,
-            MAX_DOWNLOAD,
+            fetcher.max,
             cancel,
             |b| {
                 hasher.update(b);
