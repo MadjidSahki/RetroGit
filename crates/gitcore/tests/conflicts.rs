@@ -5,7 +5,9 @@ mod common;
 use std::path::Path;
 
 use common::remote::{configure, git};
-use gitcore::{ConflictKind, Operation, Pick, Repo, conflict_count};
+use gitcore::{
+    ConflictKind, GitError, Operation, Pick, Refusal, Repo, TodoAction, TodoItem, conflict_count,
+};
 
 /// A repository with `main` and `feature` both changing `file` (or as `setup` says), then
 /// `git merge feature` (or `rebase`) leaving conflicts.
@@ -78,7 +80,27 @@ fn a_merge_conflict_gives_both_versions_and_the_marked_file() {
     assert_eq!(c.operation, Some(Operation::Merge));
     let working = c.working.unwrap();
     assert_eq!(conflict_count(&working), 1, "{working}");
-    assert!(r.conflict("other.txt").is_err(), "not in conflict");
+    assert_eq!(
+        r.conflict("other.txt").err(),
+        Some(GitError::Refused(Refusal::NotInConflict(
+            "other.txt".into()
+        ))),
+        "not in conflict"
+    );
+    assert_eq!(
+        r.continue_operation().err(),
+        Some(GitError::Refused(Refusal::FinishMergeByCommit))
+    );
+    let list = [TodoItem {
+        action: TodoAction::Pick,
+        id: "x".into(),
+        summary: "x".into(),
+        message: "x".into(),
+    }];
+    assert_eq!(
+        r.interactive_rebase("HEAD", &list).err(),
+        Some(GitError::Refused(Refusal::OperationInProgress))
+    );
 }
 
 #[test]

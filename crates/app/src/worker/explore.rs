@@ -120,7 +120,7 @@ fn answer(
             let commit = match repo.resolve(&rev) {
                 Some(c) => c,
                 None if rev == "HEAD" => String::new(),
-                None => return Err(GitError::Other(format!("unknown revision {rev}"))),
+                None => return Err(GitError::Refused(gitcore::Refusal::UnknownRev(rev))),
             };
             ExploreResult::Tree {
                 entries: if commit.is_empty() {

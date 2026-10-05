@@ -7,7 +7,7 @@ use std::sync::mpsc::channel;
 use std::time::Duration;
 
 use crate::net::{NetAuth, askpass_program, net_settings};
-use crate::{GitError, Repo};
+use crate::{GitError, Refusal, Repo};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetProgress {
@@ -268,16 +268,14 @@ impl Repo {
     ) -> Result<PullOutcome, GitError> {
         let branch = self
             .current_branch()
-            .ok_or_else(|| GitError::Unsupported("HEAD is detached".into()))?;
+            .ok_or(GitError::Refused(Refusal::DetachedHead))?;
         if branch.upstream.is_none() {
-            return Err(GitError::Unsupported(
-                "this branch has no upstream: publish it first".into(),
-            ));
+            return Err(GitError::Refused(Refusal::NoUpstream { publish: true }));
         }
         self.fetch(auth, progress, cancel)?;
         let b = self
             .current_branch()
-            .ok_or_else(|| GitError::Unsupported("HEAD is detached".into()))?;
+            .ok_or(GitError::Refused(Refusal::DetachedHead))?;
         if b.behind == 0 {
             return Ok(PullOutcome::UpToDate);
         }
@@ -314,7 +312,7 @@ impl Repo {
     ) -> Result<(), GitError> {
         let branch = self
             .current_branch()
-            .ok_or_else(|| GitError::Unsupported("HEAD is detached".into()))?;
+            .ok_or(GitError::Refused(Refusal::DetachedHead))?;
         let args: Vec<&str> = match mode {
             PushMode::Normal => vec!["push", "--progress"],
             PushMode::SetUpstream => {
@@ -338,10 +336,10 @@ impl Repo {
     ) -> Result<(), GitError> {
         let branch = self
             .current_branch()
-            .ok_or_else(|| GitError::Unsupported("HEAD is detached".into()))?;
+            .ok_or(GitError::Refused(Refusal::DetachedHead))?;
         let upstream = branch
             .upstream
-            .ok_or_else(|| GitError::Unsupported("this branch has no upstream".into()))?;
+            .ok_or(GitError::Refused(Refusal::NoUpstream { publish: false }))?;
         let remote_branch = upstream
             .split_once('/')
             .map(|(_, b)| b.to_string())

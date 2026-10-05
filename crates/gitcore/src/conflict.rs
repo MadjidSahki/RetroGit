@@ -1,7 +1,7 @@
 //! Conflicted files: the text Git left with conflict markers, cut into blocks, and the
 //! ways to resolve a file.
 
-use crate::{GitError, Operation, Repo};
+use crate::{GitError, Operation, Refusal, Repo};
 
 const OPEN: &str = "<<<<<<<";
 const BASE: &str = "|||||||";
@@ -292,7 +292,7 @@ impl Repo {
                 break;
             }
         }
-        let c = found.ok_or_else(|| GitError::Other(format!("'{path}' is not in conflict")))?;
+        let c = found.ok_or_else(|| GitError::Refused(Refusal::NotInConflict(path.to_string())))?;
         let blob = |e: &Option<git2::IndexEntry>| -> Result<Option<Vec<u8>>, GitError> {
             match e {
                 Some(e) => Ok(Some(repo.find_blob(e.id).map_err(map)?.content().to_vec())),

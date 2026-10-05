@@ -1,5 +1,35 @@
 //! Every user-visible string, in one place.
 
+use gitcore::{TodoError, WholeAction, WholeKind};
+
+// Sentences shared by several texts (macros so that `concat!` can join them into consts).
+macro_rules! ask_owner {
+    () => {
+        "ask an owner to approve RetroGit (link below)"
+    };
+}
+macro_rules! gh_too_old {
+    () => {
+        "Update the GitHub CLI (2.40 or later), then run 'gh auth login'."
+    };
+}
+macro_rules! uses_it_for_org {
+    () => {
+        "RetroGit then uses it for this organization."
+    };
+}
+macro_rules! oauth_help {
+    () => {
+        concat!(
+            "Install the GitHub CLI and run 'gh auth login': ",
+            uses_it_for_org!(),
+            " Or ",
+            ask_owner!(),
+            "."
+        )
+    };
+}
+
 pub const APP_NAME: &str = "RetroGit";
 
 pub const MENU_FILE: &str = "File";
@@ -203,7 +233,11 @@ pub const ERR_PUSH_REJECTED: &str =
     "The remote has changes you don't have. Pull first, then push again.";
 pub const ERR_STASH_CONFLICT: &str = "Re-applying your changes caused conflicts. Resolve them in the Changes tab; your changes are also kept in the stash.";
 pub const ERR_SIGNING_REQUIRES_GIT: &str = "Commit signing is enabled but git was not found: RetroGit will not create an unsigned commit. Install Git.";
-pub const ERR_ACCESS_DENIED: &str = "GitHub refused access to this repository with the RetroGit sign-in and with your own git credentials. If the organization restricts third-party OAuth apps, ask an owner to approve RetroGit (link below) or sign in with a personal access token (Advanced tab).";
+pub const ERR_ACCESS_DENIED: &str = concat!(
+    "GitHub refused access to this repository with the RetroGit sign-in and with your own git credentials. If the organization restricts third-party OAuth apps, ",
+    ask_owner!(),
+    " or sign in with a personal access token (Advanced tab)."
+);
 pub const ERR_GIT_MISSING: &str = "Install Git to use this feature.";
 pub const ERR_NET_AUTH_HELP: &str = "Git could not authenticate. For SSH remotes, add your key to ssh-agent (ssh-add). For HTTPS remotes outside github.com, configure a credential helper.";
 pub const INFO_CONFLICTS: &str = "There are conflicts. Resolve them in your editor, stage the files, then commit (or continue the rebase).";
@@ -326,7 +360,13 @@ pub const INFO_PULL_EXISTS: &str =
     "A pull request already exists for this branch: it is shown instead.";
 pub const INFO_PULL_MOVED: &str =
     "The pull request changed since it was shown. It was reloaded: check it, then merge again.";
-pub const ERR_OAUTH_RESTRICTED_HELP: &str = "Install the GitHub CLI and run 'gh auth login': RetroGit then uses it for this organization. Or ask an owner to approve RetroGit (link below).";
+pub const ERR_OAUTH_RESTRICTED_HELP: &str = oauth_help!();
+/// `{org}`: the organization's name, or [`ORG_OF_THIS_REPO`].
+pub const ERR_OAUTH_RESTRICTED: &str = concat!(
+    "The organization {org} restricts third-party applications and has not approved RetroGit. ",
+    oauth_help!()
+);
+pub const ORG_OF_THIS_REPO: &str = "of this repository";
 pub const WARN_BRANCH_NOT_DELETED: &str =
     "The pull request was merged, but its branch could not be deleted.";
 pub const PULL_LABELS_FAILED: &str =
@@ -362,7 +402,11 @@ pub const NOTIFY_CHANGES: &str = "changes requested by {who}";
 pub const NOTIFY_COMMENT: &str = "new comment from {who}";
 pub const NOTIFY_MERGED: &str = "merged";
 pub const NOTIFY_CLOSED: &str = "closed";
-pub const ERR_PULLS_NOT_FOUND: &str = "GitHub does not show this repository to RetroGit. If its organization restricts third-party applications, install the GitHub CLI and run 'gh auth login' with the same account: RetroGit then uses it. Or ask an owner to approve RetroGit (link below).";
+pub const ERR_PULLS_NOT_FOUND: &str = concat!(
+    "GitHub does not show this repository to RetroGit. If its organization restricts third-party applications, install the GitHub CLI and run 'gh auth login' with the same account: RetroGit then uses it. Or ",
+    ask_owner!(),
+    "."
+);
 pub const RESOLVE: &str = "Resolve conversation";
 pub const UNRESOLVE: &str = "Unresolve conversation";
 pub const NOTE_RESOLVED: &str = "Conversation resolved";
@@ -744,11 +788,24 @@ pub const ERR_UPDATE_NO_SUM: &str = "no checksum for {name}";
 pub const ERR_UPDATE_CHECKSUM: &str = "checksum mismatch for {name}";
 pub const ERR_UPDATE_SIGNATURE: &str = "the new app's signature does not hold: {why}";
 pub const ERR_UPDATE_VERSION: &str = "the downloaded app is {got}, not {want}";
-pub const GH_TOO_OLD: &str = "Update the GitHub CLI (2.40 or later), then run 'gh auth login'.";
+pub const GH_TOO_OLD: &str = gh_too_old!();
 /// [`ERR_OAUTH_RESTRICTED_HELP`] when the GitHub CLI is too old to choose the account.
-pub const ERR_OAUTH_RESTRICTED_GH_OLD: &str = "Update the GitHub CLI (2.40 or later), then run 'gh auth login'. RetroGit then uses it for this organization. Or ask an owner to approve RetroGit (link below).";
+pub const ERR_OAUTH_RESTRICTED_GH_OLD: &str = concat!(
+    gh_too_old!(),
+    " ",
+    uses_it_for_org!(),
+    " Or ",
+    ask_owner!(),
+    "."
+);
 /// [`ERR_PULLS_NOT_FOUND`] when the GitHub CLI is too old to choose the account.
-pub const ERR_PULLS_NOT_FOUND_GH_OLD: &str = "GitHub does not show this repository to RetroGit. Its organization may restrict third-party applications. Update the GitHub CLI (2.40 or later), then run 'gh auth login'. RetroGit then uses it with the same account. Or ask an owner to approve RetroGit (link below).";
+pub const ERR_PULLS_NOT_FOUND_GH_OLD: &str = concat!(
+    "GitHub does not show this repository to RetroGit. Its organization may restrict third-party applications. ",
+    gh_too_old!(),
+    " RetroGit then uses it with the same account. Or ",
+    ask_owner!(),
+    "."
+);
 pub const ERR_NO_ACCOUNT_SEES_REPO: &str = "No signed-in account can see this repository.";
 
 /// Detail of [`ERR_NO_ACCOUNT_SEES_REPO`]: `Tried: @a, @b`.
@@ -756,3 +813,90 @@ pub fn tried_accounts(logins: &[String]) -> String {
     let at: Vec<String> = logins.iter().map(|l| format!("@{l}")).collect();
     format!("Tried: {}", at.join(", "))
 }
+
+// --- Refusals from gitcore (`GitError::Refused`) ---
+pub const ERR_LOCAL_CHANGES_FIRST: &str = "Commit or stash your local changes first.";
+pub const ERR_RESOLVE_CONFLICTS_FIRST: &str = "Resolve conflicts first.";
+pub const ERR_OPERATION_IN_PROGRESS: &str = "Finish or abort the operation in progress first.";
+pub const ERR_FINISH_MERGE: &str = "Commit to finish the merge.";
+pub const ERR_NOTHING_TO_AMEND: &str = "There is no commit to amend.";
+pub const ERR_DETACHED_HEAD: &str = "HEAD is detached.";
+pub const ERR_NO_UPSTREAM_PUBLISH: &str = "This branch has no upstream: publish it first.";
+pub const ERR_NO_UPSTREAM: &str = "This branch has no upstream.";
+pub const ERR_INVALID_IGNORE_PATTERN: &str = "Invalid .gitignore pattern.";
+pub const ERR_MERGES_IN_RANGE: &str =
+    "The range contains merge commits: interactive rebase of merges is not supported.";
+pub const ERR_BARE_REPOSITORY: &str = "Bare repositories are not supported.";
+pub const ERR_COMMIT_NOT_FOUND: &str = "Commit not found.";
+/// A technical failure; git's own words are the detail.
+pub const ERR_GIT_FAILED: &str = "Git failed.";
+
+pub fn invalid_tag_name(name: &str) -> String {
+    format!("'{name}' is not a valid tag name.")
+}
+
+pub fn unknown_rev(rev: &str) -> String {
+    format!("Unknown version {rev}.")
+}
+
+pub fn not_in_conflict(path: &str) -> String {
+    format!("'{path}' is not in conflict.")
+}
+
+pub fn pull_not_fetched(number: u64) -> String {
+    format!("Pull request #{number} was not fetched.")
+}
+
+/// Why the interactive rebase list cannot start.
+pub fn todo_error(e: TodoError) -> &'static str {
+    match e {
+        TodoError::NoKeptAbove => "A squash or fixup needs a kept commit above it.",
+        TodoError::KeepOne => "Keep at least one commit.",
+    }
+}
+
+/// A partial stage, unstage or discard refused for this kind of file.
+pub fn whole_file_only(kind: WholeKind, action: WholeAction) -> String {
+    let what = match kind {
+        WholeKind::Deleted => "Deleted files",
+        WholeKind::Symlink => "Symbolic links",
+        WholeKind::Untracked => "Untracked files",
+        WholeKind::Filter => "Files with a Git filter (e.g. LFS)",
+        WholeKind::Binary => "Binary files",
+        WholeKind::Renamed => "Renamed files",
+    };
+    let done = match action {
+        WholeAction::Stage => "staged",
+        WholeAction::Unstage => "unstaged",
+        WholeAction::Discard => "discarded",
+        WholeAction::Restore => "restored",
+    };
+    format!("{what} can only be {done} as a whole.")
+}
+
+pub fn not_fully_merged(branch: &str) -> String {
+    format!("Branch '{branch}' is not fully merged.")
+}
+
+pub fn diverged(ahead: usize, behind: usize) -> String {
+    format!(
+        "Your branch and its upstream have diverged ({ahead} local and {behind} remote commits)."
+    )
+}
+
+pub fn sign_in_failed(code: &str) -> String {
+    format!("GitHub sign-in failed: {code}")
+}
+
+/// Name of the stash made to switch branch with local changes.
+pub fn switch_stash_label(target: &str) -> String {
+    format!("RetroGit: switch to {target}")
+}
+
+/// `message`, when the stash made to switch branch could not be re-applied.
+pub fn changes_kept_in_stash(message: &str, label: &str) -> String {
+    format!("{message}\n\nYour changes are kept in the stash '{label}' (git stash list).")
+}
+
+/// Status code of a conflicted file in the Changes lists.
+pub const CONFLICT_MARK: &str = "!";

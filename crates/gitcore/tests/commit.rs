@@ -4,7 +4,9 @@ mod common;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
-use gitcore::{CommitBackend, GitError, Repo, Selection, classify_commit_failure, git_available};
+use gitcore::{
+    CommitBackend, GitError, Refusal, Repo, Selection, classify_commit_failure, git_available,
+};
 
 /// Repo isolated from the developer's global config (identity, signing, hooks path).
 fn repo_with_identity(commits: usize) -> (tempfile::TempDir, Repo) {
@@ -64,7 +66,7 @@ fn git2_first_commit_of_an_empty_repo() {
         repo_with_identity(0)
             .1
             .commit("x", true, CommitBackend::Git2),
-        Err(GitError::Unsupported(_))
+        Err(GitError::Refused(Refusal::NothingToAmend))
     ));
 }
 
@@ -187,7 +189,7 @@ fn add_to_gitignore_creates_appends_and_dedupes() {
     );
     assert!(matches!(
         r.add_to_gitignore("  "),
-        Err(GitError::Unsupported(_))
+        Err(GitError::Refused(Refusal::InvalidIgnorePattern))
     ));
 }
 

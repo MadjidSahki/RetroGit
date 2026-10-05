@@ -1,4 +1,4 @@
-use crate::{GitError, Repo};
+use crate::{GitError, Refusal, Repo};
 use std::path::Path;
 
 /// A multi-step operation left in progress (conflicts to resolve).
@@ -85,7 +85,7 @@ impl Repo {
             return Ok(OpOutcome::Done);
         };
         if op == Operation::Merge {
-            return Err(GitError::Unsupported("commit to finish the merge".into()));
+            return Err(GitError::Refused(Refusal::FinishMergeByCommit));
         }
         let out = self.run_git(&["-c", "core.editor=true", Self::op_command(op), "--continue"])?;
         self.outcome(out, op)

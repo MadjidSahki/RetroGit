@@ -143,7 +143,7 @@ pub fn describe(path: &str, change: &Change) -> String {
         Change::Renamed { from } => ("R", format!("{from} -> {path}")),
         Change::TypeChange => ("T", path.to_string()),
         Change::Untracked => ("?", path.to_string()),
-        Change::Conflicted => ("!", path.to_string()),
+        Change::Conflicted => (s::CONFLICT_MARK, path.to_string()),
     };
     format!("[{code}] {shown}")
 }
@@ -268,7 +268,7 @@ fn conflicts_group(ui: &mut egui::Ui, cx: &mut Ctx<'_>, files: &[FileStatus]) {
         .header(false)
         .height(height)
         .show(ui, selected, |row, _| {
-            Cell::from(format!("! {}", files[row].path))
+            Cell::from(format!("{} {}", s::CONFLICT_MARK, files[row].path))
         });
     if let Some(row) = resp.clicked.or(resp.double_clicked) {
         let path = files[row].path.clone();

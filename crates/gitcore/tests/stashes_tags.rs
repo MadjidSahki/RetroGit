@@ -3,7 +3,7 @@
 mod common;
 
 use common::remote::{Env, configure, git, no_cancel};
-use gitcore::{NetAuth, Repo};
+use gitcore::{GitError, NetAuth, Refusal, Repo};
 
 fn repo(dir: &std::path::Path) -> Repo {
     git(dir, &["-c", "init.defaultBranch=main", "init", "-q"]);
@@ -75,7 +75,13 @@ fn tags_are_created_listed_deleted_and_pushed() {
     r.create_tag("v1.0", &head, Some("Release 1.0")).unwrap();
     r.create_tag("light", &first, None).unwrap();
     assert!(r.create_tag("v1.0", &head, None).is_err(), "exists");
-    assert!(r.create_tag("bad name", &head, None).is_err(), "invalid");
+    assert_eq!(
+        r.create_tag("bad name", &head, None),
+        Err(GitError::Refused(Refusal::InvalidTagName(
+            "bad name".into()
+        ))),
+        "invalid"
+    );
     let tags = r.tags().unwrap();
     let rows: Vec<(&str, &str, bool, &str)> = tags
         .iter()

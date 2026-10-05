@@ -387,7 +387,10 @@ fn rebase(
             }
             let check = validate_todo(&items);
             if let Err(why) = check {
-                ui.label(egui::RichText::new(why).color(win95::theme::palette(ui.ctx()).gray_text));
+                ui.label(
+                    egui::RichText::new(s::todo_error(why))
+                        .color(win95::theme::palette(ui.ctx()).gray_text),
+                );
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {

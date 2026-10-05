@@ -4,7 +4,10 @@ mod common;
 use std::path::Path;
 use std::process::Command;
 
-use gitcore::{Direction, GitError, LineKind, Repo, Selection, Side, apply_selection};
+use gitcore::{
+    Direction, GitError, LineKind, Refusal, Repo, Selection, Side, WholeAction, WholeKind,
+    apply_selection,
+};
 
 /// Repo whose index (and HEAD) holds `old` in `f.txt` and whose working tree holds `new`.
 fn setup(old: &str, new: &str) -> (tempfile::TempDir, Repo) {
@@ -324,14 +327,20 @@ fn partial_stage_refuses_deletions_and_binaries() {
     std::fs::remove_file(d.path().join("f.txt")).unwrap();
     assert!(matches!(
         r.stage("f.txt", &Selection::Hunks(vec![0]), None),
-        Err(GitError::Unsupported(_))
+        Err(GitError::Refused(Refusal::WholeFileOnly {
+            kind: WholeKind::Deleted,
+            action: WholeAction::Stage
+        }))
     ));
     std::fs::write(d.path().join("bin.dat"), [0u8, 1, 2, 0, 255]).unwrap();
     let diff = r.diff_file("bin.dat", Side::Unstaged).unwrap();
     assert!(diff.binary);
     assert!(matches!(
         r.stage("bin.dat", &Selection::Hunks(vec![0]), None),
-        Err(GitError::Unsupported(_))
+        Err(GitError::Refused(Refusal::WholeFileOnly {
+            kind: WholeKind::Binary,
+            action: WholeAction::Stage
+        }))
     ));
     r.stage("bin.dat", &Selection::All, None).unwrap();
 }
@@ -396,7 +405,16 @@ fn partial_unstage_of_a_staged_rename_is_refused() {
     let err = r
         .unstage("moved.txt", &Selection::Hunks(vec![0]), None)
         .err();
-    assert!(matches!(err, Some(GitError::Unsupported(_))), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            Some(GitError::Refused(Refusal::WholeFileOnly {
+                kind: WholeKind::Renamed,
+                action: WholeAction::Unstage
+            }))
+        ),
+        "{err:?}"
+    );
     assert_eq!(r.status().unwrap(), before);
     drop(repo);
 }
@@ -435,7 +453,10 @@ fn partial_stage_of_a_conflicted_file_is_refused() {
             .any(|f| f.unstaged == Some(gitcore::Change::Conflicted))
     );
     let err = r.stage("c.txt", &Selection::Hunks(vec![0]), None).err();
-    assert!(matches!(err, Some(GitError::Unsupported(_))), "{err:?}");
+    assert!(
+        matches!(err, Some(GitError::Refused(Refusal::ResolveConflictsFirst))),
+        "{err:?}"
+    );
     assert!(
         git2::Repository::open(d.path())
             .unwrap()
@@ -488,6 +509,9 @@ fn whole_file_staging_applies_clean_filters_like_git() {
     assert_eq!(index_content(d.path(), "x.up").unwrap(), "HELLO\n");
     assert!(matches!(
         r.stage("x.up", &Selection::Hunks(vec![0]), None),
-        Err(GitError::Unsupported(_))
+        Err(GitError::Refused(Refusal::WholeFileOnly {
+            kind: WholeKind::Filter,
+            action: WholeAction::Stage
+        }))
     ));
 }

@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicBool;
 
 use crate::net::NetAuth;
 use crate::remote::retry_without_token;
-use crate::{GitError, NetProgress, Repo};
+use crate::{GitError, NetProgress, Refusal, Repo};
 
 /// `(owner, repo)` of a github.com remote URL (HTTPS, `git@github.com:`, `ssh://`).
 pub fn parse_github_slug(url: &str) -> Option<(String, String)> {
@@ -116,7 +116,7 @@ impl Repo {
         retry_without_token(auth, |a| self.run_net(a, &args, &mut progress, cancel))?;
         let new = self
             .rev(&fetched)
-            .ok_or_else(|| GitError::Other(format!("pull request #{number} was not fetched")))?;
+            .ok_or(GitError::Refused(Refusal::PullNotFetched(number)))?;
         let local_ref = format!("refs/heads/{branch}");
         let Some(local) = self.rev(&local_ref) else {
             self.git_ok(&["branch", &branch, &new])?;

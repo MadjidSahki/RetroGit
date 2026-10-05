@@ -97,7 +97,7 @@ fn the_rebase_dialog_explains_why_it_cannot_start() {
     h.run();
     assert!(h.query_by_label("commit 1").is_some());
     assert!(
-        h.query_by_label_contains("A squash or fixup needs")
+        h.query_by_label(s::todo_error(gitcore::TodoError::NoKeptAbove))
             .is_some()
     );
     assert!(
