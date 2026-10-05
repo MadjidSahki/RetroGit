@@ -14,21 +14,29 @@ pub enum InstallKind {
     Development,
 }
 
-/// Inside a Cargo `target/debug` or `target/release` folder (`/` or `\` separators).
-fn in_cargo_target(exe: &Path) -> bool {
-    let text = exe.to_string_lossy().replace('\\', "/").to_lowercase();
-    let parts: Vec<&str> = text.split('/').collect();
-    parts
-        .windows(2)
-        .any(|w| w[0] == "target" && (w[1] == "debug" || w[1] == "release"))
-        || parts
-            .windows(3)
-            .any(|w| w[0] == "target" && (w[2] == "debug" || w[2] == "release"))
+/// Built by Cargo: directly in `target/debug|release` or `target/<triple>/debug|release`
+/// (any case, `/` or `\` separators), with Cargo's `deps` or `.fingerprint` folder next to
+/// the exe. A copy merely placed under folders with those names is not one.
+fn in_cargo_target(exe: &Path, exists: &impl Fn(&Path) -> bool) -> bool {
+    let text = exe.to_string_lossy().replace('\\', "/");
+    let Some((dir, _)) = text.rsplit_once('/') else {
+        return false;
+    };
+    let lower = dir.to_lowercase();
+    let parts: Vec<&str> = lower.split('/').collect();
+    let profile = matches!(parts.last(), Some(&"debug" | &"release"));
+    let n = parts.len();
+    let under_target = (n >= 2 && parts[n - 2] == "target") || (n >= 3 && parts[n - 3] == "target");
+    profile
+        && under_target
+        && ["deps", ".fingerprint"]
+            .iter()
+            .any(|d| exists(Path::new(&format!("{dir}/{d}"))))
 }
 
 /// `os`: `std::env::consts::OS`; `exists` tells whether a file is there.
 pub fn install_kind(os: &str, exe: &Path, exists: impl Fn(&Path) -> bool) -> InstallKind {
-    if in_cargo_target(exe) {
+    if in_cargo_target(exe, &exists) {
         return InstallKind::Development;
     }
     // Windows paths are read with `\` too (tests run on every system).

@@ -31,6 +31,7 @@ notify.workspace = true
 getrandom.workspace = true
 syntect.workspace = true
 two-face.workspace = true
+url.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
@@ -38,7 +39,8 @@ objc2-foundation.workspace = true
 objc2-user-notifications.workspace = true
 block2.workspace = true
 
-[target.'cfg(windows)'.build-dependencies]
+# Unconditional: the resources follow the target, not the machine building (cross builds).
+[build-dependencies]
 winresource = "0.1"
 
 [target.'cfg(windows)'.dependencies]

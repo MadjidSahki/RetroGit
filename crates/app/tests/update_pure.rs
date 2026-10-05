@@ -66,13 +66,24 @@ fn the_installation_kind_comes_from_where_the_exe_is() {
         install_kind("macos", Path::new("/usr/local/bin/retrogit"), none),
         InstallKind::Development
     );
+    let deps = |p: &Path| p.ends_with("deps");
+    let fingerprint = |p: &Path| p.ends_with(".fingerprint");
+    assert_eq!(
+        install_kind(
+            "macos",
+            Path::new("/w/RetroGit/target/release/retrogit"),
+            deps
+        ),
+        InstallKind::Development
+    );
     assert_eq!(
         install_kind(
             "macos",
             Path::new("/w/RetroGit/target/release/retrogit"),
             none
         ),
-        InstallKind::Development
+        InstallKind::Development,
+        "a bare binary outside a bundle is not updated anyway"
     );
     let installed = Path::new(r"C:\Users\Ada\AppData\Local\Programs\RetroGit\retrogit.exe");
     let has_uninstaller = |p: &Path| p.ends_with("unins000.exe");
@@ -89,9 +100,39 @@ fn the_installation_kind_comes_from_where_the_exe_is() {
         install_kind(
             "windows",
             Path::new(r"C:\w\RetroGit\target\debug\retrogit.exe"),
-            none
+            deps
         ),
         InstallKind::Development
+    );
+    assert_eq!(
+        install_kind(
+            "windows",
+            Path::new(r"C:\w\RetroGit\target\x86_64-pc-windows-msvc\release\retrogit.exe"),
+            fingerprint
+        ),
+        InstallKind::Development
+    );
+    // Folders that only look like Cargo's: a portable copy, updated like any other.
+    let deep = Path::new(r"D:\target\release\x\retrogit.exe");
+    assert_eq!(
+        install_kind("windows", deep, deps),
+        InstallKind::WindowsPortable(deep.to_path_buf())
+    );
+    let named = Path::new(r"C:\Target\Foo\Release\retrogit.exe");
+    assert_eq!(
+        install_kind("windows", named, none),
+        InstallKind::WindowsPortable(named.to_path_buf())
+    );
+    let no_deps = Path::new(r"C:\w\target\release\retrogit.exe");
+    assert_eq!(
+        install_kind("windows", no_deps, none),
+        InstallKind::WindowsPortable(no_deps.to_path_buf()),
+        "nothing of Cargo's next to it"
+    );
+    let mac_like = Path::new("/Applications/target/release/RetroGit.app/Contents/MacOS/retrogit");
+    assert_eq!(
+        install_kind("macos", mac_like, deps),
+        InstallKind::MacApp(PathBuf::from("/Applications/target/release/RetroGit.app"))
     );
     assert_eq!(
         asset_for(&InstallKind::WindowsInstalled),
@@ -189,6 +230,16 @@ fn redirect_locations_are_resolved_against_the_current_url() {
         resolve_location("https://github.com", "y.zip"),
         "https://github.com/y.zip"
     );
+    // RFC 3986: query only, dot segments, fragment only.
+    assert_eq!(
+        resolve_location("https://h/a/v1/x.zip?a=1", "?q=1"),
+        "https://h/a/v1/x.zip?q=1"
+    );
+    assert_eq!(
+        resolve_location("https://h/a/v1/x.zip", "../x"),
+        "https://h/a/x"
+    );
+    assert_eq!(resolve_location("https://h/a/b", "#f"), "https://h/a/b#f");
 }
 
 #[test]

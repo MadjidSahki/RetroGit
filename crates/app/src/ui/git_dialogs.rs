@@ -387,7 +387,10 @@ fn rebase(
             }
             let check = validate_todo(&items);
             if let Err(why) = check {
-                ui.label(egui::RichText::new(why).color(win95::theme::palette(ui.ctx()).gray_text));
+                ui.label(
+                    egui::RichText::new(s::todo_error(why))
+                        .color(win95::theme::palette(ui.ctx()).gray_text),
+                );
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -484,6 +487,7 @@ fn delete_tag(
     back_to_tags: bool,
 ) -> Option<GitDialog> {
     let (mut ok, mut cancel) = (false, false);
+    // Only deleting on origin needs the network (one network operation at a time).
     let idle = cx.state.sync.running.is_none();
     let r = Dialog::new("delete_tag", s::DELETE_TAG_TITLE)
         .width(380.0)
@@ -493,7 +497,11 @@ fn delete_tag(
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ok = ui
-                    .add(Button95::new(s::DELETE).min_size(BUTTON).enabled(idle))
+                    .add(
+                        Button95::new(s::DELETE)
+                            .min_size(BUTTON)
+                            .enabled(idle || !remote),
+                    )
                     .clicked();
                 cancel = ui.add(Button95::new(s::CANCEL).min_size(BUTTON)).clicked();
             });
@@ -594,12 +602,9 @@ fn tags(
                 let has = selected.is_some();
                 // One network operation at a time (Cancel is in the progress window).
                 let idle = cx.state.sync.running.is_none();
+                // Opens the delete dialog, local only by default (no network needed).
                 if ui
-                    .add(
-                        Button95::new(s::DELETE)
-                            .min_size(BUTTON)
-                            .enabled(has && idle),
-                    )
+                    .add(Button95::new(s::DELETE).min_size(BUTTON).enabled(has))
                     .clicked()
                     && let Some(name) = selected.clone()
                 {

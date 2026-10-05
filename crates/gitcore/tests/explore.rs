@@ -65,6 +65,12 @@ fn the_tree_and_files_of_any_version() {
     assert!(r.file_at(&first, "README.md").is_err(), "not there yet");
     assert_eq!(r.resolve("HEAD~2").as_deref(), Some(first.as_str()));
     assert_eq!(r.resolve("no-such-branch"), None);
+    assert_eq!(
+        r.blame("no-such-branch", "README.md", &NO).err(),
+        Some(gitcore::GitError::Refused(gitcore::Refusal::UnknownRev(
+            "no-such-branch".into()
+        )))
+    );
 }
 
 #[test]

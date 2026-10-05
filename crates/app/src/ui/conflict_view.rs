@@ -597,9 +597,12 @@ pub fn confirm_dialog(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             cx.worker.send(Command::AbortOperation);
         }
         ConflictConfirm::OpenRepo(path) => {
-            c.conflict = None;
-            c.conflict_path = None;
+            // The editor closes only when the switch goes (pending line comments ask first;
+            // Cancel there keeps the edits).
             if let Some(cmd) = cx.state.request_repo_switch(Command::OpenRepo(path)) {
+                let c = &mut cx.state.changes;
+                c.conflict = None;
+                c.conflict_path = None;
                 cx.worker.send(cmd);
             }
         }

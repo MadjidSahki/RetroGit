@@ -133,6 +133,73 @@ fn a_relative_redirect_is_followed() {
     assert_eq!(std::fs::read(&path).unwrap(), b"good");
 }
 
+/// A release whose file is 64 bytes, with or without a `Content-Length` header.
+fn oversized_server(file: &str, chunked: bool) -> (mockito::ServerGuard, Release) {
+    let mut server = mockito::Server::new();
+    let r = release_on(&server, file);
+    let body = [b'x'; 64];
+    server
+        .mock("GET", "/dl/sums")
+        .with_body(format!("{}  {file}\n", sha256_hex(&body)))
+        .create();
+    let asset = server.mock("GET", format!("/dl/{file}").as_str());
+    if chunked {
+        asset
+            .with_chunked_body(move |w| w.write_all(&body))
+            .create();
+    } else {
+        asset.with_body(body).create();
+    }
+    (server, r)
+}
+
+#[test]
+fn a_download_larger_than_the_limit_is_refused_and_removed() {
+    let file = "RetroGit-windows-x64-setup.exe";
+    for chunked in [false, true] {
+        let (_server, r) = oversized_server(file, chunked);
+        let dir = tempfile::tempdir().unwrap();
+        let err = download_verified(
+            &Fetcher::new(local_only).with_max(16),
+            &r,
+            &InstallKind::WindowsInstalled,
+            dir.path(),
+            &NO,
+            |_, _| {},
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            retrogit::strings::ERR_UPDATE_TOO_LARGE,
+            "chunked: {chunked}"
+        );
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            0,
+            "chunked: {chunked}"
+        );
+    }
+}
+
+#[test]
+fn a_download_at_the_limit_is_accepted() {
+    let file = "RetroGit-windows-x64-setup.exe";
+    for chunked in [false, true] {
+        let (_server, r) = oversized_server(file, chunked);
+        let dir = tempfile::tempdir().unwrap();
+        let path = download_verified(
+            &Fetcher::new(local_only).with_max(64),
+            &r,
+            &InstallKind::WindowsInstalled,
+            dir.path(),
+            &NO,
+            |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(path).unwrap().len(), 64, "chunked: {chunked}");
+    }
+}
+
 /// A server that sends the start of the file, then nothing for 3 s.
 fn stalling_server(file: &str) -> (mockito::ServerGuard, Release) {
     let mut server = mockito::Server::new();
@@ -204,6 +271,34 @@ fn a_download_that_stops_receiving_data_fails() {
         "failed after {:?}",
         started.elapsed()
     );
+}
+
+#[test]
+fn reading_the_body_is_bounded_in_time() {
+    let file = "RetroGit-windows-x64-setup.exe";
+    let (_server, r) = stalling_server(file);
+    let dir = tempfile::tempdir().unwrap();
+    // No clock: unbounded, the read would end after the server's 3 s pause with the right
+    // bytes and succeed; the stall guard (10 s) cannot fire first. Only the body timeout
+    // can make it fail, so the kind of error is the proof.
+    let err = download_verified(
+        &Fetcher::new(local_only)
+            .with_stall(Duration::from_secs(10))
+            .with_body_timeout(Duration::from_millis(300)),
+        &r,
+        &InstallKind::WindowsInstalled,
+        dir.path(),
+        &NO,
+        |_, _| {},
+    )
+    .unwrap_err();
+    assert_ne!(
+        err,
+        retrogit::strings::ERR_UPDATE_STALLED,
+        "the body timeout, not the stall"
+    );
+    assert!(err.to_lowercase().contains("timeout"), "{err}");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
 
 #[test]

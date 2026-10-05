@@ -1,6 +1,6 @@
 //! Applying a pull request suggestion: replace lines of a file and commit.
 
-use crate::{CommitBackend, GitError, Repo};
+use crate::{CommitBackend, GitError, Refusal, Repo};
 
 /// Pure: `content` with lines `start..=end` (1-based) replaced by `replacement`, if they are
 /// still `expected`. Every other line keeps its own ending; new lines take the ending of
@@ -82,9 +82,7 @@ impl Repo {
     ) -> Result<(), GitError> {
         let changes = self.git_ok(&["--literal-pathspecs", "status", "--porcelain", "-uno"])?;
         if !changes.stdout.trim().is_empty() {
-            return Err(GitError::Unsupported(
-                "commit or stash your local changes first".into(),
-            ));
+            return Err(GitError::Refused(Refusal::LocalChangesFirst));
         }
         let file = self.workdir()?.join(path);
         let content = std::fs::read_to_string(&file)

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use gitcore::{
     Branch, CloneProgress, CommitDetail, CommitOutcome, FileDiff, FileStatus, GitError, LogEntry,
-    NetProgress, Operation, PullMode, PullOutcome, PushMode, RepoSummary, Selection, Side,
+    NetProgress, Operation, PullMode, PullOutcome, PushMode, Refusal, RepoSummary, Selection, Side,
     SignatureStatus, SigningConfig,
 };
 use github::{
@@ -472,7 +472,6 @@ pub enum Event {
         note: String,
         stash_kept: bool,
     },
-    /// Local changes prevent `retry` from starting (nothing was changed).
     /// Answer of the explore service for the repository at `repo`.
     ExploreLoaded {
         repo: std::path::PathBuf,
@@ -480,6 +479,7 @@ pub enum Event {
     },
     /// Result of a tag action, shown in the Tags window.
     TagsStatus(String),
+    /// Local changes prevent `retry` from starting (nothing was changed).
     OpBlocked {
         retry: Box<Command>,
         files: Vec<String>,
@@ -578,11 +578,8 @@ impl AppError {
             }
             GithubError::OAuthRestricted { org } => AppError::new(
                 Severity::Warning,
-                &format!(
-                    "The organization {} restricts third-party applications and has not approved RetroGit. {}",
-                    org.as_deref().unwrap_or("of this repository"),
-                    s::ERR_OAUTH_RESTRICTED_HELP
-                ),
+                &s::ERR_OAUTH_RESTRICTED
+                    .replace("{org}", org.as_deref().unwrap_or(s::ORG_OF_THIS_REPO)),
             ),
             GithubError::Rejected { message, .. } => AppError::new(Severity::Warning, message),
             // How GitHub hides a repository from a restricted app; other misses (a deleted
@@ -612,7 +609,7 @@ impl AppError {
                 AppError::new(Severity::Warning, s::ERR_NO_NETWORK).with_detail(d)
             }
             GitError::StaleSelection => AppError::new(Severity::Info, s::INFO_STALE_SELECTION),
-            GitError::Unsupported(d) => AppError::new(Severity::Warning, d),
+            GitError::Refused(r) => AppError::new(Severity::Warning, &refusal_text(r)),
             GitError::CommitRejected { output } => {
                 AppError::new(Severity::Error, s::ERR_COMMIT_REJECTED).with_detail(output)
             }
@@ -621,16 +618,10 @@ impl AppError {
                 AppError::new(Severity::Warning, s::ERR_WOULD_OVERWRITE)
                     .with_detail(files.join("\n"))
             }
-            GitError::NotMerged(b) => AppError::new(
-                Severity::Warning,
-                &format!("Branch '{b}' is not fully merged."),
-            ),
-            GitError::Diverged { ahead, behind } => AppError::new(
-                Severity::Info,
-                &format!(
-                    "Your branch and its upstream have diverged ({ahead} local and {behind} remote commits)."
-                ),
-            ),
+            GitError::NotMerged(b) => AppError::new(Severity::Warning, &s::not_fully_merged(b)),
+            GitError::Diverged { ahead, behind } => {
+                AppError::new(Severity::Info, &s::diverged(*ahead, *behind))
+            }
             GitError::PushRejected => AppError::new(Severity::Warning, s::ERR_PUSH_REJECTED),
             GitError::StashConflict => AppError::new(Severity::Warning, s::ERR_STASH_CONFLICT),
             GitError::SigningRequiresGit => {
@@ -649,7 +640,8 @@ impl AppError {
             GitError::AccessDenied(d) => {
                 AppError::new(Severity::Warning, s::ERR_ACCESS_DENIED).with_detail(d)
             }
-            GitError::Other(d) => AppError::new(Severity::Error, d),
+            // Technical (git's own output): not worded by RetroGit, shown as the detail.
+            GitError::Other(d) => AppError::new(Severity::Error, s::ERR_GIT_FAILED).with_detail(d),
         }
     }
 
@@ -658,13 +650,38 @@ impl AppError {
             DeviceFlowFailure::Expired => AppError::new(Severity::Warning, s::ERR_DEVICE_EXPIRED),
             DeviceFlowFailure::Denied => AppError::new(Severity::Warning, s::ERR_DEVICE_DENIED),
             DeviceFlowFailure::Other(code) => {
-                AppError::new(Severity::Error, &format!("GitHub sign-in failed: {code}"))
+                AppError::new(Severity::Error, &s::sign_in_failed(code))
             }
         }
     }
 
     pub fn from_store(e: &TokenStoreError) -> AppError {
         AppError::new(Severity::Error, s::ERR_KEYCHAIN).with_detail(e)
+    }
+}
+
+/// The app's words for a gitcore refusal.
+fn refusal_text(r: &Refusal) -> String {
+    match r {
+        Refusal::LocalChangesFirst => s::ERR_LOCAL_CHANGES_FIRST.into(),
+        Refusal::ResolveConflictsFirst => s::ERR_RESOLVE_CONFLICTS_FIRST.into(),
+        Refusal::OperationInProgress => s::ERR_OPERATION_IN_PROGRESS.into(),
+        Refusal::FinishMergeByCommit => s::ERR_FINISH_MERGE.into(),
+        Refusal::NothingToAmend => s::ERR_NOTHING_TO_AMEND.into(),
+        Refusal::DetachedHead => s::ERR_DETACHED_HEAD.into(),
+        Refusal::NoUpstream { publish: true } => s::ERR_NO_UPSTREAM_PUBLISH.into(),
+        Refusal::NoUpstream { publish: false } => s::ERR_NO_UPSTREAM.into(),
+        Refusal::InvalidTagName(name) => s::invalid_tag_name(name),
+        Refusal::InvalidIgnorePattern => s::ERR_INVALID_IGNORE_PATTERN.into(),
+        Refusal::MergesInRange => s::ERR_MERGES_IN_RANGE.into(),
+        Refusal::BareRepository => s::ERR_BARE_REPOSITORY.into(),
+        Refusal::UnknownRev(rev) => s::unknown_rev(rev),
+        Refusal::UnknownRevision(rev) => s::unknown_revision(rev),
+        Refusal::NotInConflict(path) => s::not_in_conflict(path),
+        Refusal::PullNotFetched(n) => s::pull_not_fetched(*n),
+        Refusal::CommitNotFound => s::ERR_COMMIT_NOT_FOUND.into(),
+        Refusal::WholeFileOnly { kind, action } => s::whole_file_only(*kind, *action),
+        Refusal::Todo(e) => s::todo_error(*e).into(),
     }
 }
 
@@ -736,6 +753,8 @@ pub enum ExploreResult {
     Grep {
         rev: String,
         text: String,
+        match_case: bool,
+        paths: String,
         result: gitcore::GrepResult,
     },
     LogSearch {

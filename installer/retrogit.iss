@@ -54,6 +54,11 @@ Root: HKCU; Subkey: "Software\Classes\retrogit"; ValueType: string; ValueName: "
 Root: HKCU; Subkey: "Software\Classes\retrogit"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKCU; Subkey: "Software\Classes\retrogit\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\retrogit.exe"" ""%1"""
 
+[UninstallDelete]
+; Written by RetroGit at start for its notifications (notify/winreg.rs); the rest of that
+; folder (settings, log) is the user's and stays.
+Type: files; Name: "{localappdata}\RetroGit\icon.png"
+
 [Run]
 Filename: "{app}\retrogit.exe"; Description: "{cm:LaunchProgram,RetroGit}"; Flags: nowait postinstall skipifsilent
 ; Updates from RetroGit run the installer silently with /RELAUNCH: start the new version.

@@ -2,7 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer, Serialize};
 
 pub const MAX_RECENT: usize = 20;
 
@@ -39,20 +40,29 @@ impl WindowGeometry {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    #[serde(deserialize_with = "lenient")]
     pub recent: Vec<RecentRepo>,
+    #[serde(deserialize_with = "lenient")]
     pub last_clone_dir: Option<PathBuf>,
+    #[serde(deserialize_with = "lenient")]
     pub window: Option<WindowGeometry>,
     /// IDE chosen for each repository ("Open in IDE"), by IDE id.
+    #[serde(deserialize_with = "lenient")]
     pub ide_by_repo: std::collections::BTreeMap<PathBuf, String>,
     /// Last IDE chosen: the default for repositories without a choice.
+    #[serde(deserialize_with = "lenient")]
     pub default_ide: Option<String>,
     /// GitHub logins of the signed-in accounts, in order (tokens are in the keychain).
+    #[serde(deserialize_with = "lenient")]
     pub accounts: Vec<String>,
     /// Account of each repository (`owner/repo`, lowercase): chosen or learned.
+    #[serde(deserialize_with = "lenient")]
     pub repo_accounts: std::collections::BTreeMap<String, github::RepoAccount>,
     /// View > Appearance.
+    #[serde(deserialize_with = "lenient")]
     pub appearance: AppearanceConfig,
     /// Update checks (6g).
+    #[serde(deserialize_with = "lenient")]
     pub updates: UpdatesConfig,
 }
 
@@ -60,15 +70,17 @@ pub struct Config {
 #[serde(default)]
 pub struct UpdatesConfig {
     /// Check for a new version at start and every day.
+    #[serde(deserialize_with = "lenient_check")]
     pub check: bool,
     /// Version the user chose to skip.
+    #[serde(deserialize_with = "lenient")]
     pub skipped: Option<String>,
 }
 
 impl Default for UpdatesConfig {
     fn default() -> Self {
         UpdatesConfig {
-            check: true,
+            check: default_check(),
             skipped: None,
         }
     }
@@ -78,9 +90,12 @@ impl Default for UpdatesConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppearanceConfig {
+    #[serde(deserialize_with = "lenient_scheme")]
     pub scheme: String,
+    #[serde(deserialize_with = "lenient_font")]
     pub font: String,
     /// Interface zoom (1.0 = 100 %).
+    #[serde(deserialize_with = "lenient_zoom")]
     pub zoom: f32,
 }
 
@@ -89,8 +104,64 @@ pub const MAX_ZOOM: f32 = 2.0;
 
 impl Default for AppearanceConfig {
     fn default() -> Self {
-        AppearanceConfig::from_choice(win95::theme::Appearance::default(), 1.0)
+        AppearanceConfig {
+            scheme: default_scheme(),
+            font: default_font(),
+            zoom: default_zoom(),
+        }
     }
+}
+
+// Field defaults: what `Default` gives, and what a wrong value falls back to.
+fn default_check() -> bool {
+    true
+}
+
+fn default_scheme() -> String {
+    win95::theme::Appearance::default()
+        .scheme
+        .name()
+        .to_string()
+}
+
+fn default_font() -> String {
+    win95::theme::Appearance::default().font.name().to_string()
+}
+
+fn default_zoom() -> f32 {
+    1.0
+}
+
+/// A value of the wrong type only resets its own field (to `default`), not the whole file.
+fn lenient_or<'de, D: Deserializer<'de>, T: DeserializeOwned>(
+    d: D,
+    default: fn() -> T,
+) -> Result<T, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(value).unwrap_or_else(|e| {
+        log::warn!("ignoring a wrong config value: {e}");
+        default()
+    }))
+}
+
+fn lenient<'de, D: Deserializer<'de>, T: DeserializeOwned + Default>(d: D) -> Result<T, D::Error> {
+    lenient_or(d, T::default)
+}
+
+fn lenient_check<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
+    lenient_or(d, default_check)
+}
+
+fn lenient_scheme<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    lenient_or(d, default_scheme)
+}
+
+fn lenient_font<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    lenient_or(d, default_font)
+}
+
+fn lenient_zoom<'de, D: Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    lenient_or(d, default_zoom)
 }
 
 impl AppearanceConfig {
@@ -125,15 +196,25 @@ impl Config {
         dirs::config_dir().map(|d| d.join("RetroGit").join("config.json"))
     }
 
-    /// Missing or corrupt file => default config (a corrupt file is logged, not fatal).
+    /// Missing or unreadable file => default config. A wrong value only resets its own
+    /// field; a file that is not a config at all is logged and kept as `config.json.bad`
+    /// (the next save overwrites `config.json`).
     pub fn load_from(path: &Path) -> Config {
-        match std::fs::read_to_string(path) {
-            Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
-                log::warn!("ignoring corrupt config {}: {e}", path.display());
-                Config::default()
-            }),
-            Err(_) => Config::default(),
-        }
+        let Ok(bytes) = std::fs::read(path) else {
+            return Config::default();
+        };
+        serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+            let bad = path.with_extension("json.bad");
+            log::warn!(
+                "ignoring corrupt config {} (kept as {}): {e}",
+                path.display(),
+                bad.display()
+            );
+            if let Err(e) = std::fs::write(&bad, &bytes) {
+                log::warn!("cannot keep {}: {e}", bad.display());
+            }
+            Config::default()
+        })
     }
 
     /// Atomic write: temp file then rename.

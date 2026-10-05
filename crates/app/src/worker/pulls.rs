@@ -1,5 +1,6 @@
 //! Worker side of sub-project 4: pull requests through the GitHub API.
 
+use gitcore::{GitError, Refusal};
 use github::{Client, GithubError, NewPull, PrFilter};
 
 use super::Worker;
@@ -22,8 +23,12 @@ impl Worker {
         {
             r = self.on_github_once(slug, &call);
         }
-        if r.is_ok() {
-            // GitHub answers again: check the accounts kept offline at startup.
+        if r.is_ok()
+            && !self.unchecked.is_empty()
+            && self.recheck_throttle.ready(std::time::Instant::now())
+        {
+            // GitHub answers again: check the accounts kept offline at startup (at most
+            // every few minutes, each check is a `GET /user` per account).
             self.recheck_unchecked();
         }
         r
@@ -493,6 +498,27 @@ impl Worker {
         drop(repo);
         let (name, mut behind) = match fetched {
             Ok(target) => target,
+            // Fetched, but local changes keep the checked-out `pr/N` from moving: the fetch
+            // worked, the checkout did not.
+            Err(
+                e @ (GitError::WouldOverwrite { .. }
+                | GitError::Refused(Refusal::LocalChangesFirst)),
+            ) => {
+                self.emit(Event::SyncFinished {
+                    op: SyncOp::Fetch,
+                    ok: true,
+                });
+                let error = match e {
+                    // No branch switches: say which branch could not be updated.
+                    GitError::WouldOverwrite { files } => AppError::new(
+                        Severity::Warning,
+                        &s::pr_branch_not_moved(&format!("pr/{number}")),
+                    )
+                    .with_detail(files.join("\n")),
+                    e => AppError::from_git(&e),
+                };
+                return self.fail(Op::PullAction, error);
+            }
             Err(e) => return self.net_failed(SyncOp::Fetch, false, &e),
         };
         self.emit(Event::SyncFinished {

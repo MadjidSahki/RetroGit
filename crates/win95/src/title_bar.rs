@@ -18,6 +18,7 @@ pub struct TitleBar<'a> {
     title: &'a str,
     active: bool,
     close_only: bool,
+    decorative: bool,
     icon: Option<egui::TextureId>,
 }
 
@@ -29,6 +30,7 @@ impl<'a> TitleBar<'a> {
             title,
             active: true,
             close_only: false,
+            decorative: false,
             icon: None,
         }
     }
@@ -50,10 +52,22 @@ impl<'a> TitleBar<'a> {
         self
     }
 
+    /// A picture of a title bar (the Appearance preview): its buttons cannot be pressed,
+    /// it cannot be dragged, and screen readers do not see them. Always [`TitleAction::None`].
+    pub fn decorative(mut self) -> Self {
+        self.decorative = true;
+        self
+    }
+
     pub fn show(self, ui: &mut Ui) -> TitleAction {
         let pal = theme::palette(ui.ctx());
         let width = ui.available_width();
-        let (rect, bar) = ui.allocate_exact_size(vec2(width, HEIGHT), Sense::click_and_drag());
+        let sense = if self.decorative {
+            Sense::hover()
+        } else {
+            Sense::click_and_drag()
+        };
+        let (rect, bar) = ui.allocate_exact_size(vec2(width, HEIGHT), sense);
         let (start, end) = if self.active {
             (pal.title, pal.title_end)
         } else {
@@ -95,14 +109,16 @@ impl<'a> TitleBar<'a> {
         }
         for (i, (glyph, label, a)) in buttons.into_iter().enumerate() {
             let r = Rect::from_min_size(pos2(x, y), btn);
-            if caption_button(ui, r, glyph, label) {
+            if self.decorative {
+                paint_caption_button(ui, r, glyph, false);
+            } else if caption_button(ui, r, glyph, label) {
                 action = a;
             }
             // Win95 leaves a 2px gap between Close and the others.
             x -= btn.x + if i == 0 { 2.0 } else { 0.0 };
         }
 
-        if action == TitleAction::None {
+        if action == TitleAction::None && !self.decorative {
             if bar.double_clicked() && !self.close_only {
                 action = TitleAction::ToggleMaximize;
             } else if bar.drag_started() {
@@ -125,7 +141,11 @@ fn caption_button(ui: &mut Ui, rect: Rect, glyph: Glyph, label: &str) -> bool {
     let resp = ui.interact(rect, id, Sense::click());
     let label_owned = label.to_string();
     resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label_owned));
-    let pressed = resp.is_pointer_button_down_on();
+    paint_caption_button(ui, rect, glyph, resp.is_pointer_button_down_on());
+    resp.clicked()
+}
+
+fn paint_caption_button(ui: &Ui, rect: Rect, glyph: Glyph, pressed: bool) {
     let pal = theme::palette(ui.ctx());
     let p = ui.painter();
     p.rect_filled(rect, 0.0, pal.face);
@@ -164,7 +184,6 @@ fn caption_button(ui: &mut Ui, rect: Rect, glyph: Glyph, label: &str) -> bool {
             p.line_segment([c + vec2(3.5, -3.0), c + vec2(-3.5, 3.0)], s);
         }
     }
-    resp.clicked()
 }
 
 fn gradient(rect: Rect, left: Color32, right: Color32) -> Mesh {

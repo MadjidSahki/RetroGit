@@ -81,20 +81,32 @@ impl Worker {
     }
 
     /// Run a branch command, then resync; `WouldOverwrite` / `NotMerged` become dialogs.
-    fn branch_op(&mut self, run: impl FnOnce(&Repo) -> Result<(), GitError>, branch: &str) {
+    fn branch_op<E: Into<BranchFail>>(
+        &mut self,
+        run: impl FnOnce(&Repo) -> Result<(), E>,
+        branch: &str,
+    ) {
         let Some(repo) = self.open_current(Op::History) else {
             return;
         };
-        match run(&repo) {
-            Ok(()) => {}
-            Err(GitError::WouldOverwrite { files }) => {
+        let err = match run(&repo).map_err(Into::into) {
+            Ok(()) => None,
+            Err(BranchFail::Shown(a)) => {
+                self.fail(Op::History, a);
+                None
+            }
+            Err(BranchFail::Git(e)) => Some(e),
+        };
+        match err {
+            None => {}
+            Some(GitError::WouldOverwrite { files }) => {
                 self.emit(Event::WouldOverwrite {
                     branch: branch.to_string(),
                     files,
                 });
             }
-            Err(GitError::NotMerged(name)) => self.emit(Event::NotMerged(name)),
-            Err(e) => self.fail(Op::History, AppError::from_git(&e)),
+            Some(GitError::NotMerged(name)) => self.emit(Event::NotMerged(name)),
+            Some(e) => self.fail(Op::History, AppError::from_git(&e)),
         }
         self.after_ref_change(&repo);
     }
@@ -108,7 +120,7 @@ impl Worker {
         let remote = name.starts_with("origin/");
         let target = name.to_string();
         self.branch_op(
-            |r| {
+            |r| -> Result<(), BranchFail> {
                 let switch = |r: &Repo| {
                     if remote {
                         r.checkout_remote_branch(&target)
@@ -117,29 +129,31 @@ impl Worker {
                     }
                 };
                 if !stash {
-                    return switch(r);
+                    return switch(r).map_err(BranchFail::Git);
                 }
-                let label = format!("RetroGit: switch to {target}");
+                let label = s::switch_stash_label(&target);
                 let stashed = r.stash_push(&label)?;
                 if let Err(e) = switch(r) {
                     // Put the changes back where they were; never lose track of them.
                     if stashed && r.stash_pop().is_err() {
-                        return Err(GitError::Other(format!(
-                            "{e}\n\nYour changes are kept in the stash '{label}' (git stash list)."
-                        )));
+                        let mut a = AppError::from_git(&e);
+                        a.message = s::changes_kept_in_stash(&a.message, &label);
+                        return Err(BranchFail::Shown(a));
                     }
                     // Already stashed: a second "would be overwritten" must not reopen the
                     // same dialog in a loop.
                     return Err(match e {
-                        GitError::WouldOverwrite { files } => GitError::Other(format!(
-                            "{}\n{}",
-                            s::ERR_WOULD_OVERWRITE,
-                            files.join("\n")
-                        )),
-                        other => other,
+                        e @ GitError::WouldOverwrite { .. } => {
+                            BranchFail::Shown(AppError::from_git(&e))
+                        }
+                        other => BranchFail::Git(other),
                     });
                 }
-                if stashed { r.stash_pop() } else { Ok(()) }
+                if stashed {
+                    r.stash_pop().map_err(BranchFail::Git)
+                } else {
+                    Ok(())
+                }
             },
             name,
         );
@@ -345,5 +359,17 @@ impl Worker {
             return;
         }
         self.fetch(true);
+    }
+}
+
+/// Why a branch operation failed: from git, or already worded for the user.
+enum BranchFail {
+    Git(GitError),
+    Shown(AppError),
+}
+
+impl From<GitError> for BranchFail {
+    fn from(e: GitError) -> Self {
+        BranchFail::Git(e)
     }
 }

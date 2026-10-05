@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::{GitError, Repo};
+use crate::{GitError, Refusal, Repo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Side {
@@ -82,7 +82,7 @@ impl Repo {
     pub(crate) fn workdir(&self) -> Result<&Path, GitError> {
         self.git()
             .workdir()
-            .ok_or_else(|| GitError::Unsupported("bare repositories are not supported".into()))
+            .ok_or(GitError::Refused(Refusal::BareRepository))
     }
 }
 

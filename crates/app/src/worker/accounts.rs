@@ -54,6 +54,25 @@ pub fn clone_refused(slug_is_github: bool, tried: &[String], e: &GitError) -> Op
     })
 }
 
+/// A failed clone of a github.com repository (`slug_is_github`): the account chosen for it
+/// that must sign in again (`unusable`, nothing else was tried), else `clone_refused`.
+pub fn clone_error(
+    slug_is_github: bool,
+    unusable: Option<&str>,
+    tried: &[String],
+    e: &GitError,
+) -> Option<AppError> {
+    let refused = matches!(e, GitError::Auth(_) | GitError::AccessDenied(_));
+    match unusable {
+        Some(login) if slug_is_github && refused => Some(AppError::new(
+            Severity::Warning,
+            &s::ERR_ACCOUNT_MUST_SIGN_IN.replace("{login}", login),
+        )),
+        Some(_) => None,
+        None => clone_refused(slug_is_github, tried, e),
+    }
+}
+
 impl Worker {
     fn accounts_changed(&self) {
         self.emit(Event::AccountsChanged(self.accounts.statuses()));
@@ -284,7 +303,8 @@ impl Worker {
         if self.accounts.list().is_empty() {
             self.emit(Event::SignedOut);
         }
-        self.send_repo_account();
+        // Without probing: the other accounts are tried on the next GitHub call.
+        self.send_repo_account_known();
     }
 
     fn learn(&mut self, slug: &Slug, login: &str) {
@@ -325,17 +345,31 @@ impl Worker {
         if self.unusable_choice(slug).is_some() {
             return None;
         }
+        match self.known_login_for(slug) {
+            Some(login) => self.accounts.get(&login),
+            None => self.probe(slug, None),
+        }
+    }
+
+    /// `account_for` without asking GitHub: the choice, the account learned or listing it,
+    /// the owner or a member of the organization.
+    fn known_account_for(&mut self, slug: &Slug) -> Option<Account> {
+        if self.unusable_choice(slug).is_some() {
+            return None;
+        }
+        let login = self.known_login_for(slug)?;
+        self.accounts.get(&login)
+    }
+
+    /// Login `choose_account` gives for `slug` (remembered when a list showed it).
+    fn known_login_for(&mut self, slug: &Slug) -> Option<String> {
         let key = repo_key(slug);
         let seen = self.seen.get(&key).cloned().unwrap_or_default();
-        if let Some(login) =
-            choose_account(&slug.0, &self.accounts, self.repo_accounts.get(&key), &seen)
-        {
-            if seen.iter().any(|l| l.eq_ignore_ascii_case(&login)) {
-                self.learn(slug, &login);
-            }
-            return self.accounts.get(&login);
+        let login = choose_account(&slug.0, &self.accounts, self.repo_accounts.get(&key), &seen)?;
+        if seen.iter().any(|l| l.eq_ignore_ascii_case(&login)) {
+            self.learn(slug, &login);
         }
-        self.probe(slug, None)
+        Some(login)
     }
 
     /// Try each account (except `exclude`) until one can see `slug`, and remember it.
@@ -404,6 +438,15 @@ impl Worker {
 
     /// Tell the UI which account the open repository uses.
     pub(super) fn send_repo_account(&mut self) {
+        self.tell_repo_account(true);
+    }
+
+    /// `send_repo_account` without probing GitHub (after a rejected token).
+    fn send_repo_account_known(&mut self) {
+        self.tell_repo_account(false);
+    }
+
+    fn tell_repo_account(&mut self, probe: bool) {
         let Some(slug) = self
             .repo
             .clone()
@@ -412,7 +455,12 @@ impl Worker {
         else {
             return;
         };
-        let login = self.account_for(&slug).map(|a| a.login);
+        let account = if probe {
+            self.account_for(&slug)
+        } else {
+            self.known_account_for(&slug)
+        };
+        let login = account.map(|a| a.login);
         self.emit(Event::RepoAccount { slug, login });
     }
 
@@ -507,6 +555,11 @@ impl Worker {
             (None, Some(slug)) => self.account_for(slug),
             (None, None) => None,
         };
+        // A chosen account that must sign in again: no other one was tried.
+        let unusable = match (&account, &slug) {
+            (None, Some(slug)) => self.unusable_choice(slug),
+            _ => None,
+        };
         let tried: Vec<String> = self.accounts.list().into_iter().map(|a| a.login).collect();
         let token = match (&account, &slug) {
             (Some(a), Some(slug)) if self.deps.tokens.is_restricted(&a.login, &slug.0) => self
@@ -550,7 +603,13 @@ impl Worker {
                 self.opened(summary, true)
             }
             Err(GitError::Cancelled) => self.emit(Event::CloneCancelled),
-            Err(e) => match clone_refused(slug.is_some() && account.is_none(), &tried, &e) {
+            Err(e) => match clone_error(
+                slug.is_some() && account.is_none(),
+                unusable.as_deref(),
+                &tried,
+                &e,
+            ) {
+                Some(error) if unusable.is_some() => self.fail(Op::Clone, error),
                 Some(mut error) => {
                     error.link = Some(self.sso_settings_link());
                     self.fail(Op::Clone, error)

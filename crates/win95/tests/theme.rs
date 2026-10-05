@@ -47,3 +47,22 @@ fn monospace_stays_fixed_width_for_diffs() {
         .fonts_mut(|f| (f.glyph_width(&font, 'i'), f.glyph_width(&font, 'M')));
     assert!((w_i - w_m).abs() < 0.01, "i={w_i} M={w_m}");
 }
+
+#[test]
+fn a_panic_while_drawing_with_another_palette_restores_the_scheme_palette() {
+    let ctx = egui::Context::default();
+    win95::theme::install(&ctx);
+    let mut after = None;
+    let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            win95::theme::with_palette(ui, win95::palette::DARK, |_| -> () {
+                panic!("preview failed")
+            })
+        }));
+        assert!(r.is_err());
+        after = Some(win95::theme::palette(ui.ctx()));
+    });
+    out.textures_delta.clear();
+    assert_eq!(after, Some(win95::palette::STANDARD));
+    assert_eq!(win95::theme::palette(&ctx), win95::palette::STANDARD);
+}

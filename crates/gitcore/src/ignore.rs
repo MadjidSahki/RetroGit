@@ -1,11 +1,11 @@
-use crate::{GitError, Repo};
+use crate::{GitError, Refusal, Repo};
 
 impl Repo {
     /// Append `pattern` to the root `.gitignore` (created if needed, no duplicates).
     pub fn add_to_gitignore(&self, pattern: &str) -> Result<(), GitError> {
         let pattern = pattern.trim();
         if pattern.is_empty() || pattern.contains('\n') {
-            return Err(GitError::Unsupported("invalid .gitignore pattern".into()));
+            return Err(GitError::Refused(Refusal::InvalidIgnorePattern));
         }
         let path = self.workdir()?.join(".gitignore");
         let io = |e: std::io::Error| GitError::Other(format!("cannot update .gitignore: {e}"));

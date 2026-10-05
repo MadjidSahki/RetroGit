@@ -76,3 +76,14 @@ fn discover_finds_the_root_from_a_subfolder() {
         Err(GitError::NotARepository(_))
     ));
 }
+
+#[test]
+fn a_bare_repository_is_refused_where_files_are_needed() {
+    let d = tempfile::tempdir().unwrap();
+    git2::Repository::init_bare(d.path()).unwrap();
+    let r = Repo::open(d.path()).unwrap();
+    assert_eq!(
+        r.add_to_gitignore("*.log"),
+        Err(GitError::Refused(gitcore::Refusal::BareRepository))
+    );
+}

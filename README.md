@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/MadjidSahki/RetroGit/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/MadjidSahki/RetroGit/ci.yml?branch=main&label=CI" alt="CI"></a>
-  <a href="https://github.com/MadjidSahki/RetroGit/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-590%20passed-brightgreen" alt="Tests"></a>
+  <a href="https://github.com/MadjidSahki/RetroGit/actions/workflows/ci.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/MadjidSahki/RetroGit/badges/tests.json" alt="Tests"></a>
   <a href="https://github.com/MadjidSahki/RetroGit/releases/latest"><img src="https://img.shields.io/github/v/release/MadjidSahki/RetroGit?label=release" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows-blue" alt="Platforms">
   <img src="https://img.shields.io/badge/rust-1.95%2B-orange" alt="Rust 1.95+">
@@ -21,7 +21,9 @@ GitHub repositories, stage exactly the lines you want, commit with your hooks an
 explore history, review and merge pull requests — all in grey bevelled windows, with a blue
 gradient title bar and a pixel font.
 
-> Screenshot: _coming soon_
+<p align="center">
+  <img src="docs/screenshot.png" alt="RetroGit: the History tab with the commit graph and a commit's diff" width="900">
+</p>
 
 - **Small and native** — a single ~16 MB binary, no webview, no runtime
 - **Quiet** — idle CPU ≈ 0 %: it redraws only when something changes
@@ -60,6 +62,8 @@ gradient title bar and a pixel font.
 ### Local work
 
 - Staged, unstaged and untracked files, refreshed as files change.
+- Commits, checkouts and fetches made elsewhere (terminal, IDE) show up by themselves:
+  branches, ahead/behind and history reload.
 - Colored diffs (200+ languages) with **line-level staging**: a file, a hunk or single lines.
 - Discard a file, a hunk or lines (with confirmation; untracked files go to the trash).
 - Commits go through your `git`: **hooks and GPG/SSH signing just work**.
@@ -75,7 +79,7 @@ gradient title bar and a pixel font.
   **browse its files**.
 - **Interactive rebase**: reorder, pick, reword, squash, fixup or drop — pushed commits are flagged.
 - **Stashes** tab: stash, browse, apply, pop, drop.
-- **Tags**: create (lightweight or annotated), delete (also on origin), push.
+- **Tags**: create (lightweight or annotated), delete (also on origin), push — with progress and cancel.
 
 ### Conflicts
 
@@ -83,7 +87,7 @@ gradient title bar and a pixel font.
 - Per block: use mine, theirs or both — or keep one side for the whole file.
 - The result stays editable; **Mark resolved** opens the next conflicted file.
 - Continue, Skip and Abort for merges, rebases, cherry-picks and reverts.
-- Your edits are never lost silently.
+- Files keep their line endings (CRLF stays CRLF); your edits are never lost silently.
 
 ### Explore the code
 
@@ -100,11 +104,15 @@ gradient title bar and a pixel font.
 - Lists: open, mine, review requested, closed — with checks, reviews and labels.
 - Read the description, the conversation, the commits, the files and the checks.
 - **Create** a pull request from the current branch (publishing it first if needed).
-- **Review**: comment on lines or ranges, approve, request changes, reply, resolve.
-- **Suggestions**: write them, and apply the ones you receive as a local commit.
+- **Review**: comment on lines or ranges, approve, request changes, reply, resolve. Draft
+  comments are kept per pull request; long comments fit the window and unfold with a click.
+- **Suggestions**: write them, and apply the ones you receive as a local commit, credited to
+  their author (`Co-authored-by`), as on github.com.
 - Edit the title, description, reviewers, assignees, labels; draft ↔ ready for review.
 - **Merge, squash or rebase** — the button tells you why when GitHub would refuse.
-- Check out a pull request, forks included.
+- Check out a pull request, forks included, with progress and cancel.
+- Long lists say when GitHub has more and link to it; only web and mail links open from
+  pull request text.
 
 ### Notifications
 
@@ -156,8 +164,7 @@ Download the latest build from the [Releases](../../releases) page:
   adds it to the Start menu and to *Installed apps* (to uninstall it).
 - Or unzip the **portable** `retrogit.exe` anywhere.
 - The files are not code-signed: if SmartScreen appears, click **More info** → **Run anyway**.
-- The installer is checked automatically on every build; notifications on Windows have not
-  been tried by hand yet — feedback welcome.
+- The installer is checked automatically on every build.
 
 [Git](https://git-scm.com/) should be installed: RetroGit uses it for commits, branches and
 network operations, so your hooks, signing, SSH keys and credential helpers keep working.
@@ -244,6 +251,7 @@ cargo test --workspace
 - Each merge into `main` publishes a release `v<major>.<minor>.<run number>` with both binaries.
 - Icons are made from the full logo with `python3 scripts/make-icons.py path/to/retrogit.png` (needs Pillow).
 - Each release also has `SHA256SUMS.txt`, which RetroGit checks before installing an update.
+- The tests badge is written by the CI on each merge (`tests.json` on the `badges` branch).
 - `scripts/package-macos.sh <binary> <version> <dir>` builds and signs `RetroGit.app` (ad-hoc,
   or `MACOS_SIGN_IDENTITY`); `installer/retrogit.iss` is the Windows installer (Inno Setup 6),
   checked by `installer/test-install.ps1` in the CI.

@@ -15,8 +15,9 @@ pub enum GitError {
     /// The file changed since its diff was displayed; nothing was written.
     #[error("the file changed since its diff was shown")]
     StaleSelection,
-    #[error("{0}")]
-    Unsupported(String),
+    /// RetroGit refuses the action; the app words it (gitcore has no user texts).
+    #[error("refused: {0:?}")]
+    Refused(Refusal),
     /// `git commit` exited with an error (hook, signing...). `output` is its stdout+stderr.
     #[error("commit rejected")]
     CommitRejected { output: String },
@@ -59,6 +60,61 @@ pub enum GitError {
     MessageRefused { output: String },
     #[error("{0}")]
     Other(String),
+}
+
+/// Why an action is refused before anything is changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    LocalChangesFirst,
+    ResolveConflictsFirst,
+    OperationInProgress,
+    /// A merge is finished by committing, not by "continue".
+    FinishMergeByCommit,
+    NothingToAmend,
+    DetachedHead,
+    /// `publish`: the branch can be published to get one (pull); otherwise just missing.
+    NoUpstream {
+        publish: bool,
+    },
+    InvalidTagName(String),
+    InvalidIgnorePattern,
+    /// Interactive rebase of merge commits.
+    MergesInRange,
+    BareRepository,
+    /// A version gitcore could not resolve to a commit (file at, blame, tree...).
+    UnknownRev(String),
+    /// A revision the Explore view could not resolve.
+    UnknownRevision(String),
+    NotInConflict(String),
+    PullNotFetched(u64),
+    CommitNotFound,
+    /// A partial (hunk or line) action on a file that only takes it whole.
+    WholeFileOnly {
+        kind: WholeKind,
+        action: WholeAction,
+    },
+    /// The interactive rebase list cannot be run.
+    Todo(crate::TodoError),
+}
+
+/// The kind of file a partial action refuses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WholeKind {
+    Deleted,
+    Symlink,
+    Untracked,
+    /// A Git filter (e.g. LFS).
+    Filter,
+    Binary,
+    Renamed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WholeAction {
+    Stage,
+    Unstage,
+    Discard,
+    Restore,
 }
 
 impl GitError {

@@ -2,7 +2,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
-use crate::{CommitInfo, GitError, Repo};
+use crate::{CommitInfo, GitError, Refusal, Repo};
 
 /// How to create commits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +94,7 @@ impl Repo {
         let commit = self
             .summary()?
             .last_commit
-            .ok_or_else(|| GitError::Other("commit not found".into()))?;
+            .ok_or(GitError::Refused(Refusal::CommitNotFound))?;
         Ok(CommitOutcome { commit, used_cli })
     }
 
@@ -156,7 +156,7 @@ impl Repo {
                 .map_err(map)?;
             }
             (true, None) => {
-                return Err(GitError::Unsupported("there is no commit to amend".into()));
+                return Err(GitError::Refused(Refusal::NothingToAmend));
             }
             (false, head) => {
                 let parents: Vec<&git2::Commit<'_>> = head.iter().collect();

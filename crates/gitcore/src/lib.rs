@@ -40,7 +40,7 @@ pub use net::{
     ASKPASS_TOKEN_VAR, NetAuth, NetSettings, askpass_answer, net_settings, set_askpass_program,
 };
 pub use ops::{OpOutcome, Operation, ResetMode};
-pub use rebase_todo::{TodoAction, TodoItem, TodoText, todo_text, validate_todo};
+pub use rebase_todo::{TodoAction, TodoError, TodoItem, TodoText, todo_text, validate_todo};
 pub use remote::{
     NetProgress, PullMode, PullOutcome, PushMode, classify_net_failure, parse_progress,
     retry_without_token, strip_progress,
@@ -55,7 +55,7 @@ pub use commit::{
     CommitBackend, CommitOutcome, classify_commit_failure, git_available, set_git_search_path,
 };
 pub use diff::{DiffLine, FileDiff, Hunk, LineKind, Side};
-pub use error::GitError;
+pub use error::{GitError, Refusal, WholeAction, WholeKind};
 pub use explore::{
     BlameBlock, EntryKind, FileCommit, FileContent, MAX_FILE_BYTES, TreeEntry,
     parse_blame_porcelain,

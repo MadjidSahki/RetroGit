@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use crate::{GitError, OpOutcome, Operation, Repo};
+use crate::{GitError, OpOutcome, Refusal, Repo};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TodoAction {
@@ -27,14 +27,25 @@ pub struct TodoItem {
     pub message: String,
 }
 
+/// Why an interactive rebase list cannot be run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum TodoError {
+    /// A squash or fixup has no kept commit above it to meld into.
+    #[error("a squash or fixup needs a kept commit above it")]
+    NoKeptAbove,
+    /// Every commit is dropped.
+    #[error("keep at least one commit")]
+    KeepOne,
+}
+
 /// Why the list cannot be run: something to meld into is needed above each squash or
 /// fixup, and at least one commit must be kept.
-pub fn validate_todo(items: &[TodoItem]) -> Result<(), &'static str> {
+pub fn validate_todo(items: &[TodoItem]) -> Result<(), TodoError> {
     let mut kept = false;
     for i in items {
         match i.action {
             TodoAction::Squash(_) | TodoAction::Fixup if !kept => {
-                return Err("A squash or fixup needs a kept commit above it.");
+                return Err(TodoError::NoKeptAbove);
             }
             TodoAction::Drop => {}
             _ => kept = true,
@@ -43,7 +54,7 @@ pub fn validate_todo(items: &[TodoItem]) -> Result<(), &'static str> {
     if kept {
         Ok(())
     } else {
-        Err("Keep at least one commit.")
+        Err(TodoError::KeepOne)
     }
 }
 
@@ -132,10 +143,7 @@ impl Repo {
                 parts.next().unwrap_or_default(),
             );
             if parents.split(' ').count() > 1 {
-                return Err(GitError::Unsupported(
-                    "the range contains merge commits: interactive rebase of merges is not supported"
-                        .into(),
-                ));
+                return Err(GitError::Refused(Refusal::MergesInRange));
             }
             items.push(TodoItem {
                 action: TodoAction::Pick,
@@ -154,12 +162,10 @@ impl Repo {
         base: &str,
         items: &[TodoItem],
     ) -> Result<OpOutcome, GitError> {
-        validate_todo(items).map_err(|e| GitError::Unsupported(e.to_string()))?;
+        validate_todo(items).map_err(|e| GitError::Refused(Refusal::Todo(e)))?;
         if self.operation_in_progress().is_some() {
             // Its message files are still needed: never touch them.
-            return Err(GitError::Unsupported(
-                "finish or abort the operation in progress first".into(),
-            ));
+            return Err(GitError::Refused(Refusal::OperationInProgress));
         }
         let dir = self.git().path().join("retrogit-rebase");
         let _ = std::fs::remove_dir_all(&dir);
@@ -175,6 +181,6 @@ impl Repo {
         // The environment variable wins over any user setting (config or environment).
         let editor = format!("cp {}", quote(&todo));
         let out = self.run_git_env(&["rebase", "-i", base], &[("GIT_SEQUENCE_EDITOR", &editor)])?;
-        self.outcome(out, Operation::Rebase)
+        self.outcome(out)
     }
 }

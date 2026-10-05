@@ -12,9 +12,12 @@ app="$out/RetroGit.app"
 rm -rf "$app"
 mkdir -p "$out" "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin" "$app/Contents/MacOS/retrogit"
-if [ -f "$root/crates/app/assets/RetroGit.icns" ]; then
-  cp "$root/crates/app/assets/RetroGit.icns" "$app/Contents/Resources/RetroGit.icns"
+icns="$root/crates/app/assets/RetroGit.icns"
+if [ ! -f "$icns" ]; then
+  echo "missing $icns: the app would have no icon" >&2
+  exit 1
 fi
+cp "$icns" "$app/Contents/Resources/RetroGit.icns"
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -38,9 +41,20 @@ identity="${MACOS_SIGN_IDENTITY:--}"
 # Extended attributes (provenance, quarantine) would end up as ._ files in the zip.
 xattr -cr "$app"
 echo "Signing with: $identity"
-codesign --force --options runtime --timestamp=none --sign "$identity" "$app"
+# A real identity gets Apple's secure timestamp (notarization needs it); ad-hoc cannot.
+if [ "$identity" = "-" ]; then timestamp="--timestamp=none"; else timestamp="--timestamp"; fi
+codesign --force --options runtime "$timestamp" --sign "$identity" "$app"
 codesign --verify --deep --strict "$app"
 # The bundle says which version it is (checked by the CI).
 test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Contents/Info.plist")" = "$version"
-(cd "$out" && rm -f RetroGit-macos-arm64.zip && ditto -c -k --keepParent RetroGit.app RetroGit-macos-arm64.zip)
-echo "Wrote $app and $out/RetroGit-macos-arm64.zip"
+zip="$out/RetroGit-macos-arm64.zip"
+rm -f "$zip"
+# No resource forks, extended attributes or quarantine: they would become ._ entries.
+(cd "$out" && ditto -c -k --norsrc --noextattr --noqtn --keepParent RetroGit.app RetroGit-macos-arm64.zip)
+# Listed first (a broken zip stops here), then searched: no early-exiting pipe under pipefail.
+listing="$(unzip -Z1 "$zip")"
+if grep -Eq '(^|/)(\._|__MACOSX)' <<<"$listing"; then
+  echo "$zip contains ._ or __MACOSX entries" >&2
+  exit 1
+fi
+echo "Wrote $app and $zip"

@@ -141,3 +141,13 @@ fn a_newer_request_of_the_same_kind_wins() {
         }
     }
 }
+
+#[test]
+fn an_unknown_ref_reads_as_before() {
+    let Some((_d, dir, w)) = start() else { return };
+    w.explore(&dir, ExploreRequest::Tree { rev: "nope".into() });
+    match next_explore(&w) {
+        ExploreResult::Failed { message, .. } => assert_eq!(message, "Unknown revision nope."),
+        other => panic!("{other:?}"),
+    }
+}

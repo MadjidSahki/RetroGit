@@ -18,8 +18,9 @@ pub use explore::{
 pub use git_ops::{GitDialog, HistoryAction, StashesView, move_item, pick_action};
 pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};
 pub use pulls::{
-    CHECKS_REFRESH, PullDialog, PullTab, PullsView, default_merge_method, merge_defaults,
-    merge_disabled_reason, needs_auto_refresh, prefill_title, review_events_allowed,
+    CHECKS_REFRESH, CommentKey, PullDialog, PullTab, PullsView, default_merge_method,
+    merge_defaults, merge_disabled_reason, needs_auto_refresh, prefill_title,
+    review_events_allowed,
 };
 pub use pulls_more::{
     LineSelection, PeopleKind, SelectionTarget, apply_disabled_reason, apply_disabled_reason_for,
@@ -574,9 +575,13 @@ impl AppState {
         &mut self,
         cmd: crate::protocol::Command,
     ) -> Option<crate::protocol::Command> {
+        // Nothing to lose: no need to look at the disk to compare the repositories.
+        if self.pulls.pending_total() == 0 {
+            return Some(cmd);
+        }
         let same = matches!(&cmd, crate::protocol::Command::OpenRepo(path)
-            if self.current.as_ref().is_some_and(|c| &c.path == path));
-        if same || self.pulls.pending_total() == 0 {
+            if self.current.as_ref().is_some_and(|c| same_repo(&c.path, path)));
+        if same {
             return Some(cmd);
         }
         self.repo_switch = Some(cmd);
@@ -629,6 +634,19 @@ impl AppState {
         }
         self.config_dirty = true;
     }
+}
+
+/// Whether `a` and `b` are in the same repository: same working-tree root once links are
+/// resolved (a path outside any repository is compared as itself).
+fn same_repo(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    let root = |p: &Path| {
+        let found = gitcore::Repo::discover(p).unwrap_or_else(|_| p.to_path_buf());
+        crate::watch::canonical(&found)
+    };
+    root(a) == root(b)
 }
 
 /// Indexes of repos whose `owner/name` contains `filter` (case-insensitive).

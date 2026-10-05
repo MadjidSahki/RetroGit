@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::diff::{LineKind, Side};
 use crate::stage::{Direction, Selection, apply_selection};
 use crate::status::Change;
-use crate::{FileDiff, GitError, Repo};
+use crate::{FileDiff, GitError, Refusal, Repo, WholeAction, WholeKind};
 
 impl Repo {
     /// Revert a selection of the unstaged changes of `path` in the working tree.
@@ -22,24 +22,29 @@ impl Repo {
         let rel = Path::new(path);
         let file = self.workdir()?.join(rel);
         let meta = file.symlink_metadata().map_err(|_| {
-            GitError::Unsupported("deleted files can only be restored as a whole".into())
+            GitError::Refused(Refusal::WholeFileOnly {
+                kind: WholeKind::Deleted,
+                action: WholeAction::Restore,
+            })
         })?;
         if meta.file_type().is_symlink() {
-            return Err(GitError::Unsupported(
-                "symbolic links can only be discarded as a whole".into(),
-            ));
+            return Err(GitError::Refused(Refusal::WholeFileOnly {
+                kind: WholeKind::Symlink,
+                action: WholeAction::Discard,
+            }));
         }
         let index = self.git().index().map_err(|e| GitError::from_git2(&e))?;
         if index.get_path(rel, 0).is_none() {
             // Partial discard would delete lines for good; whole-file discard uses the trash.
-            return Err(GitError::Unsupported(
-                "untracked files can only be discarded as a whole".into(),
-            ));
+            return Err(GitError::Refused(Refusal::WholeFileOnly {
+                kind: WholeKind::Untracked,
+                action: WholeAction::Discard,
+            }));
         }
         if let Some(f) = self.status()?.into_iter().find(|f| f.path == path)
             && f.unstaged == Some(Change::Conflicted)
         {
-            return Err(GitError::Unsupported("resolve conflicts first".into()));
+            return Err(GitError::Refused(Refusal::ResolveConflictsFirst));
         }
         let filtered = self
             .git()
@@ -48,18 +53,20 @@ impl Repo {
             .flatten()
             .is_some();
         if filtered {
-            return Err(GitError::Unsupported(
-                "files with a Git filter (e.g. LFS) can only be discarded as a whole".into(),
-            ));
+            return Err(GitError::Refused(Refusal::WholeFileOnly {
+                kind: WholeKind::Filter,
+                action: WholeAction::Discard,
+            }));
         }
         let mut current = self.diff_file(path, Side::Unstaged)?;
         if shown.is_some_and(|s| *s != current) {
             return Err(GitError::StaleSelection);
         }
         if current.binary {
-            return Err(GitError::Unsupported(
-                "binary files can only be discarded as a whole".into(),
-            ));
+            return Err(GitError::Refused(Refusal::WholeFileOnly {
+                kind: WholeKind::Binary,
+                action: WholeAction::Discard,
+            }));
         }
         let io = |e: std::io::Error| GitError::Other(format!("cannot update '{path}': {e}"));
         let base = std::fs::read(&file).map_err(io)?;

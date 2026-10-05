@@ -547,3 +547,25 @@ fn check_details_open_only_web_links() {
         Vec::<String>::new()
     );
 }
+
+#[test]
+fn a_truncated_list_in_a_tiny_window_keeps_its_footer() {
+    let mut w = world(false);
+    w.state.pulls.total = 120;
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(400.0, 120.0))
+        .build_ui_state(
+            |ui, w: &mut World| {
+                let mut cx = Ctx {
+                    state: &mut w.state,
+                    worker: &w.worker,
+                    highlighter: &w.highlighter,
+                    notices: &w.notices,
+                };
+                retrogit::ui::main_window::show(ui, &mut cx);
+            },
+            w,
+        );
+    h.run();
+    assert!(h.query_by_label(&s::pulls_truncated(1, 120)).is_some());
+}

@@ -41,6 +41,25 @@ pub fn registry_entries(classes: &str, exe: &Path, icon: &Path) -> Vec<RegEntry>
     ]
 }
 
+/// Whether `exe` may register itself: not when it runs from inside `temp` (a downloaded
+/// update, the uninstaller's copy), or the link handler would point at a file about to go.
+/// Case-insensitive, `/` and `\` alike (Windows paths).
+pub fn should_register(exe: &Path, temp: &Path) -> bool {
+    let norm = |p: &Path| {
+        let mut s = p.to_string_lossy().replace('\\', "/").to_lowercase();
+        while s.ends_with('/') {
+            s.pop();
+        }
+        s
+    };
+    let (exe, temp) = (norm(exe), norm(temp));
+    if temp.is_empty() {
+        return true;
+    }
+    !exe.strip_prefix(&temp)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
 /// Arguments of `reg.exe` writing `e`.
 pub fn reg_add_args(e: &RegEntry) -> Vec<String> {
     let mut args = vec!["add".to_string(), e.key.clone()];
@@ -114,6 +133,16 @@ pub fn register_under(classes: &str, exe: &Path, icon: &Path) -> Result<(), Stri
 #[cfg(windows)]
 pub fn register() {
     static ICON: &[u8] = include_bytes!("../../assets/icon-256.png");
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    // Compared as given and canonical too (the temporary folder may come in 8.3 form).
+    let temp = std::env::temp_dir();
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if !should_register(&exe, &temp) || !should_register(&canon(&exe), &canon(&temp)) {
+        log::info!("run from the temporary folder: notifications not registered");
+        return;
+    }
     let Some(dir) = dirs::data_local_dir().map(|d| d.join("RetroGit")) else {
         return;
     };
@@ -127,9 +156,6 @@ pub fn register() {
     if let Err(e) = written {
         log::info!("notification icon not written: {e}");
     }
-    let Ok(exe) = std::env::current_exe() else {
-        return;
-    };
     if let Err(e) = register_under(r"HKCU\Software\Classes", &exe, &icon) {
         log::info!("notifications not registered: {e}");
     }

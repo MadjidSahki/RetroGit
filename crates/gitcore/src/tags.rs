@@ -5,7 +5,7 @@ use std::sync::atomic::AtomicBool;
 use crate::NetProgress;
 use crate::net::NetAuth;
 use crate::remote::retry_without_token;
-use crate::{GitError, Repo};
+use crate::{GitError, Refusal, Repo};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tag {
@@ -51,9 +51,7 @@ impl Repo {
     pub fn create_tag(&self, name: &str, id: &str, message: Option<&str>) -> Result<(), GitError> {
         let check = self.run_git(&["check-ref-format", &format!("refs/tags/{name}")])?;
         if !check.success || name.trim() != name || name.is_empty() {
-            return Err(GitError::Unsupported(format!(
-                "'{name}' is not a valid tag name"
-            )));
+            return Err(GitError::Refused(Refusal::InvalidTagName(name.to_string())));
         }
         let mut args = vec!["tag"];
         if let Some(m) = message {

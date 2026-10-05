@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::diff::{FileDiff, LineKind, Side};
 use crate::status::Change;
-use crate::{GitError, Repo};
+use crate::{GitError, Refusal, Repo, WholeAction, WholeKind};
 
 /// What to stage or unstage in one file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,23 +147,25 @@ impl Repo {
             .flatten()
             .is_some();
         if filtered {
-            return Err(GitError::Unsupported(
-                "files with a Git filter (e.g. LFS) can only be staged as a whole".into(),
-            ));
+            return Err(GitError::Refused(Refusal::WholeFileOnly {
+                kind: WholeKind::Filter,
+                action: WholeAction::Stage,
+            }));
         }
 
         // Whole-file only: conflicts (a partial stage would "resolve" them with made-up
         // content) and renames (unstaging part of the new path would split the rename).
         if let Some(file) = self.status()?.into_iter().find(|f| f.path == path) {
             if file.unstaged == Some(Change::Conflicted) {
-                return Err(GitError::Unsupported("resolve conflicts first".into()));
+                return Err(GitError::Refused(Refusal::ResolveConflictsFirst));
             }
             if matches!(file.staged, Some(Change::Renamed { .. }))
                 && direction == Direction::Unstage
             {
-                return Err(GitError::Unsupported(
-                    "renamed files can only be unstaged as a whole".into(),
-                ));
+                return Err(GitError::Refused(Refusal::WholeFileOnly {
+                    kind: WholeKind::Renamed,
+                    action: WholeAction::Unstage,
+                }));
             }
         }
         let side = match direction {
@@ -175,9 +177,10 @@ impl Repo {
             return Err(GitError::StaleSelection);
         }
         if current.binary {
-            return Err(GitError::Unsupported(
-                "binary files can only be staged as a whole".into(),
-            ));
+            return Err(GitError::Refused(Refusal::WholeFileOnly {
+                kind: WholeKind::Binary,
+                action: WholeAction::Stage,
+            }));
         }
         let mut index = repo.index().map_err(map)?;
         let existing = index.get_path(rel, 0);
@@ -186,9 +189,10 @@ impl Repo {
             Direction::Unstage => existing.is_none(),
         };
         if is_deletion {
-            return Err(GitError::Unsupported(
-                "deleted files can only be staged as a whole".into(),
-            ));
+            return Err(GitError::Refused(Refusal::WholeFileOnly {
+                kind: WholeKind::Deleted,
+                action: WholeAction::Stage,
+            }));
         }
         let base = match &existing {
             Some(entry) => repo.find_blob(entry.id).map_err(map)?.content().to_vec(),

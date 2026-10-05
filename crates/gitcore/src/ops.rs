@@ -1,4 +1,4 @@
-use crate::{GitError, Repo};
+use crate::{GitError, Refusal, Repo};
 use std::path::Path;
 
 /// A multi-step operation left in progress (conflicts to resolve).
@@ -60,11 +60,14 @@ impl Repo {
         Ok(())
     }
 
-    /// Remove the message files of an interactive rebase once no operation needs them.
-    pub(crate) fn forget_rebase_messages(&self) {
-        if self.operation_in_progress().is_none() {
+    /// Remove the message files of an interactive rebase once no operation needs them;
+    /// returns the operation still in progress (read once).
+    pub(crate) fn forget_rebase_messages(&self) -> Option<Operation> {
+        let in_progress = self.operation_in_progress();
+        if in_progress.is_none() {
             let _ = std::fs::remove_dir_all(self.git().path().join("retrogit-rebase"));
         }
+        in_progress
     }
 
     /// Continue a rebase once conflicts are resolved and staged.
@@ -85,10 +88,10 @@ impl Repo {
             return Ok(OpOutcome::Done);
         };
         if op == Operation::Merge {
-            return Err(GitError::Unsupported("commit to finish the merge".into()));
+            return Err(GitError::Refused(Refusal::FinishMergeByCommit));
         }
         let out = self.run_git(&["-c", "core.editor=true", Self::op_command(op), "--continue"])?;
-        self.outcome(out, op)
+        self.outcome(out)
     }
 
     /// Skip the current commit of a cherry-pick, revert or rebase (e.g. already applied).
@@ -97,7 +100,7 @@ impl Repo {
             return Ok(OpOutcome::Done);
         };
         let out = self.run_git(&[Self::op_command(op), "--skip"])?;
-        self.outcome(out, op)
+        self.outcome(out)
     }
 
     /// Whether commit `id` has several parents.
@@ -120,7 +123,7 @@ impl Repo {
         }
         args.push(id);
         let out = self.run_git(&args)?;
-        self.outcome(out, Operation::CherryPick)
+        self.outcome(out)
     }
 
     /// Add a commit undoing `id`; a merge needs the parent to keep (`mainline`, 1-based).
@@ -132,7 +135,7 @@ impl Repo {
         }
         args.push(id);
         let out = self.run_git(&args)?;
-        self.outcome(out, Operation::Revert)
+        self.outcome(out)
     }
 
     /// Move the current branch to `id`.
@@ -167,23 +170,18 @@ impl Repo {
     }
 
     /// Done, stopped on conflicts, or empty (nothing to commit), from git's answer.
-    pub(crate) fn outcome(
-        &self,
-        out: crate::cli::GitOutput,
-        op: Operation,
-    ) -> Result<OpOutcome, GitError> {
-        self.forget_rebase_messages();
-        if out.success && self.operation_in_progress().is_none() {
+    pub(crate) fn outcome(&self, out: crate::cli::GitOutput) -> Result<OpOutcome, GitError> {
+        let in_progress = self.forget_rebase_messages().is_some();
+        if out.success && !in_progress {
             return Ok(OpOutcome::Done);
         }
         let text = out.text.to_lowercase();
-        if !out.success && self.operation_in_progress().is_none() && blocked_by_local_changes(&text)
-        {
+        if !out.success && !in_progress && blocked_by_local_changes(&text) {
             return Err(GitError::WouldOverwrite {
                 files: crate::parse_overwritten_files(&out.text),
             });
         }
-        if self.operation_in_progress() == Some(op) || self.operation_in_progress().is_some() {
+        if in_progress {
             let empty = text.contains("nothing to commit")
                 || text.contains("is now empty")
                 || text.contains("previous cherry-pick is now empty");

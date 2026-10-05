@@ -165,9 +165,16 @@ fn highlight_lines(
     Some(out)
 }
 
+thread_local! {
+    /// Number of [`highlight`] calls on this thread (tests check the preview cache).
+    #[doc(hidden)]
+    pub static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Highlight consecutive lines of one file (each line may end with its newline).
 /// `None` when the language is unknown or the input is too large.
 pub fn highlight(path: &str, lines: &[&str], dark: bool) -> Option<Vec<Vec<Span>>> {
+    CALLS.with(|c| c.set(c.get() + 1));
     if lines.len() > MAX_LINES {
         return None;
     }
@@ -249,6 +256,15 @@ pub struct Service {
 impl Service {
     /// `deliver` is called on the highlighting thread for each finished request.
     pub fn start(deliver: impl Fn(Highlighted) + Send + 'static) -> Service {
+        Service::start_with_budget(TIME_BUDGET, deliver)
+    }
+
+    /// Like `start`, with `budget` instead of `TIME_BUDGET`: a diff whose highlighting
+    /// reaches it stays plain text (`Duration::ZERO` gives up at once).
+    pub fn start_with_budget(
+        budget: std::time::Duration,
+        deliver: impl Fn(Highlighted) + Send + 'static,
+    ) -> Service {
         let (tx, rx) = channel::<(u64, Target, FileDiff, bool)>();
         let latest: Arc<std::sync::Mutex<std::collections::HashMap<Target, u64>>> = Arc::default();
         let current = latest.clone();
@@ -271,7 +287,7 @@ impl Service {
                     for (id, target, diff, dark) in jobs {
                         let started = std::time::Instant::now();
                         let superseded = || !is_latest(target, id);
-                        let cancelled = || superseded() || started.elapsed() > TIME_BUDGET;
+                        let cancelled = || superseded() || started.elapsed() >= budget;
                         let colors = highlight_diff(&diff, dark, &cancelled);
                         if !superseded() {
                             deliver(Highlighted {
@@ -365,7 +381,8 @@ pub fn diff_row(
     let row = ui.interact(
         egui::Rect::from_min_size(rect.min, egui::vec2(row_width, height)),
         row.id,
-        egui::Sense::click(),
+        // Clicks only: a row is not a Tab stop (it would take the focus and drop it).
+        egui::Sense::CLICK,
     );
     resp.union(row)
 }
@@ -759,27 +776,6 @@ mod tests {
         assert_eq!(last.target, Target::Changes);
         assert_eq!(last.diff, new);
         assert!(last.colors.is_some());
-    }
-
-    #[test]
-    fn a_pathologically_slow_diff_gives_up_within_the_time_budget() {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let service = Service::start(move |r| {
-            let _ = tx.send(r);
-        });
-        let line = format!("const s = \"{}\";\n", "a".repeat(480));
-        let lines = (0..400).map(|_| dl(LineKind::Added, &line)).collect();
-        let started = std::time::Instant::now();
-        service.request(Target::Changes, file("x.js", vec![hunk(1, lines)]));
-        let r = rx
-            .recv_timeout(TIME_BUDGET + std::time::Duration::from_secs(5))
-            .unwrap();
-        assert!(r.colors.is_none(), "gives up and stays plain");
-        assert!(
-            started.elapsed() < TIME_BUDGET + std::time::Duration::from_secs(2),
-            "{:?}",
-            started.elapsed()
-        );
     }
 
     #[test]

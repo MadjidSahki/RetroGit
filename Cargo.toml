@@ -37,6 +37,8 @@ block2 = "0.6"
 two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
 # Toasts (already used by eframe's dependencies, same version).
 windows = { version = "0.62", features = ["Data_Xml_Dom", "UI_Notifications", "Foundation"] }
+# Redirect locations resolved by RFC 3986 (already in the tree through other crates).
+url = "2.5.8"
 mockito = "1"
 tempfile = "3"
 

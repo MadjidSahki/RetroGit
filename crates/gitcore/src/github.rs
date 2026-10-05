@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicBool;
 
 use crate::net::NetAuth;
 use crate::remote::retry_without_token;
-use crate::{GitError, NetProgress, Repo};
+use crate::{GitError, NetProgress, Refusal, Repo};
 
 /// `(owner, repo)` of a github.com remote URL (HTTPS, `git@github.com:`, `ssh://`).
 pub fn parse_github_slug(url: &str) -> Option<(String, String)> {
@@ -100,7 +100,8 @@ impl Repo {
     /// the local branch `pr/N`, without switching to it. An existing `pr/N` moves forward;
     /// after a force-push it follows the pull request only if it has no commits of its own.
     /// Returns the branch name, and whether commits of its own kept it from moving to
-    /// the pull request's latest commit.
+    /// the pull request's latest commit. A checked-out `pr/N` that local changes keep from
+    /// moving: `WouldOverwrite` (or `Refused(LocalChangesFirst)`), after a successful fetch.
     pub fn fetch_pull(
         &self,
         number: u64,
@@ -116,7 +117,7 @@ impl Repo {
         retry_without_token(auth, |a| self.run_net(a, &args, &mut progress, cancel))?;
         let new = self
             .rev(&fetched)
-            .ok_or_else(|| GitError::Other(format!("pull request #{number} was not fetched")))?;
+            .ok_or(GitError::Refused(Refusal::PullNotFetched(number)))?;
         let local_ref = format!("refs/heads/{branch}");
         let Some(local) = self.rev(&local_ref) else {
             self.git_ok(&["branch", &branch, &new])?;
@@ -135,11 +136,26 @@ impl Repo {
         let checked_out = self.current_branch().is_some_and(|b| b.name == branch);
         if !checked_out {
             self.git_ok(&["branch", "-f", &branch, &new])?;
-        } else if forward {
-            self.git_ok(&["merge", "--ff-only", &new])?;
+            return Ok((branch, false));
+        }
+        let out = if forward {
+            self.run_git(&["merge", "--ff-only", &new])?
         } else {
             // Force-pushed pull request, no local work: follow it, keeping local changes.
-            self.git_ok(&["reset", "--keep", &new])?;
+            self.run_git(&["reset", "--keep", &new])?
+        };
+        if !out.success {
+            // Fetched, but local changes keep the checked-out branch from moving.
+            let files = crate::parse_overwritten_files(&out.text);
+            let lower = out.text.to_lowercase();
+            return Err(if !files.is_empty() {
+                GitError::WouldOverwrite { files }
+            } else if lower.contains("not uptodate") || lower.contains("would be overwritten") {
+                // `reset --keep`: "Entry 'f' not uptodate. Cannot merge."
+                GitError::Refused(Refusal::LocalChangesFirst)
+            } else {
+                GitError::Other(out.text)
+            });
         }
         Ok((branch, false))
     }

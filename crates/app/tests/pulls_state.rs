@@ -332,6 +332,80 @@ fn a_created_pull_request_shows_in_the_list_at_once() {
 }
 
 #[test]
+fn a_created_pull_request_stays_in_the_list_across_filters() {
+    let mut st = opened(Some("https://github.com/o/r"));
+    let list = |st: &AppState| st.pulls.list.iter().map(|p| p.number).collect::<Vec<_>>();
+    st.apply(Event::PullCreated {
+        slug: slug(),
+        number: 12,
+    });
+    st.apply(Event::PullLoaded {
+        slug: slug(),
+        detail: Box::new(detail(12)),
+    });
+    // The filter changes (the tab clears the list), GitHub's search still lags.
+    for filter in [PrFilter::Mine, PrFilter::Open] {
+        st.pulls.filter = filter;
+        st.pulls.list.clear();
+        st.apply(Event::PullsLoaded {
+            slug: slug(),
+            filter,
+            list: vec![pr(1)],
+            total: 1,
+        });
+        assert_eq!(list(&st), [12, 1], "{filter:?}");
+    }
+    // Not under a filter that would not list it.
+    st.pulls.filter = PrFilter::Closed;
+    st.pulls.list.clear();
+    st.apply(Event::PullsLoaded {
+        slug: slug(),
+        filter: PrFilter::Closed,
+        list: vec![pr(1)],
+        total: 1,
+    });
+    assert_eq!(list(&st), [1]);
+}
+
+#[test]
+fn reopening_the_same_repository_by_another_path_keeps_the_comments() {
+    use retrogit::protocol::Command;
+    let d = tempfile::tempdir().unwrap();
+    git2::Repository::init(d.path()).unwrap();
+    std::fs::create_dir(d.path().join("src")).unwrap();
+    let mut st = AppState::new(Config::default());
+    st.apply(Event::RepoOpened(RepoSummary {
+        name: "r".into(),
+        path: d.path().to_path_buf(),
+        head: Head::Branch("main".into()),
+        origin_url: Some("https://github.com/o/r".into()),
+        last_commit: None,
+    }));
+    st.pulls.select(4);
+    st.queue_line_comment(4, line_comment("x"));
+    let sub = Command::OpenRepo(d.path().join("src"));
+    assert_eq!(
+        st.request_repo_switch(sub.clone()),
+        Some(sub),
+        "a folder inside it"
+    );
+    #[cfg(unix)]
+    {
+        let link = tempfile::tempdir().unwrap();
+        let alias = link.path().join("alias");
+        std::os::unix::fs::symlink(d.path(), &alias).unwrap();
+        let cmd = Command::OpenRepo(alias);
+        assert_eq!(
+            st.request_repo_switch(cmd.clone()),
+            Some(cmd),
+            "a link to it"
+        );
+    }
+    assert_eq!(st.pulls.pending_total(), 1);
+    assert_eq!(st.repo_switch, None);
+}
+
+#[test]
 fn a_created_pull_request_is_inserted_only_under_open_or_mine() {
     for (filter, shown) in [
         (PrFilter::Open, true),
@@ -503,6 +577,39 @@ fn pending_comments_are_cleared_only_when_the_review_went_through() {
         note: s::NOTE_REVIEW_SENT.into(),
     });
     assert!(st.pulls.selected_pending().is_empty() && st.pulls.dialog.is_none());
+}
+
+#[test]
+fn a_sent_review_forgets_which_pending_comments_were_shown_whole() {
+    use retrogit::state::CommentKey;
+    let mut st = opened(Some("https://github.com/o/r"));
+    st.pulls.select(4);
+    st.queue_line_comment(4, line_comment("x"));
+    st.pulls.expanded.insert(CommentKey::Pending(0));
+    st.pulls.expanded.insert(CommentKey::Thread("T1".into(), 0));
+    st.pulls.dialog = Some(retrogit::state::PullDialog::Review {
+        event: ReviewEvent::Comment,
+        body: String::new(),
+    });
+    st.apply(Event::PullActionDone {
+        slug: slug(),
+        number: 4,
+        note: s::NOTE_REVIEW_SENT.into(),
+    });
+    assert!(
+        !st.pulls
+            .expanded
+            .iter()
+            .any(|k| matches!(k, CommentKey::Pending(_))),
+        "{:?}",
+        st.pulls.expanded
+    );
+    assert!(
+        st.pulls
+            .expanded
+            .contains(&CommentKey::Thread("T1".into(), 0)),
+        "threads stay as they were"
+    );
 }
 
 #[test]

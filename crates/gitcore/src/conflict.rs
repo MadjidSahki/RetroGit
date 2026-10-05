@@ -1,7 +1,7 @@
 //! Conflicted files: the text Git left with conflict markers, cut into blocks, and the
 //! ways to resolve a file.
 
-use crate::{GitError, Operation, Repo};
+use crate::{GitError, Operation, Refusal, Repo};
 
 const OPEN: &str = "<<<<<<<";
 const BASE: &str = "|||||||";
@@ -118,7 +118,7 @@ pub fn has_marker_lines(text: &str) -> bool {
 /// `text` with conflict block number `block` replaced by `choice`; everything else (other
 /// blocks, edits made by hand) is kept as is.
 pub fn apply_choice(text: &str, block: usize, choice: Choice) -> String {
-    let crlf = text.contains("\r\n");
+    let first_crlf = text.find('\n').is_some_and(|i| text[..i].ends_with('\r'));
     let mut out = String::with_capacity(text.len());
     let mut n = 0;
     for seg in parse_conflicts(text) {
@@ -134,6 +134,12 @@ pub fn apply_choice(text: &str, block: usize, choice: Choice) -> String {
                         Choice::Both => {
                             out.push_str(&mine);
                             if !mine.is_empty() && !mine.ends_with('\n') && !theirs.is_empty() {
+                                // The line ending of mine's last ended line (the file's
+                                // first one if mine has a single line).
+                                let crlf = match mine.rfind('\n') {
+                                    Some(i) => mine[..i].ends_with('\r'),
+                                    None => first_crlf,
+                                };
                                 out.push_str(if crlf { "\r\n" } else { "\n" });
                             }
                             out.push_str(&theirs);
@@ -292,7 +298,7 @@ impl Repo {
                 break;
             }
         }
-        let c = found.ok_or_else(|| GitError::Other(format!("'{path}' is not in conflict")))?;
+        let c = found.ok_or_else(|| GitError::Refused(Refusal::NotInConflict(path.to_string())))?;
         let blob = |e: &Option<git2::IndexEntry>| -> Result<Option<Vec<u8>>, GitError> {
             match e {
                 Some(e) => Ok(Some(repo.find_blob(e.id).map_err(map)?.content().to_vec())),

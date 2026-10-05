@@ -5,7 +5,10 @@ mod common;
 use std::path::Path;
 
 use common::remote::{configure, git};
-use gitcore::{ConflictKind, Operation, Pick, Repo, conflict_count};
+use gitcore::{
+    Choice, ConflictKind, GitError, Operation, Pick, Refusal, Repo, TodoAction, TodoItem,
+    apply_choice, conflict_count,
+};
 
 /// A repository with `main` and `feature` both changing `file` (or as `setup` says), then
 /// `git merge feature` (or `rebase`) leaving conflicts.
@@ -78,7 +81,27 @@ fn a_merge_conflict_gives_both_versions_and_the_marked_file() {
     assert_eq!(c.operation, Some(Operation::Merge));
     let working = c.working.unwrap();
     assert_eq!(conflict_count(&working), 1, "{working}");
-    assert!(r.conflict("other.txt").is_err(), "not in conflict");
+    assert_eq!(
+        r.conflict("other.txt").err(),
+        Some(GitError::Refused(Refusal::NotInConflict(
+            "other.txt".into()
+        ))),
+        "not in conflict"
+    );
+    assert_eq!(
+        r.continue_operation().err(),
+        Some(GitError::Refused(Refusal::FinishMergeByCommit))
+    );
+    let list = [TodoItem {
+        action: TodoAction::Pick,
+        id: "x".into(),
+        summary: "x".into(),
+        message: "x".into(),
+    }];
+    assert_eq!(
+        r.interactive_rebase("HEAD", &list).err(),
+        Some(GitError::Refused(Refusal::OperationInProgress))
+    );
 }
 
 #[test]
@@ -220,4 +243,14 @@ fn an_unreadable_working_file_is_an_error_not_a_binary_file() {
     std::fs::create_dir(d.path().join("file")).unwrap();
     let err = r.conflict("file").unwrap_err();
     assert!(err.to_string().contains("file"), "{err}");
+}
+
+#[test]
+fn both_sides_of_a_mixed_line_ending_file_keep_their_own_line_endings() {
+    // CRLF elsewhere in the file, mine with lone '\n', theirs with CRLF.
+    let text = "a\r\n<<<<<<< HEAD\nm1\nm2\n=======\r\nt1\r\n>>>>>>> x\r\nz\n";
+    assert_eq!(
+        apply_choice(text, 0, Choice::Both),
+        "a\r\nm1\nm2\nt1\r\nz\n"
+    );
 }

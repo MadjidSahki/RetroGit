@@ -6,7 +6,8 @@ use std::sync::atomic::AtomicBool;
 
 use common::remote::{Env, configure, git, no_cancel};
 use gitcore::{
-    CommitBackend, GitError, NetAuth, Operation, PullMode, PullOutcome, PushMode, Selection,
+    CommitBackend, GitError, NetAuth, Operation, PullMode, PullOutcome, PushMode, Refusal,
+    Selection,
 };
 
 #[test]
@@ -243,5 +244,35 @@ fn force_with_lease_never_overwrites_a_commit_we_have_not_seen_before_amending()
     assert!(
         remote_log.contains("remote theirs.txt"),
         "the colleague's commit must survive: {remote_log}"
+    );
+}
+
+#[test]
+fn pull_and_push_refuse_a_detached_head_or_a_branch_without_upstream() {
+    let Some(env) = Env::new() else { return };
+    let r = env.repo();
+    let auth = NetAuth::default();
+    r.create_branch("local-only", true).unwrap();
+    assert_eq!(
+        r.pull(&auth, PullMode::Merge, |_| {}, &no_cancel()),
+        Err(GitError::Refused(Refusal::NoUpstream { publish: true }))
+    );
+    let head = r.upstream_oid().unwrap_or_default();
+    assert_eq!(
+        r.push_force_with_lease(&auth, &head, |_| {}, &no_cancel()),
+        Err(GitError::Refused(Refusal::NoUpstream { publish: false }))
+    );
+    git(&env.work, &["switch", "-q", "--detach"]);
+    assert_eq!(
+        r.pull(&auth, PullMode::Merge, |_| {}, &no_cancel()),
+        Err(GitError::Refused(Refusal::DetachedHead))
+    );
+    assert_eq!(
+        r.push(&auth, PushMode::Normal, |_| {}, &no_cancel()),
+        Err(GitError::Refused(Refusal::DetachedHead))
+    );
+    assert_eq!(
+        r.push_force_with_lease(&auth, &head, |_| {}, &no_cancel()),
+        Err(GitError::Refused(Refusal::DetachedHead))
     );
 }

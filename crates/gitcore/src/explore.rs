@@ -2,7 +2,7 @@
 
 use std::sync::atomic::AtomicBool;
 
-use crate::{GitError, LogEntry, Repo};
+use crate::{GitError, LogEntry, Refusal, Repo};
 
 /// Files larger than this are not loaded for display.
 pub const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
@@ -236,7 +236,7 @@ impl Repo {
     /// [`Repo::resolve`], or an error naming `rev`.
     pub(crate) fn commit_id(&self, rev: &str) -> Result<String, GitError> {
         self.resolve(rev)
-            .ok_or_else(|| GitError::Other(format!("unknown version {rev}")))
+            .ok_or_else(|| GitError::Refused(Refusal::UnknownRev(rev.to_string())))
     }
 
     fn tree_of(&self, rev: &str) -> Result<git2::Tree<'_>, GitError> {

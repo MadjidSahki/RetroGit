@@ -5,7 +5,7 @@ mod common;
 use std::path::Path;
 
 use common::remote::{configure, git};
-use gitcore::{OpOutcome, Operation, Repo, TodoAction, TodoItem};
+use gitcore::{OpOutcome, Operation, Refusal, Repo, TodoAction, TodoError, TodoItem};
 
 fn commit(dir: &Path, file: &str, text: &str, msg: &str) {
     std::fs::write(dir.join(file), text).unwrap();
@@ -193,7 +193,7 @@ fn merges_in_the_range_are_refused() {
     );
     assert!(matches!(
         r.rebase_list(&base),
-        Err(gitcore::GitError::Unsupported(_))
+        Err(gitcore::GitError::Refused(Refusal::MergesInRange))
     ));
 }
 
@@ -205,15 +205,21 @@ fn todo_lists_are_checked_and_written() {
         summary: format!("s{id}"),
         message: format!("s{id}"),
     };
-    assert!(gitcore::validate_todo(&[item(TodoAction::Squash(None), "a")]).is_err());
-    assert!(gitcore::validate_todo(&[item(TodoAction::Drop, "a")]).is_err());
-    assert!(
-        gitcore::validate_todo(&[item(TodoAction::Fixup, "a"), item(TodoAction::Pick, "b")])
-            .is_err()
+    assert_eq!(
+        gitcore::validate_todo(&[item(TodoAction::Squash(None), "a")]),
+        Err(TodoError::NoKeptAbove)
     );
-    assert!(
-        gitcore::validate_todo(&[item(TodoAction::Drop, "a"), item(TodoAction::Fixup, "b")])
-            .is_err(),
+    assert_eq!(
+        gitcore::validate_todo(&[item(TodoAction::Drop, "a")]),
+        Err(TodoError::KeepOne)
+    );
+    assert_eq!(
+        gitcore::validate_todo(&[item(TodoAction::Fixup, "a"), item(TodoAction::Pick, "b")]),
+        Err(TodoError::NoKeptAbove)
+    );
+    assert_eq!(
+        gitcore::validate_todo(&[item(TodoAction::Drop, "a"), item(TodoAction::Fixup, "b")]),
+        Err(TodoError::NoKeptAbove),
         "nothing to fix up"
     );
     assert!(

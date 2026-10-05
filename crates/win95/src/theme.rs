@@ -17,6 +17,14 @@ static W95FA: &[u8] = include_bytes!("../assets/W95FA.otf");
 static ATKINSON: &[u8] = include_bytes!("../assets/AtkinsonHyperlegible-Regular.ttf");
 pub const ATKINSON_NAME: &str = "Atkinson Hyperlegible";
 
+/// The embedded font file of `font` (glyph checks build contexts with it alone).
+pub fn font_bytes(font: Font) -> &'static [u8] {
+    match font {
+        Font::W95fa => W95FA,
+        Font::Atkinson => ATKINSON,
+    }
+}
+
 /// Interface font (code and diffs always use egui's monospace font).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Font {
@@ -119,22 +127,33 @@ pub fn with_palette<R>(
     let ctx = ui.ctx().clone();
     let before = ctx.data(|d| d.get_temp::<Palette>(override_id()));
     ctx.data_mut(|d| d.insert_temp(override_id(), palette));
-    let r = ui
-        .scope(|ui| {
-            let mut style = (**ui.style()).clone();
-            apply_style(&mut style, &palette);
-            ui.set_style(style);
-            add(ui)
-        })
-        .inner;
-    ctx.data_mut(|d| {
-        if let Some(p) = before {
-            d.insert_temp(override_id(), p);
-        } else {
-            d.remove::<Palette>(override_id());
-        }
-    });
-    r
+    // Restores the previous palette even if `add` panics.
+    let _restore = Restore { ctx, before };
+    ui.scope(|ui| {
+        let mut style = (**ui.style()).clone();
+        apply_style(&mut style, &palette);
+        ui.set_style(style);
+        add(ui)
+    })
+    .inner
+}
+
+struct Restore {
+    ctx: egui::Context,
+    before: Option<Palette>,
+}
+
+impl Drop for Restore {
+    fn drop(&mut self) {
+        let before = self.before.take();
+        self.ctx.data_mut(|d| {
+            if let Some(p) = before {
+                d.insert_temp(override_id(), p);
+            } else {
+                d.remove::<Palette>(override_id());
+            }
+        });
+    }
 }
 
 fn set_fonts(ctx: &egui::Context, first: Font) {

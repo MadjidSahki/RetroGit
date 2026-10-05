@@ -3,7 +3,7 @@ mod common;
 
 use std::path::Path;
 
-use gitcore::{GitError, LineKind, Repo, Selection, Side};
+use gitcore::{GitError, LineKind, Refusal, Repo, Selection, Side, WholeAction, WholeKind};
 
 /// `f.txt` committed with `old`, working tree holds `new`.
 fn setup(old: &[u8], new: &[u8]) -> (tempfile::TempDir, Repo) {
@@ -156,12 +156,19 @@ fn stale_or_unsupported_discards_write_nothing() {
     std::fs::remove_file(d.path().join("f.txt")).unwrap();
     assert!(matches!(
         r.discard("f.txt", &Selection::Hunks(vec![0]), None),
-        Err(GitError::Unsupported(_))
+        Err(GitError::Refused(Refusal::WholeFileOnly {
+            kind: WholeKind::Deleted,
+            action: WholeAction::Restore
+        }))
     ));
-    std::fs::write(d.path().join("bin.dat"), [0u8, 1, 0, 2]).unwrap();
+    // A tracked binary file (an untracked one is refused as untracked first).
+    let (_bin, r) = setup(&[0u8, 1, 0, 2], &[0u8, 3, 0, 2]);
     assert!(matches!(
-        r.discard("bin.dat", &Selection::Hunks(vec![0]), None),
-        Err(GitError::Unsupported(_))
+        r.discard("f.txt", &Selection::Hunks(vec![0]), None),
+        Err(GitError::Refused(Refusal::WholeFileOnly {
+            kind: WholeKind::Binary,
+            action: WholeAction::Discard
+        }))
     ));
 }
 
@@ -172,7 +179,16 @@ fn partial_discard_of_an_untracked_file_is_refused_and_keeps_it() {
     let err = r
         .discard("notes.txt", &Selection::Hunks(vec![0]), None)
         .err();
-    assert!(matches!(err, Some(GitError::Unsupported(_))), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            Some(GitError::Refused(Refusal::WholeFileOnly {
+                kind: WholeKind::Untracked,
+                action: WholeAction::Discard
+            }))
+        ),
+        "{err:?}"
+    );
     assert_eq!(read(d.path(), "notes.txt"), b"one\ntwo\n");
 }
 
@@ -212,7 +228,16 @@ fn partial_discard_of_a_symlink_is_refused() {
     std::fs::remove_file(d.path().join("link")).unwrap();
     std::os::unix::fs::symlink("elsewhere.txt", d.path().join("link")).unwrap();
     let err = r.discard("link", &Selection::Hunks(vec![0]), None).err();
-    assert!(matches!(err, Some(GitError::Unsupported(_))), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            Some(GitError::Refused(Refusal::WholeFileOnly {
+                kind: WholeKind::Symlink,
+                action: WholeAction::Discard
+            }))
+        ),
+        "{err:?}"
+    );
     assert!(
         std::fs::symlink_metadata(d.path().join("link"))
             .unwrap()

@@ -307,6 +307,43 @@ fn switching_repository_resets_explore() {
 }
 
 #[test]
+fn a_late_answer_of_another_file_search_is_ignored() {
+    let mut st = opened();
+    let grep = |text: &str, match_case: bool, paths: &str, n: usize| ExploreResult::Grep {
+        rev: "HEAD".into(),
+        text: text.into(),
+        match_case,
+        paths: paths.into(),
+        result: gitcore::GrepResult {
+            matches: (1..=n)
+                .map(|line| gitcore::GrepMatch {
+                    path: "a.rs".into(),
+                    line,
+                    text: "x".into(),
+                })
+                .collect(),
+            truncated: false,
+        },
+    };
+    st.explore.start_search("x", false, "");
+    st.explore.start_search("x", true, "");
+    loaded(&mut st, grep("x", false, "", 3));
+    let sv = st.explore.search.as_ref().unwrap();
+    assert!(
+        sv.running,
+        "the answer of the case-insensitive search is not this one"
+    );
+    assert!(sv.result.is_none());
+    st.explore.start_search("x", true, "*.rs");
+    loaded(&mut st, grep("x", true, "", 2));
+    assert!(st.explore.search.as_ref().unwrap().running, "other paths");
+    loaded(&mut st, grep("x", true, "*.rs", 1));
+    let sv = st.explore.search.as_ref().unwrap();
+    assert!(!sv.running);
+    assert_eq!(sv.result.as_ref().unwrap().matches.len(), 1);
+}
+
+#[test]
 fn search_results_and_the_history_filter() {
     let mut st = opened();
     st.explore.start_search("needle", false, "");
@@ -316,6 +353,8 @@ fn search_results_and_the_history_filter() {
         ExploreResult::Grep {
             rev: "HEAD".into(),
             text: "needle".into(),
+            match_case: false,
+            paths: String::new(),
             result: gitcore::GrepResult {
                 matches: vec![],
                 truncated: false,

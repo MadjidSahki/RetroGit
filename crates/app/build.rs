@@ -1,6 +1,6 @@
-//! Windows: the icon and version information of retrogit.exe.
+//! Windows targets: the icon and version information of retrogit.exe. Decided by the
+//! target (`CARGO_CFG_TARGET_OS`), not by the machine building, so cross builds get them too.
 
-#[cfg(windows)]
 #[allow(dead_code)]
 #[path = "src/version.rs"]
 mod version;
@@ -8,11 +8,11 @@ mod version;
 fn main() {
     println!("cargo:rerun-if-env-changed=RETROGIT_VERSION");
     println!("cargo:rerun-if-changed=assets/RetroGit.ico");
-    #[cfg(windows)]
-    windows_resources();
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        windows_resources();
+    }
 }
 
-#[cfg(windows)]
 fn windows_resources() {
     let version = std::env::var("RETROGIT_VERSION")
         .unwrap_or_else(|_| std::env::var("CARGO_PKG_VERSION").unwrap_or_default());

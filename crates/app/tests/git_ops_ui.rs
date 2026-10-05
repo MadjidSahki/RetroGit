@@ -97,7 +97,7 @@ fn the_rebase_dialog_explains_why_it_cannot_start() {
     h.run();
     assert!(h.query_by_label("commit 1").is_some());
     assert!(
-        h.query_by_label_contains("A squash or fixup needs")
+        h.query_by_label(s::todo_error(gitcore::TodoError::NoKeptAbove))
             .is_some()
     );
     assert!(
@@ -360,9 +360,11 @@ fn tag_buttons_are_greyed_while_a_network_operation_runs() {
     w.state.sync.running = Some(retrogit::protocol::SyncOp::Push);
     let mut h = harness(w);
     h.run();
-    for label in [s::PUSH_TAG, s::PUSH_ALL_TAGS, s::DELETE] {
+    for label in [s::PUSH_TAG, s::PUSH_ALL_TAGS] {
         assert!(disabled(&h, label), "{label}");
     }
+    // Deleting only the local tag needs no network: still possible.
+    assert!(!disabled(&h, s::DELETE), "Tags window: local delete");
     h.state_mut().state.git_dialog = Some(GitDialog::DeleteTag {
         name: "v1.0".into(),
         remote: true,
@@ -370,6 +372,17 @@ fn tag_buttons_are_greyed_while_a_network_operation_runs() {
     });
     h.run();
     assert!(disabled(&h, s::DELETE));
+    h.state_mut().state.sync.running = Some(retrogit::protocol::SyncOp::Fetch);
+    h.state_mut().state.git_dialog = Some(GitDialog::DeleteTag {
+        name: "v1.0".into(),
+        remote: false,
+        back_to_tags: true,
+    });
+    h.run();
+    assert!(
+        !disabled(&h, s::DELETE),
+        "local only: enabled during a fetch"
+    );
     h.state_mut().state.sync.running = None;
     h.run();
     assert!(!disabled(&h, s::DELETE), "usable again");

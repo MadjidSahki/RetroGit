@@ -120,7 +120,7 @@ fn answer(
             let commit = match repo.resolve(&rev) {
                 Some(c) => c,
                 None if rev == "HEAD" => String::new(),
-                None => return Err(GitError::Other(format!("unknown revision {rev}"))),
+                None => return Err(GitError::Refused(gitcore::Refusal::UnknownRevision(rev))),
             };
             ExploreResult::Tree {
                 entries: if commit.is_empty() {
@@ -161,6 +161,8 @@ fn answer(
             result: repo.grep(&rev, &text, match_case, &paths, EXPLORE_LIMIT, cancel)?,
             rev,
             text,
+            match_case,
+            paths,
         },
         ExploreRequest::LogSearch { kind, query } => {
             let (entries, truncated) = repo.search_log(kind, &query, EXPLORE_LIMIT, cancel)?;

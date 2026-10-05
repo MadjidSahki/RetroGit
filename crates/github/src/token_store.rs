@@ -24,21 +24,59 @@ pub fn keep_after_migration(token: String, resaved: Result<(), TokenStoreError>)
 /// Comment set on the Keychain items RetroGit writes through `/usr/bin/security`.
 pub const SECURITY_MARKER: &str = "retrogit-security";
 
-fn security_quote(s: &str) -> String {
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+/// A quoted argument for `security -i`, which reads one command per line: a line break or a
+/// NUL could end the command or start another one, so they are refused.
+fn security_quote(s: &str) -> Result<String, TokenStoreError> {
+    if s.contains(['\n', '\r', '\0']) {
+        return Err(TokenStoreError(
+            "line break or NUL in a credential name or token".into(),
+        ));
+    }
+    Ok(format!(
+        "\"{}\"",
+        s.replace('\\', "\\\\").replace('"', "\\\"")
+    ))
 }
 
 /// Command for `security -i` (read from its standard input) adding the item: the token is
 /// hex-encoded (`-X`), so it never appears in a process list.
-pub fn security_add_command(service: &str, account: &str, token: &str) -> String {
+pub fn security_add_command(
+    service: &str,
+    account: &str,
+    token: &str,
+) -> Result<String, TokenStoreError> {
+    security_quote(token)?;
     let hex: String = token.bytes().map(|b| format!("{b:02x}")).collect();
-    format!(
+    Ok(format!(
         "add-generic-password -U -s {} -a {} -j {} -X {}\n",
-        security_quote(service),
-        security_quote(account),
-        security_quote(SECURITY_MARKER),
-        security_quote(&hex)
-    )
+        security_quote(service)?,
+        security_quote(account)?,
+        security_quote(SECURITY_MARKER)?,
+        security_quote(&hex)?
+    ))
+}
+
+/// The password in `security find-generic-password -g` output (its standard error):
+/// `password: "…"` for printable ASCII without `"` or `\`, else
+/// `password: 0x<HEX>  "<escaped>"`, read from the hex bytes (UTF-8). `None`: no password,
+/// or one that cannot be read.
+pub fn parse_security_password(stderr: &str) -> Option<String> {
+    let value = stderr
+        .split('\n')
+        .find_map(|l| l.strip_prefix("password: "))?;
+    if let Some(hex) = value.strip_prefix("0x") {
+        let hex = hex.split(' ').next().unwrap_or("");
+        if hex.is_empty() || hex.len() % 2 != 0 {
+            return None;
+        }
+        let bytes = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
+            .collect::<Option<Vec<u8>>>()?;
+        return String::from_utf8(bytes).ok();
+    }
+    let inner = value.strip_prefix('"')?.strip_suffix('"')?;
+    Some(inner.to_string())
 }
 
 /// The `icmt` (comment) attribute in `security find-generic-password` output.
@@ -76,7 +114,10 @@ mod mac {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
-    use super::{KeyringStore, SECURITY_MARKER, TokenStoreError, parse_security_comment};
+    use super::{
+        KeyringStore, SECURITY_MARKER, TokenStoreError, parse_security_comment,
+        parse_security_password,
+    };
 
     const SECURITY: &str = "/usr/bin/security";
     /// `security` exit code for "item not found".
@@ -112,11 +153,14 @@ mod mac {
             let Some(comment) = self.comment()? else {
                 return Ok(None);
             };
-            let out = self.run(&["find-generic-password", "-w"])?;
+            // `-g` rather than `-w`: `-w` prints anything but plain ASCII as bare hex.
+            let out = self.run(&["find-generic-password", "-g"])?;
             if !out.status.success() {
                 return Err(err(String::from_utf8_lossy(&out.stderr).trim()));
             }
-            let token = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
+            let Some(token) = parse_security_password(&String::from_utf8_lossy(&out.stderr)) else {
+                return Ok(None);
+            };
             if comment.as_deref() != Some(SECURITY_MARKER) {
                 // Written by an older RetroGit: re-create it through the tool.
                 return Ok(Some(super::keep_after_migration(
@@ -138,6 +182,7 @@ mod mac {
         }
 
         fn add(&self, token: &str) -> Result<(), TokenStoreError> {
+            let cmd = super::security_add_command(&self.service, &self.account, token)?;
             let mut child = Command::new(SECURITY)
                 .arg("-i")
                 .stdin(Stdio::piped())
@@ -145,7 +190,6 @@ mod mac {
                 .stderr(Stdio::piped())
                 .spawn()
                 .map_err(err)?;
-            let cmd = super::security_add_command(&self.service, &self.account, token);
             child
                 .stdin
                 .take()

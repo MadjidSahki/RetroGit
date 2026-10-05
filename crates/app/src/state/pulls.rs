@@ -6,7 +6,7 @@ use github::{
     ReviewEvent,
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::AppState;
@@ -83,6 +83,15 @@ pub enum PullDialog {
     },
 }
 
+/// A comment of the Files tab, to remember it is shown whole.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum CommentKey {
+    /// Thread id, comment index.
+    Thread(String, usize),
+    /// Index in the pending review of the selected pull request.
+    Pending(usize),
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PullsView {
     /// Repository the list and detail belong to.
@@ -129,8 +138,13 @@ pub struct PullsView {
     pub assignable_query: Option<String>,
     /// Pull request created in this session, until GitHub's list has it (its search lags).
     pub created: Option<u64>,
+    /// Row of `created` once its detail loaded: put back on top of the Open and Mine lists
+    /// (a filter change clears the list) until GitHub's search has it.
+    pub created_row: Option<PrSummary>,
     /// The detail of this pull request failed to load, and why.
     pub load_error: Option<(u64, String)>,
+    /// Comments of the selected pull request shown whole in the Files tab (clicked).
+    pub expanded: HashSet<CommentKey>,
 }
 
 impl PullsView {
@@ -153,6 +167,7 @@ impl PullsView {
             self.file_colors = crate::highlight::Colors::NotRequested;
             self.selection = None;
             self.load_error = None;
+            self.expanded.clear();
             self.comment.clear();
             self.comment_sent = false;
             self.sub_tab = PullTab::Conversation;
@@ -205,6 +220,9 @@ impl PullsView {
             && i < list.len()
         {
             list.remove(i);
+            // The pending comments after it moved up: forget which were shown whole.
+            self.expanded
+                .retain(|k| !matches!(k, CommentKey::Pending(_)));
             if list.is_empty() {
                 self.pending.remove(&n);
             }
@@ -352,14 +370,15 @@ impl AppState {
                 total,
             } => {
                 if p.slug.as_ref() == Some(&slug) && p.filter == filter {
-                    let old = std::mem::replace(&mut p.list, list);
+                    p.list = list;
                     p.total = total;
                     p.loading = false;
                     if let Some(n) = p.created {
                         if p.list.iter().any(|r| r.number == n) {
                             p.created = None;
-                        } else if p.selected == Some(n)
-                            && let Some(row) = old.into_iter().find(|r| r.number == n)
+                            p.created_row = None;
+                        } else if matches!(filter, PrFilter::Open | PrFilter::Mine)
+                            && let Some(row) = p.created_row.clone()
                         {
                             // GitHub's search does not list it yet: keep it.
                             p.list.insert(0, row);
@@ -374,6 +393,10 @@ impl AppState {
                     {
                         // Merged or closed since: lists no longer keep it.
                         p.created = None;
+                        p.created_row = None;
+                    }
+                    if p.created == Some(detail.summary.number) {
+                        p.created_row = Some(detail.summary.clone());
                     }
                     // Keep the list in step with what the detail says.
                     if let Some(row) = p
@@ -434,6 +457,7 @@ impl AppState {
                     p.dialog = None;
                     p.select(number);
                     p.created = Some(number);
+                    p.created_row = None;
                     p.stale = true;
                     p.note = Some(s::NOTE_PULL_CREATED.to_string());
                 }
@@ -455,6 +479,8 @@ impl AppState {
                     // The review went through with its line comments.
                     if matches!(p.dialog, Some(PullDialog::Review { .. })) {
                         p.pending.remove(&number);
+                        // The next pending comment at index 0 must not open shown whole.
+                        p.expanded.retain(|k| !matches!(k, CommentKey::Pending(_)));
                     }
                     if p.comment_sent {
                         p.comment.clear();

@@ -156,13 +156,34 @@ pub fn safe_link(url: &str) -> bool {
     })
 }
 
-/// For each index `j`, the first index `>= j` where `pat` starts in `chars` (if any).
+/// No further marker in a table of `next_index`.
+const NONE: u32 = u32::MAX;
+
+/// The markers looked ahead for, in this order (index of their table in `inlines`).
+const MARKERS: [&[char]; 7] = [
+    &['`'],
+    &['*'],
+    &['_'],
+    &['*', '*'],
+    &['_', '_'],
+    &[']', '('],
+    &[')'],
+];
+const BACKTICK: usize = 0;
+const STAR: usize = 1;
+const UNDERSCORE: usize = 2;
+const DOUBLE_STAR: usize = 3;
+const DOUBLE_UNDERSCORE: usize = 4;
+const LINK_MIDDLE: usize = 5;
+const CLOSE_PAREN: usize = 6;
+
+/// For each index `j`, the first index `>= j` where `pat` starts in `chars` (`NONE`: none).
 /// Built once per block so an unmatched marker never rescans the rest of the text.
-fn next_index(chars: &[char], pat: &[char]) -> Vec<Option<usize>> {
-    let mut next = vec![None; chars.len() + 1];
+fn next_index(chars: &[char], pat: &[char]) -> Vec<u32> {
+    let mut next = vec![NONE; chars.len() + 1];
     for j in (0..chars.len()).rev() {
         next[j] = if chars[j..].starts_with(pat) {
-            Some(j)
+            u32::try_from(j).unwrap_or(NONE)
         } else {
             next[j + 1]
         };
@@ -183,19 +204,10 @@ pub fn inlines(text: &str) -> Vec<Inline> {
     let chars: Vec<char> = text.chars().collect();
     let mut out: Vec<Inline> = Vec::new();
     let mut plain = String::new();
-    let patterns: [&[char]; 7] = [
-        &['`'],
-        &['*'],
-        &['_'],
-        &['*', '*'],
-        &['_', '_'],
-        &[']', '('],
-        &[')'],
-    ];
-    let tables: Vec<Vec<Option<usize>>> = patterns.iter().map(|p| next_index(&chars, p)).collect();
-    let find = |from: usize, pat: &[char]| -> Option<usize> {
-        let k = patterns.iter().position(|p| *p == pat)?;
-        tables[k].get(from).copied().flatten()
+    let tables: [Vec<u32>; 7] = MARKERS.map(|p| next_index(&chars, p));
+    let find = |from: usize, marker: usize| -> Option<usize> {
+        let at = *tables[marker].get(from)?;
+        (at != NONE).then_some(at as usize)
     };
     let collect = |a: usize, b: usize| chars[a..b].iter().collect::<String>();
     let mut i = 0;
@@ -208,17 +220,23 @@ pub fn inlines(text: &str) -> Vec<Inline> {
             continue;
         }
         if c == '`'
-            && let Some(end) = find(i + 1, &['`'])
+            && let Some(end) = find(i + 1, BACKTICK)
         {
             token = Some((Inline::Code(collect(i + 1, end)), end + 1));
         } else if (c == '*' || c == '_') && chars.get(i + 1) == Some(&c) {
-            if let Some(end) = find(i + 2, &[c, c])
+            let double = if c == '*' {
+                DOUBLE_STAR
+            } else {
+                DOUBLE_UNDERSCORE
+            };
+            if let Some(end) = find(i + 2, double)
                 && end > i + 2
             {
                 token = Some((Inline::Bold(collect(i + 2, end)), end + 2));
             }
         } else if c == '*' || (c == '_' && (i == 0 || !chars[i - 1].is_alphanumeric())) {
-            if let Some(end) = find(i + 1, &[c])
+            let single = if c == '*' { STAR } else { UNDERSCORE };
+            if let Some(end) = find(i + 1, single)
                 && end > i + 1
                 && !chars[i + 1].is_whitespace()
             {
@@ -226,8 +244,8 @@ pub fn inlines(text: &str) -> Vec<Inline> {
             }
         } else if c == '[' || (c == '!' && chars.get(i + 1) == Some(&'[')) {
             let open = if c == '!' { i + 1 } else { i };
-            if let Some(close) = find(open + 1, &[']', '('])
-                && let Some(end) = find(close + 2, &[')'])
+            if let Some(close) = find(open + 1, LINK_MIDDLE)
+                && let Some(end) = find(close + 2, CLOSE_PAREN)
             {
                 let label = collect(open + 1, close);
                 let label = if c == '!' {
@@ -376,7 +394,9 @@ pub fn markdown_view(ui: &mut Ui, text: &str) {
                                     .font(egui::FontId::monospace(base))
                                     .color(pal.window_text),
                             )
-                            .extend(),
+                            // Long lines wrap: an unbroken line would widen the whole
+                            // view and push what follows out of sight.
+                            .wrap(),
                         );
                     });
             }

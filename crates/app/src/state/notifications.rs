@@ -30,12 +30,6 @@ pub enum NotificationTarget {
     Browser(String),
 }
 
-struct Target<'a> {
-    repo: &'a str,
-    number: u64,
-    url: &'a str,
-}
-
 /// `"owner/repo"` => `(owner, repo)`.
 pub fn split_repo(full: &str) -> Option<Slug> {
     let (o, r) = full.split_once('/')?;
@@ -77,15 +71,17 @@ impl AppState {
         std::mem::take(&mut self.links)
     }
 
-    /// Where a `retrogit://pull` link leads (`None`: not a pull request link).
+    /// The repository (`owner/repo`) of a `retrogit://pull` link and where the link leads
+    /// (`None`: not a pull request link).
     pub fn link_target(
         &self,
         link: &str,
         slug_of: impl Fn(&Path) -> Option<Slug>,
-    ) -> Option<NotificationTarget> {
+    ) -> Option<(String, NotificationTarget)> {
         let l = crate::notify::parse_pull_link(link)?;
         let url = format!("https://github.com/{}/pull/{}", l.repo, l.number);
-        Some(self.pull_target(&l.repo, l.number, &url, slug_of))
+        let target = self.pull_target(&l.repo, l.number, &url, slug_of);
+        Some((l.repo, target))
     }
 
     fn pull_target(
@@ -95,21 +91,20 @@ impl AppState {
         url: &str,
         slug_of: impl Fn(&Path) -> Option<Slug>,
     ) -> NotificationTarget {
-        let e = Target { repo, number, url };
-        let Some(slug) = split_repo(e.repo) else {
-            return NotificationTarget::Browser(e.url.to_string());
+        let Some(slug) = split_repo(repo) else {
+            return NotificationTarget::Browser(url.to_string());
         };
         let same =
             |s: &Slug| s.0.eq_ignore_ascii_case(&slug.0) && s.1.eq_ignore_ascii_case(&slug.1);
         if self.github_slug().as_ref().is_some_and(same) {
-            return NotificationTarget::Current(e.number);
+            return NotificationTarget::Current(number);
         }
         for r in self.recents_sorted() {
             if !self.missing.contains(&r.path) && slug_of(&r.path).as_ref().is_some_and(same) {
-                return NotificationTarget::Local(r.path, e.number);
+                return NotificationTarget::Local(r.path, number);
             }
         }
-        NotificationTarget::Browser(e.url.to_string())
+        NotificationTarget::Browser(url.to_string())
     }
 
     /// Show pull request `number` of the open repository (loads it).

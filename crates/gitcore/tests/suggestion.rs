@@ -5,7 +5,7 @@ mod common;
 use std::path::Path;
 
 use common::remote::{configure, git};
-use gitcore::{GitError, Repo};
+use gitcore::{GitError, Refusal, Repo};
 
 fn repo(dir: &Path, content: &[u8]) -> Repo {
     git(dir, &["-c", "init.defaultBranch=main", "init", "-q"]);
@@ -85,7 +85,7 @@ fn changed_lines_or_local_changes_are_refused() {
     std::fs::write(d.path().join("a.rs"), "a\nb\nmine\n").unwrap();
     assert!(matches!(
         r.apply_suggestion("a.rs", 2, 2, &lines(&["b"]), "x\n", "s"),
-        Err(GitError::Unsupported(_))
+        Err(GitError::Refused(Refusal::LocalChangesFirst))
     ));
     assert_eq!(
         std::fs::read_to_string(d.path().join("a.rs")).unwrap(),

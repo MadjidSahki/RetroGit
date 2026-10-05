@@ -235,7 +235,7 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
             let footer = if truncated { 56.0 } else { 0.0 };
             ScrollArea::vertical()
                 .auto_shrink([false, false])
-                .max_height(ui.available_height() - footer)
+                .max_height((ui.available_height() - footer).max(0.0))
                 .show_rows_flat(ui, ROW_HEIGHT, p.list.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for pr in &p.list[range] {

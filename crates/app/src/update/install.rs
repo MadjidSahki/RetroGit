@@ -17,26 +17,49 @@ use crate::strings as s;
 /// Larger downloads are refused.
 pub const MAX_DOWNLOAD: u64 = 200 * 1024 * 1024;
 
-/// Downloads from allowed hosts only, each redirect checked. No overall time limit (slow
-/// connections finish); a download that receives nothing for `stall` fails.
+/// Longest time reading a download's body.
+pub const BODY_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
+/// The download agent: 30 s for the headers, `body` for the body.
+fn download_agent(body: Duration) -> ureq::Agent {
+    super::check::agent(None, Some(Duration::from_secs(30)), Some(body))
+}
+
+/// Downloads from allowed hosts only, each redirect checked. Reading the body is bounded by
+/// `BODY_TIMEOUT` (200 MB at more than 57 KB/s; the reading thread, abandoned on Cancel or a
+/// stall, ends then at the latest); a download that receives nothing for `stall` fails.
 pub struct Fetcher {
     agent: ureq::Agent,
     allow: fn(&str) -> bool,
     stall: Duration,
+    max: u64,
 }
 
 impl Fetcher {
     pub fn new(allow: fn(&str) -> bool) -> Fetcher {
         Fetcher {
-            agent: super::check::agent(None, Some(Duration::from_secs(30))),
+            agent: download_agent(BODY_TIMEOUT),
             allow,
             stall: Duration::from_secs(60),
+            max: MAX_DOWNLOAD,
         }
+    }
+
+    /// Largest file accepted, in bytes (`MAX_DOWNLOAD` by default).
+    pub fn with_max(mut self, max: u64) -> Fetcher {
+        self.max = max;
+        self
     }
 
     /// How long without data before giving up (60 s by default).
     pub fn with_stall(mut self, stall: Duration) -> Fetcher {
         self.stall = stall;
+        self
+    }
+
+    /// Longest time reading the body (`BODY_TIMEOUT` by default).
+    pub fn with_body_timeout(mut self, body: Duration) -> Fetcher {
+        self.agent = download_agent(body);
         self
     }
 
@@ -202,7 +225,7 @@ pub fn download_verified(
         let mut hasher = Sha256::new();
         fetcher.get(
             &asset.url,
-            MAX_DOWNLOAD,
+            fetcher.max,
             cancel,
             |b| {
                 hasher.update(b);
@@ -511,33 +534,13 @@ pub fn work_dir(kind: &InstallKind) -> Option<PathBuf> {
     }
 }
 
-/// A redirect's `Location` made absolute against `base` (the URL that answered):
-/// `https://...` as is, `//host/...` with `base`'s scheme, `/path` on `base`'s host,
-/// anything else next to `base`'s last path segment.
+/// A redirect's `Location` made absolute against `base` (the URL that answered), by
+/// RFC 3986 (dot segments, query or fragment alone...). Kept as is if either cannot be
+/// parsed: `allowed_url` refuses it then.
 pub fn resolve_location(base: &str, location: &str) -> String {
-    let has_scheme = location.split_once("://").is_some_and(|(scheme, _)| {
-        !scheme.is_empty()
-            && scheme
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"+-.".contains(&b))
-    });
-    if has_scheme {
-        return location.to_string();
-    }
-    let (scheme, rest) = base.split_once("://").unwrap_or(("https", base));
-    if let Some(net) = location.strip_prefix("//") {
-        return format!("{scheme}://{net}");
-    }
-    let rest = rest.split(['?', '#']).next().unwrap_or("");
-    let (authority, path) = match rest.find('/') {
-        Some(i) => rest.split_at(i),
-        None => (rest, "/"),
-    };
-    if location.starts_with('/') {
-        return format!("{scheme}://{authority}{location}");
-    }
-    let dir = &path[..path.rfind('/').map_or(0, |i| i + 1)];
-    format!("{scheme}://{authority}{dir}{location}")
+    url::Url::parse(base)
+        .and_then(|b| b.join(location))
+        .map_or_else(|_| location.to_string(), String::from)
 }
 
 /// Call `remove` on `path` up to `attempts` times, `interval` apart, until it works (or the

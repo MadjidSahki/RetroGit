@@ -30,10 +30,15 @@ Get-Process retrogit -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep 2
 Write-Host "relaunched after a silent update"
 
+# RetroGit writes its notification icon at start: the uninstaller must remove it.
+$icon = Join-Path $env:LOCALAPPDATA "RetroGit\icon.png"
+New-Item -ItemType Directory -Force (Split-Path $icon) | Out-Null
+Set-Content -Path $icon -Value "icon"
 Start-Process (Join-Path $app "unins000.exe") -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
 # The uninstaller runs from a copy in the temporary folder: wait for it to finish.
 for ($i = 0; $i -lt 60 -and (Test-Path (Join-Path $app "retrogit.exe")); $i++) { Start-Sleep 1 }
 if (Test-Path (Join-Path $app "retrogit.exe")) { throw "retrogit.exe still installed" }
 if (Test-Path $link) { throw "Start menu shortcut left" }
 foreach ($k in $keys) { if (Test-Path $k) { throw "registry key left: $k" } }
+if (Test-Path $icon) { throw "notification icon left: $icon" }
 Write-Host "uninstalled cleanly"

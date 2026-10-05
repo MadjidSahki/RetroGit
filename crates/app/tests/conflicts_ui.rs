@@ -512,3 +512,56 @@ fn enter_and_backspace_in_a_crlf_file_keep_crlf() {
     assert!(r.contains("xy"), "{r:?}");
     assert_eq!(r.matches('\r').count(), r.matches("\r\n").count(), "{r:?}");
 }
+
+#[test]
+fn cancelling_the_pending_comments_question_keeps_the_edited_conflict() {
+    let mut w = world(ConflictKind::Content);
+    let edited = "fn login() {\n    check(a);\n}\n";
+    w.state
+        .changes
+        .conflict
+        .as_mut()
+        .unwrap()
+        .edit(edited.into());
+    w.state.queue_line_comment(
+        7,
+        github::LineComment {
+            path: "a.rs".into(),
+            line: 1,
+            side: github::DiffSide::Right,
+            start: None,
+            body: "x".into(),
+        },
+    );
+    let other = PathBuf::from("/tmp/retrogit-none-c");
+    assert!(!w.state.changes.request_open_repo(&other));
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1200.0, 700.0))
+        .build_ui_state(
+            |ui, w: &mut World| {
+                let ctx = ui.ctx().clone();
+                let mut cx = Ctx {
+                    state: &mut w.state,
+                    worker: &w.worker,
+                    highlighter: &w.highlighter,
+                    notices: &w.notices,
+                };
+                retrogit::ui::main_window::show(ui, &mut cx);
+                retrogit::ui::pull_dialogs::show(&ctx, &mut cx);
+            },
+            w,
+        );
+    h.run();
+    assert!(h.query_by_label(s::CONFIRM_DISCARD_EDITS).is_some());
+    h.get_by_label(s::OK).click();
+    h.run();
+    assert!(h.query_by_label(&s::pending_discard_question(1)).is_some());
+    h.get_by_label(s::CANCEL).click();
+    h.run();
+    let st = &h.state().state;
+    assert_eq!(st.repo_switch, None);
+    assert!(st.changes.conflict.is_some(), "the editor stays open");
+    let ed = st.changes.conflict.as_ref().unwrap();
+    assert!(ed.edited);
+    assert_eq!(ed.result, edited);
+}
