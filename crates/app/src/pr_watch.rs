@@ -81,7 +81,15 @@ impl Poller {
     fn gh_token_for(&mut self, login: &str) -> Option<String> {
         let gh = self.tokens.gh_token_for(login)?;
         if !self.gh_checked.contains_key(&gh) {
-            let account = self.client.current_user(&gh).ok().map(|u| u.login);
+            let account = match self.client.current_user(&gh) {
+                Ok(u) => Some(u.login),
+                Err(GithubError::Unauthorized) => {
+                    // Revoked: ask gh again next time (it may have a new one).
+                    self.tokens.gh_rejected(login);
+                    return None;
+                }
+                Err(_) => None,
+            };
             self.gh_checked.insert(gh.clone(), account);
         }
         let account = self.gh_checked.get(&gh).and_then(|a| a.as_deref());
@@ -99,9 +107,13 @@ impl Poller {
     ) -> Result<Vec<PrSnapshot>, GithubError> {
         let since = github::date_days_before(now_epoch, 7);
         let mut all = self.client.watch_snapshot(token, &since)?;
-        if let Some(gh) = self.gh_token_for(login).filter(|g| g != token)
-            && let Ok(more) = self.client.watch_snapshot(&gh, &since)
-        {
+        let gh = self.gh_token_for(login).filter(|g| g != token);
+        let more = gh.as_ref().map(|gh| self.client.watch_snapshot(gh, &since));
+        if let (Some(gh), Some(Err(GithubError::Unauthorized))) = (&gh, &more) {
+            self.tokens.gh_rejected(login);
+            self.gh_checked.remove(gh);
+        }
+        if let Some(Ok(more)) = more {
             let known: HashMap<String, usize> = all
                 .iter()
                 .enumerate()

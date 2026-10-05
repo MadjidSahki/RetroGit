@@ -16,12 +16,28 @@ fn start(
     known: &[&str],
     repo_accounts: &[(&str, &str, bool)],
 ) -> WorkerHandle {
+    start_with(
+        server,
+        store,
+        known,
+        repo_accounts,
+        TokenProvider::without_gh(),
+    )
+}
+
+fn start_with(
+    server: &mockito::Server,
+    store: Arc<MemoryAccounts>,
+    known: &[&str],
+    repo_accounts: &[(&str, &str, bool)],
+    tokens: TokenProvider,
+) -> WorkerHandle {
     let deps = WorkerDeps {
         client: Client::with_bases(&server.url(), &server.url()),
         store,
         client_id: String::new(),
         commit_backend: gitcore::CommitBackend::Git2,
-        tokens: TokenProvider::without_gh(),
+        tokens,
         known_accounts: known.iter().map(|k| k.to_string()).collect(),
         repo_accounts: repo_accounts
             .iter()
@@ -110,10 +126,176 @@ fn the_single_account_of_older_versions_is_moved_to_its_login() {
     w.send(Command::ValidateToken);
     let evs = until(&w, |e| matches!(e, Event::SignedIn(u) if u.login == "ada"));
     assert_eq!(store.load("ada").unwrap().as_deref(), Some("gho_old"));
-    assert_eq!(store.load_legacy().unwrap(), None);
+    assert_eq!(
+        store.load_legacy().unwrap().as_deref(),
+        Some("gho_old"),
+        "kept until the login is saved in the configuration"
+    );
     assert!(evs.iter().any(
         |e| matches!(e, Event::AccountsChanged(a) if a.len() == 1 && a[0].login == "ada" && a[0].valid)
     ));
+}
+
+#[test]
+fn the_old_single_account_is_cleared_once_its_login_is_known() {
+    let mut server = mockito::Server::new();
+    user(&mut server, "gho_old", "ada", &[]);
+    let store = Arc::new(MemoryAccounts::with_legacy("gho_old"));
+    let w = start(&server, store.clone(), &["ada"], &[]);
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::SignedIn(u) if u.login == "ada"));
+    assert_eq!(store.load("ada").unwrap().as_deref(), Some("gho_old"));
+    assert_eq!(store.load_legacy().unwrap(), None);
+}
+
+#[test]
+fn an_account_removed_after_migrating_does_not_come_back() {
+    let mut server = mockito::Server::new();
+    user(&mut server, "gho_old", "ada", &[]);
+    let store = Arc::new(MemoryAccounts::with_legacy("gho_old"));
+    let w = start(&server, store.clone(), &[], &[]);
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::SignedIn(u) if u.login == "ada"));
+    w.send(Command::RemoveAccount("ada".into()));
+    until(&w, |e| matches!(e, Event::SignedOut));
+    assert_eq!(store.load_legacy().unwrap(), None, "the old slot goes too");
+}
+
+#[test]
+fn a_newer_token_is_not_replaced_by_the_old_single_account() {
+    let mut server = mockito::Server::new();
+    user(&mut server, "gho_old", "ada", &[]);
+    user(&mut server, "gho_new", "ada", &[]);
+    let store = Arc::new(MemoryAccounts::with_legacy("gho_old"));
+    store.save("ada", "gho_new").unwrap();
+    let w = start(&server, store.clone(), &["ada"], &[]);
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::SignedIn(u) if u.login == "ada"));
+    assert_eq!(store.load("ada").unwrap().as_deref(), Some("gho_new"));
+    assert_eq!(store.load_legacy().unwrap(), None);
+}
+
+#[test]
+fn accounts_back_online_sign_the_app_in() {
+    let mut server = mockito::Server::new();
+    let down = server
+        .mock("GET", "/user")
+        .match_header("authorization", "Bearer gho_ada")
+        .with_status(500)
+        .create();
+    let store = Arc::new(MemoryAccounts::with("ada", "gho_ada"));
+    let w = start(&server, store, &["ada"], &[]);
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::Offline));
+    down.remove();
+    user(&mut server, "gho_ada", "ada", &[]);
+    list(&mut server, "gho_ada");
+    let evs = load_pulls(&w, "ada", "app");
+    if !evs
+        .iter()
+        .any(|e| matches!(e, Event::SignedIn(u) if u.login == "ada"))
+    {
+        until(&w, |e| matches!(e, Event::SignedIn(u) if u.login == "ada"));
+    }
+}
+
+/// bob's `GET /user` fails at startup (offline), then answers with his name.
+fn bob_offline_at_start(server: &mut mockito::Server) -> WorkerHandle {
+    user(server, "gho_ada", "ada", &[]);
+    let down = server
+        .mock("GET", "/user")
+        .match_header("authorization", "Bearer gho_bob")
+        .with_status(500)
+        .create();
+    let store = Arc::new(MemoryAccounts::with("ada", "gho_ada"));
+    store.save("bob", "gho_bob").unwrap();
+    let w = start(server, store, &["ada", "bob"], &[]);
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::SignedIn(_)));
+    down.remove();
+    server
+        .mock("GET", "/user")
+        .match_header("authorization", "Bearer gho_bob")
+        .with_body(json!({ "login": "bob", "name": "Bob Smith" }).to_string())
+        .create();
+    server
+        .mock("GET", "/user/orgs")
+        .match_query(Matcher::Any)
+        .match_header("authorization", "Bearer gho_bob")
+        .with_body("[]")
+        .create();
+    w
+}
+
+fn bob_named(e: &Event) -> bool {
+    matches!(e, Event::AccountsChanged(a)
+        if a.iter().any(|s| s.login == "bob" && s.name.as_deref() == Some("Bob Smith")))
+}
+
+#[test]
+fn an_account_kept_offline_is_checked_again_on_validate() {
+    let mut server = mockito::Server::new();
+    let w = bob_offline_at_start(&mut server);
+    w.send(Command::ValidateToken);
+    until(&w, bob_named);
+}
+
+#[test]
+fn an_account_kept_offline_is_checked_again_after_a_github_call_succeeds() {
+    let mut server = mockito::Server::new();
+    let w = bob_offline_at_start(&mut server);
+    list(&mut server, "gho_ada");
+    let evs = load_pulls(&w, "ada", "app");
+    assert!(
+        matches!(evs.last(), Some(Event::PullsLoaded { .. })),
+        "{evs:?}"
+    );
+    if !evs.iter().any(bob_named) {
+        until(&w, bob_named);
+    }
+}
+
+#[test]
+fn signing_in_tries_restricted_organizations_again() {
+    let mut server = mockito::Server::new();
+    user(&mut server, "gho_ada", "ada", &[]);
+    let tokens = TokenProvider::without_gh();
+    tokens.remember("ada", "corp");
+    let store = Arc::new(MemoryAccounts::with("ada", "gho_ada"));
+    let w = start_with(&server, store, &["ada"], &[], tokens.clone());
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::SignedIn(_)));
+    assert!(!tokens.is_restricted("ada", "corp"));
+    tokens.remember("ada", "corp");
+    w.send(Command::SavePat("gho_ada".into()));
+    until(&w, |e| matches!(e, Event::SignedIn(_)));
+    assert!(!tokens.is_restricted("ada", "corp"));
+}
+
+#[test]
+fn a_clone_no_account_can_see_names_the_accounts_tried() {
+    use gitcore::GitError;
+    use retrogit::strings as s;
+    use retrogit::worker::clone_refused;
+    let tried = ["ada".to_string(), "bob".to_string()];
+    for e in [
+        GitError::Auth("could not read Username".into()),
+        GitError::AccessDenied("Repository not found".into()),
+    ] {
+        let err = clone_refused(true, &tried, &e).unwrap();
+        assert_eq!(err.message, s::ERR_NO_ACCOUNT_SEES_REPO);
+        assert_eq!(err.detail.as_deref(), Some("Tried: @ada, @bob"));
+    }
+    let auth = GitError::Auth("x".into());
+    assert!(
+        clone_refused(false, &tried, &auth).is_none(),
+        "not github.com"
+    );
+    assert!(
+        clone_refused(true, &[], &auth).is_none(),
+        "nobody signed in"
+    );
+    assert!(clone_refused(true, &tried, &GitError::Network("x".into())).is_none());
 }
 
 #[test]

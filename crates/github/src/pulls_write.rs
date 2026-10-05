@@ -121,7 +121,8 @@ pub fn encode_segment(s: &str, keep_slash: bool) -> String {
 }
 
 impl Client {
-    /// Open a pull request and add its labels. `Rejected` with GitHub's reason on 422
+    /// Open a pull request, without its labels (`set_labels` adds them, so a failure there
+    /// keeps the number). `Rejected` with GitHub's reason on 422
     /// (e.g. "A pull request already exists for o:branch.").
     pub fn create_pull(
         &self,
@@ -143,11 +144,7 @@ impl Client {
             token,
             Some(&body),
         )?;
-        let number = resp.body_mut().read_json::<Created>()?.number;
-        if !pull.labels.is_empty() {
-            self.set_labels(token, owner, repo, number, &pull.labels)?;
-        }
-        Ok(number)
+        Ok(resp.body_mut().read_json::<Created>()?.number)
     }
 
     /// Number of the open pull request whose head is `head_owner:branch`, if any.
@@ -270,15 +267,7 @@ impl Client {
         if !add.is_empty() {
             self.api_send("POST", &path, token, Some(&json!({ "reviewers": add })))?;
         }
-        if !remove.is_empty() {
-            self.api_send(
-                "DELETE",
-                &path,
-                token,
-                Some(&json!({ "reviewers": remove })),
-            )?;
-        }
-        Ok(())
+        self.remove_people(&path, token, "reviewers", remove, !add.is_empty())
     }
 
     pub fn set_assignees(
@@ -294,15 +283,30 @@ impl Client {
         if !add.is_empty() {
             self.api_send("POST", &path, token, Some(&json!({ "assignees": add })))?;
         }
-        if !remove.is_empty() {
-            self.api_send(
-                "DELETE",
-                &path,
-                token,
-                Some(&json!({ "assignees": remove })),
-            )?;
+        self.remove_people(&path, token, "assignees", remove, !add.is_empty())
+    }
+
+    /// DELETE `remove` (under `key`) from `path`; after an addition (`added`), a failure
+    /// says which half was done.
+    fn remove_people(
+        &self,
+        path: &str,
+        token: &str,
+        key: &str,
+        remove: &[String],
+        added: bool,
+    ) -> Result<(), GithubError> {
+        if remove.is_empty() {
+            return Ok(());
         }
-        Ok(())
+        match self.api_send("DELETE", path, token, Some(&json!({ key: remove }))) {
+            Ok(_) => Ok(()),
+            Err(e) if added && e != GithubError::Unauthorized => Err(GithubError::PeopleHalf {
+                not_removed: remove.to_vec(),
+                reason: e.to_string(),
+            }),
+            Err(e) => Err(e),
+        }
     }
 
     /// Turn the pull request (GraphQL id `pull_id`) into a draft, or mark it ready.
@@ -413,22 +417,39 @@ impl Client {
         .map(|_| ())
     }
 
-    /// Replace the labels of pull request `number` with `labels`.
+    /// Change the labels of pull request `number` from `old` to `new`: adds what `new`
+    /// has, removes what it dropped, and leaves alone labels neither list knows (set by
+    /// someone else meanwhile, or not shown).
     pub fn set_labels(
         &self,
         token: &str,
         owner: &str,
         repo: &str,
         number: u64,
-        labels: &[String],
+        old: &[String],
+        new: &[String],
     ) -> Result<(), GithubError> {
-        self.api_send(
-            "PUT",
-            &format!("/repos/{owner}/{repo}/issues/{number}/labels"),
-            token,
-            Some(&json!({ "labels": labels })),
-        )
-        .map(|_| ())
+        let (add, remove) = diff_lists(old, new);
+        if !add.is_empty() {
+            self.api_send(
+                "POST",
+                &format!("/repos/{owner}/{repo}/issues/{number}/labels"),
+                token,
+                Some(&json!({ "labels": add })),
+            )?;
+        }
+        for name in remove {
+            self.api_send(
+                "DELETE",
+                &format!(
+                    "/repos/{owner}/{repo}/issues/{number}/labels/{}",
+                    encode_segment(&name, false)
+                ),
+                token,
+                None,
+            )?;
+        }
+        Ok(())
     }
 
     /// Default branch and every label of the repository.

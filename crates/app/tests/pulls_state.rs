@@ -77,6 +77,9 @@ fn detail(number: u64) -> PrDetail {
             },
         ],
         commit_count: 2,
+        comments_total: 0,
+        reviews_total: 0,
+        threads_total: 0,
         check_runs: vec![],
         timeline: vec![],
         threads: vec![],
@@ -91,6 +94,8 @@ fn detail(number: u64) -> PrDetail {
         viewer_can_update: true,
         reviewers: vec![],
         assignees: vec![],
+        viewer_can_triage: true,
+        team_reviewers: vec![],
     }
 }
 
@@ -124,17 +129,20 @@ fn results_for_another_repo_filter_or_selection_are_ignored() {
         slug: ("x".into(), "y".into()),
         filter: PrFilter::Open,
         list: vec![pr(1)],
+        total: 1,
     });
     st.apply(Event::PullsLoaded {
         slug: slug(),
         filter: PrFilter::Closed,
         list: vec![pr(2)],
+        total: 1,
     });
     assert!(st.pulls.list.is_empty() && st.pulls.loading);
     st.apply(Event::PullsLoaded {
         slug: slug(),
         filter: PrFilter::Open,
         list: vec![pr(3)],
+        total: 1,
     });
     assert_eq!(st.pulls.list[0].number, 3);
     assert!(!st.pulls.loading);
@@ -176,7 +184,7 @@ fn selecting_another_pull_request_resets_the_detail_but_keeps_its_pending_review
         detail: Box::new(detail(1)),
     });
     st.pulls.sub_tab = PullTab::Files;
-    st.queue_line_comment(line_comment("on one"));
+    st.queue_line_comment(1, line_comment("on one"));
     st.pulls.select(1);
     assert_eq!(
         st.pulls.selected_pending().len(),
@@ -187,7 +195,7 @@ fn selecting_another_pull_request_resets_the_detail_but_keeps_its_pending_review
     assert!(st.pulls.detail.is_none());
     assert!(st.pulls.selected_pending().is_empty(), "not shown on #2");
     assert_eq!(st.pulls.sub_tab, PullTab::Conversation);
-    st.queue_line_comment(line_comment("on two"));
+    st.queue_line_comment(2, line_comment("on two"));
     assert_eq!(st.pulls.pending_total(), 2);
     st.pulls.select(1);
     assert_eq!(
@@ -201,6 +209,7 @@ fn selecting_another_pull_request_resets_the_detail_but_keeps_its_pending_review
         body: String::new(),
     });
     st.apply(Event::PullActionDone {
+        slug: slug(),
         number: 1,
         note: s::NOTE_REVIEW_SENT.into(),
     });
@@ -220,7 +229,7 @@ fn changing_repository_with_pending_comments_asks_first() {
         "nothing pending: goes"
     );
     st.pulls.select(4);
-    st.queue_line_comment(line_comment("x"));
+    st.queue_line_comment(4, line_comment("x"));
     let same = Command::OpenRepo(PathBuf::from("/tmp/r"));
     assert_eq!(
         st.request_repo_switch(same.clone()),
@@ -243,6 +252,25 @@ fn changing_repository_with_pending_comments_asks_first() {
 }
 
 #[test]
+fn the_list_keeps_how_many_pull_requests_match() {
+    let mut st = opened(Some("https://github.com/o/r"));
+    st.apply(Event::PullsLoaded {
+        slug: slug(),
+        filter: PrFilter::Open,
+        list: vec![pr(1), pr(2)],
+        total: 120,
+    });
+    assert_eq!(st.pulls.total, 120);
+    st.apply(Event::PullsLoaded {
+        slug: ("x".into(), "y".into()),
+        filter: PrFilter::Open,
+        list: vec![pr(3)],
+        total: 7,
+    });
+    assert_eq!(st.pulls.total, 120, "another repository's count is ignored");
+}
+
+#[test]
 fn a_created_pull_request_shows_in_the_list_at_once() {
     let mut st = opened(Some("https://github.com/o/r"));
     let list = |st: &AppState| st.pulls.list.iter().map(|p| p.number).collect::<Vec<_>>();
@@ -250,6 +278,7 @@ fn a_created_pull_request_shows_in_the_list_at_once() {
         slug: slug(),
         filter: PrFilter::Open,
         list: vec![pr(1)],
+        total: 1,
     });
     st.apply(Event::PullCreated {
         slug: slug(),
@@ -260,6 +289,7 @@ fn a_created_pull_request_shows_in_the_list_at_once() {
         slug: slug(),
         filter: PrFilter::Open,
         list: vec![pr(1)],
+        total: 1,
     });
     assert_eq!(list(&st), [1]);
     st.apply(Event::PullLoaded {
@@ -271,18 +301,21 @@ fn a_created_pull_request_shows_in_the_list_at_once() {
         slug: slug(),
         filter: PrFilter::Open,
         list: vec![pr(1)],
+        total: 1,
     });
     assert_eq!(list(&st), [12, 1], "a late list does not drop it");
     st.apply(Event::PullsLoaded {
         slug: slug(),
         filter: PrFilter::Open,
         list: vec![pr(1), pr(12)],
+        total: 1,
     });
     assert_eq!(list(&st), [1, 12], "GitHub caught up");
     st.apply(Event::PullsLoaded {
         slug: slug(),
         filter: PrFilter::Open,
         list: vec![pr(1)],
+        total: 1,
     });
     assert_eq!(
         list(&st),
@@ -389,8 +422,12 @@ fn actions_end_busy_and_mark_the_list_stale() {
     st.pulls.stale = false;
     st.pulls.select(4);
     st.pulls.busy = true;
-    st.pulls.dialog = Some(retrogit::state::PullDialog::Labels { checked: vec![] });
+    st.pulls.dialog = Some(retrogit::state::PullDialog::Labels {
+        old: vec![],
+        checked: vec![],
+    });
     st.apply(Event::PullActionDone {
+        slug: slug(),
         number: 4,
         note: s::NOTE_LABELS.into(),
     });
@@ -417,10 +454,34 @@ fn actions_end_busy_and_mark_the_list_stale() {
 }
 
 #[test]
+fn an_action_done_on_another_repository_is_ignored() {
+    let mut st = opened(Some("https://github.com/o/r"));
+    st.pulls.stale = false;
+    st.pulls.select(4);
+    st.queue_line_comment(4, line_comment("x"));
+    st.pulls.comment = "typed".into();
+    st.pulls.comment_sent = true;
+    st.pulls.busy = true;
+    st.pulls.dialog = Some(retrogit::state::PullDialog::Review {
+        event: ReviewEvent::Comment,
+        body: String::new(),
+    });
+    st.apply(Event::PullActionDone {
+        slug: ("o".into(), "other".into()),
+        number: 4,
+        note: s::NOTE_REVIEW_SENT.into(),
+    });
+    assert!(st.pulls.busy && !st.pulls.stale && st.pulls.note.is_none());
+    assert!(st.pulls.dialog.is_some(), "dialog kept");
+    assert_eq!(st.pulls.selected_pending().len(), 1, "pending kept");
+    assert_eq!(st.pulls.comment, "typed");
+}
+
+#[test]
 fn pending_comments_are_cleared_only_when_the_review_went_through() {
     let mut st = opened(Some("https://github.com/o/r"));
     st.pulls.select(4);
-    st.queue_line_comment(line_comment("x"));
+    st.queue_line_comment(4, line_comment("x"));
     st.pulls.dialog = Some(retrogit::state::PullDialog::Review {
         event: ReviewEvent::Comment,
         body: String::new(),
@@ -437,6 +498,7 @@ fn pending_comments_are_cleared_only_when_the_review_went_through() {
     );
     assert!(st.pulls.dialog.is_some());
     st.apply(Event::PullActionDone {
+        slug: slug(),
         number: 4,
         note: s::NOTE_REVIEW_SENT.into(),
     });
@@ -457,6 +519,7 @@ fn a_conversation_comment_is_kept_until_github_accepts_it() {
     assert_eq!(st.pulls.comment, "Looks good", "not lost on failure");
     st.pulls.send_comment();
     st.apply(Event::PullActionDone {
+        slug: slug(),
         number: 4,
         note: s::NOTE_COMMENTED.into(),
     });
@@ -662,6 +725,7 @@ fn a_created_pull_request_merged_before_search_lists_it_leaves_the_open_list() {
         slug: slug(),
         filter: PrFilter::Open,
         list,
+        total: 1,
     };
     st.apply(pulls(vec![pr(1)]));
     st.apply(Event::PullCreated {

@@ -11,7 +11,7 @@ fn client(server: &mockito::Server) -> Client {
 }
 
 #[test]
-fn create_pull_then_sets_its_labels() {
+fn create_pull_leaves_its_labels_to_the_caller() {
     let mut server = mockito::Server::new();
     let create = server
         .mock("POST", "/repos/o/r/pulls")
@@ -22,13 +22,14 @@ fn create_pull_then_sets_its_labels() {
         .with_status(201)
         .with_body(r#"{"number": 12, "html_url": "https://github.com/o/r/pull/12"}"#)
         .create();
+    // Labels are set apart (`set_labels`), so a failure there keeps the number.
     let labels = server
-        .mock("PUT", "/repos/o/r/issues/12/labels")
-        .match_body(Matcher::Json(
-            json!({ "labels": ["bug", "good first issue"] }),
-        ))
-        .with_body("[]")
+        .mock("POST", "/repos/o/r/issues/12/labels")
+        .with_status(422)
+        .with_body(r#"{"message":"Validation Failed"}"#)
+        .expect(0)
         .create();
+    let put = server.mock("PUT", Matcher::Any).expect(0).create();
     let n = client(&server)
         .create_pull(
             "t",
@@ -47,6 +48,56 @@ fn create_pull_then_sets_its_labels() {
     assert_eq!(n, 12);
     create.assert();
     labels.assert();
+    put.assert();
+}
+
+#[test]
+fn labels_are_added_and_removed_without_replacing_the_others() {
+    let mut server = mockito::Server::new();
+    let add = server
+        .mock("POST", "/repos/o/r/issues/7/labels")
+        .match_header("authorization", "Bearer t")
+        .match_body(Matcher::Json(json!({ "labels": ["c"] })))
+        .with_body("[]")
+        .create();
+    let remove_a = server
+        .mock("DELETE", "/repos/o/r/issues/7/labels/a")
+        .with_body("[]")
+        .create();
+    let remove_spaced = server
+        .mock("DELETE", "/repos/o/r/issues/7/labels/good%20first%20issue")
+        .with_body("[]")
+        .create();
+    let kept = server
+        .mock("DELETE", "/repos/o/r/issues/7/labels/b")
+        .expect(0)
+        .create();
+    let put = server.mock("PUT", Matcher::Any).expect(0).create();
+    let old = ["a".to_string(), "b".into(), "good first issue".into()];
+    let new = ["b".to_string(), "c".into()];
+    client(&server)
+        .set_labels("t", "o", "r", 7, &old, &new)
+        .unwrap();
+    add.assert();
+    remove_a.assert();
+    remove_spaced.assert();
+    kept.assert();
+    put.assert();
+}
+
+#[test]
+fn removing_labels_only_posts_nothing() {
+    let mut server = mockito::Server::new();
+    let add = server.mock("POST", Matcher::Any).expect(0).create();
+    let remove = server
+        .mock("DELETE", "/repos/o/r/issues/7/labels/a")
+        .with_body("[]")
+        .create();
+    client(&server)
+        .set_labels("t", "o", "r", 7, &["a".to_string()], &[])
+        .unwrap();
+    add.assert();
+    remove.assert();
 }
 
 #[test]

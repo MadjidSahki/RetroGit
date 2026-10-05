@@ -2,7 +2,8 @@
 #![recursion_limit = "256"]
 
 use github::{
-    Client, DiffSide, LineComment, ReviewState, diff_lists, suggestion_block, suggestions,
+    Client, DiffSide, GithubError, LineComment, ReviewState, diff_lists, suggestion_block,
+    suggestions,
 };
 use mockito::Matcher;
 use serde_json::json;
@@ -77,6 +78,72 @@ fn reviewers_and_assignees_are_added_and_removed() {
     add_a.assert();
     // Nothing to change: no request at all.
     c.set_assignees("t", "o", "r", 7, &[], &[]).unwrap();
+}
+
+#[test]
+fn a_removal_failing_after_an_addition_says_which_half() {
+    let mut server = mockito::Server::new();
+    for (path, key) in [
+        ("/repos/o/r/pulls/7/requested_reviewers", "reviewers"),
+        ("/repos/o/r/issues/7/assignees", "assignees"),
+    ] {
+        server
+            .mock("POST", path)
+            .match_body(Matcher::Json(json!({ key: ["carol"] })))
+            .with_status(201)
+            .with_body("{}")
+            .create();
+        server
+            .mock("POST", path)
+            .match_body(Matcher::Json(json!({ key: ["zed"] })))
+            .with_status(422)
+            .with_body(r#"{"message":"Validation Failed"}"#)
+            .create();
+        server
+            .mock("DELETE", path)
+            .with_status(422)
+            .with_body(r#"{"message":"Validation Failed"}"#)
+            .create();
+    }
+    let c = client(&server);
+    let both = [
+        c.set_reviewers(
+            "t",
+            "o",
+            "r",
+            7,
+            &["carol".into()],
+            &["ada".into(), "dan".into()],
+        ),
+        c.set_assignees(
+            "t",
+            "o",
+            "r",
+            7,
+            &["carol".into()],
+            &["ada".into(), "dan".into()],
+        ),
+    ];
+    for r in both {
+        match r {
+            Err(GithubError::PeopleHalf { not_removed, .. }) => {
+                assert_eq!(not_removed, ["ada", "dan"]);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    // The addition fails: nothing done, the usual error.
+    let first = c.set_reviewers("t", "o", "r", 7, &["zed".into()], &["ada".into()]);
+    assert!(
+        matches!(first, Err(GithubError::Rejected { status: 422, .. })),
+        "{first:?}"
+    );
+    // Only a removal, refused: nothing done either.
+    let only = c.set_assignees("t", "o", "r", 7, &[], &["ada".into()]);
+    assert!(
+        matches!(only, Err(GithubError::Rejected { status: 422, .. })),
+        "{only:?}"
+    );
 }
 
 #[test]
@@ -163,9 +230,12 @@ fn the_detail_gives_reviewers_assignees_and_ranges() {
                 "id": "PR_9", "viewerCanUpdate": true,
                 "reviewRequests": { "nodes": [
                     { "requestedReviewer": { "__typename": "User", "login": "bob" } },
-                    { "requestedReviewer": { "__typename": "Team", "slug": "core" } }
+                    { "requestedReviewer": { "__typename": "Team", "slug": "core", "organization": { "login": "o" } } }
                 ] },
-                "latestReviews": { "nodes": [ { "author": { "login": "carol" }, "state": "APPROVED" } ] },
+                "latestReviews": { "nodes": [
+                    { "author": { "login": "carol" }, "state": "APPROVED" },
+                    { "author": { "login": "ada" }, "state": "COMMENTED" }
+                ] },
                 "assignees": { "nodes": [ { "login": "ada" } ] },
                 "number": 9, "title": "T", "url": "u", "isDraft": true, "state": "OPEN",
                 "updatedAt": "", "body": "", "author": { "login": "ada" },
@@ -184,11 +254,33 @@ fn the_detail_gives_reviewers_assignees_and_ranges() {
             }
         }
     } });
+    let mut triage = body.clone();
+    triage["data"]["repository"]["viewerPermission"] = json!("TRIAGE");
+    let mut read = body.clone();
+    read["data"]["repository"]["viewerPermission"] = json!("READ");
     server
         .mock("POST", "/graphql")
         .with_body(body.to_string())
         .create();
     let d = client(&server).pull_detail("t", "o", "r", 9).unwrap();
+    assert!(
+        d.viewer_can_write && d.viewer_can_triage,
+        "write includes triage"
+    );
+    server.reset();
+    server
+        .mock("POST", "/graphql")
+        .with_body(triage.to_string())
+        .create();
+    let t = client(&server).pull_detail("t", "o", "r", 9).unwrap();
+    assert!(t.viewer_can_triage && !t.viewer_can_write, "triage only");
+    server.reset();
+    server
+        .mock("POST", "/graphql")
+        .with_body(read.to_string())
+        .create();
+    let r = client(&server).pull_detail("t", "o", "r", 9).unwrap();
+    assert!(!r.viewer_can_triage && !r.viewer_can_write, "read only");
     assert_eq!(d.id, "PR_9");
     assert!(d.viewer_can_update);
     let reviewers: Vec<(String, Option<ReviewState>)> = d
@@ -202,8 +294,9 @@ fn the_detail_gives_reviewers_assignees_and_ranges() {
             ("bob".to_string(), None),
             ("carol".to_string(), Some(ReviewState::Approved))
         ],
-        "requested people, then those who reviewed (teams left out)"
+        "requested people, then those who reviewed, not the author (ada)"
     );
+    assert_eq!(d.team_reviewers, ["o/core"]);
     assert_eq!(d.assignees, ["ada"]);
     assert_eq!(d.threads[0].start_line, Some(12));
     assert_eq!(d.threads[0].start_side, Some(DiffSide::Right));

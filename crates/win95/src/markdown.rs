@@ -2,6 +2,8 @@
 //! lists (task boxes too), code blocks, quotes, rules, and inline emphasis, code and links.
 //! HTML is not interpreted (comments are dropped, other tags shown as text).
 
+use std::sync::Arc;
+
 use egui::{Color32, RichText, Ui};
 
 use crate::theme;
@@ -145,13 +147,55 @@ pub fn markdown_blocks(text: &str) -> Vec<Block> {
     blocks
 }
 
-/// Parse inline markup of one block.
+/// Only these links open: web pages and mail. Anything else (`file:`, `javascript:`,
+/// `retrogit://`, relative paths) is shown as text.
+pub fn safe_link(url: &str) -> bool {
+    ["https://", "http://", "mailto:"].iter().any(|p| {
+        url.get(..p.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(p))
+    })
+}
+
+/// For each index `j`, the first index `>= j` where `pat` starts in `chars` (if any).
+/// Built once per block so an unmatched marker never rescans the rest of the text.
+fn next_index(chars: &[char], pat: &[char]) -> Vec<Option<usize>> {
+    let mut next = vec![None; chars.len() + 1];
+    for j in (0..chars.len()).rev() {
+        next[j] = if chars[j..].starts_with(pat) {
+            Some(j)
+        } else {
+            next[j + 1]
+        };
+    }
+    next
+}
+
+/// Whether `chars` holds `prefix` at `i`, without allocating.
+fn starts_at(chars: &[char], i: usize, prefix: &str) -> bool {
+    prefix
+        .chars()
+        .enumerate()
+        .all(|(k, c)| chars.get(i + k) == Some(&c))
+}
+
+/// Parse inline markup of one block (linear in the length of `text`).
 pub fn inlines(text: &str) -> Vec<Inline> {
     let chars: Vec<char> = text.chars().collect();
     let mut out: Vec<Inline> = Vec::new();
     let mut plain = String::new();
+    let patterns: [&[char]; 7] = [
+        &['`'],
+        &['*'],
+        &['_'],
+        &['*', '*'],
+        &['_', '_'],
+        &[']', '('],
+        &[')'],
+    ];
+    let tables: Vec<Vec<Option<usize>>> = patterns.iter().map(|p| next_index(&chars, p)).collect();
     let find = |from: usize, pat: &[char]| -> Option<usize> {
-        (from..chars.len().saturating_sub(pat.len() - 1)).find(|&j| chars[j..j + pat.len()] == *pat)
+        let k = patterns.iter().position(|p| *p == pat)?;
+        tables[k].get(from).copied().flatten()
     };
     let collect = |a: usize, b: usize| chars[a..b].iter().collect::<String>();
     let mut i = 0;
@@ -199,26 +243,26 @@ pub fn inlines(text: &str) -> Vec<Inline> {
                     end + 1,
                 ));
             }
-        } else if c == 'h' && (i == 0 || chars[i - 1].is_whitespace() || chars[i - 1] == '(') {
-            let rest = collect(i, chars.len());
-            if rest.starts_with("https://") || rest.starts_with("http://") {
-                let len = rest
-                    .chars()
-                    .take_while(|c| !c.is_whitespace() && *c != ')')
-                    .count();
-                let mut url = collect(i, i + len);
-                while url.ends_with(['.', ',', ';', ':']) {
-                    url.pop();
-                }
-                let n = url.chars().count();
-                token = Some((
-                    Inline::Link {
-                        text: url.clone(),
-                        url,
-                    },
-                    i + n,
-                ));
+        } else if c == 'h'
+            && (i == 0 || chars[i - 1].is_whitespace() || chars[i - 1] == '(')
+            && (starts_at(&chars, i, "https://") || starts_at(&chars, i, "http://"))
+        {
+            let len = chars[i..]
+                .iter()
+                .take_while(|c| !c.is_whitespace() && **c != ')')
+                .count();
+            let mut url = collect(i, i + len);
+            while url.ends_with(['.', ',', ';', ':']) {
+                url.pop();
             }
+            let n = url.chars().count();
+            token = Some((
+                Inline::Link {
+                    text: url.clone(),
+                    url,
+                },
+                i + n,
+            ));
         }
         match token {
             Some((t, next)) => {
@@ -264,35 +308,61 @@ fn show_inlines(ui: &mut Ui, items: &[Inline], size: f32, color: Color32) {
                             .color(pal.window_text),
                     );
                 }
-                Inline::Link { text, url } => {
+                Inline::Link { text, url } if safe_link(url) => {
                     ui.hyperlink_to(RichText::new(text).size(size), url);
+                }
+                Inline::Link { text, url } => {
+                    ui.label(RichText::new(text).size(size).color(color))
+                        .on_hover_text(url);
                 }
             }
         }
     });
 }
 
-/// Draw Markdown `text`. Links open in the browser.
+thread_local! {
+    /// Number of texts parsed by `markdown_view` on this thread (tests check the cache).
+    #[doc(hidden)]
+    pub static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[derive(Default)]
+struct Parser;
+
+impl egui::cache::ComputerMut<&str, Arc<Vec<Block>>> for Parser {
+    fn compute(&mut self, text: &str) -> Arc<Vec<Block>> {
+        PARSES.with(|p| p.set(p.get() + 1));
+        Arc::new(markdown_blocks(text))
+    }
+}
+
+type ParseCache = egui::cache::FrameCache<Arc<Vec<Block>>, Parser>;
+
+/// Draw Markdown `text`, parsed once while it stays on screen. Web and mail links open
+/// in the browser; other links are shown as text with the address on hover.
 pub fn markdown_view(ui: &mut Ui, text: &str) {
     let pal = theme::palette(ui.ctx());
     let base = theme::FONT_SIZE;
-    for block in markdown_blocks(text) {
+    let blocks = ui
+        .ctx()
+        .memory_mut(|m| m.caches.cache::<ParseCache>().get(text).clone());
+    for block in blocks.iter() {
         match block {
             Block::Heading(level, items) => {
-                let size = base + (4.0 - f32::from(level.min(4))).max(0.0) * 2.0;
+                let size = base + (4.0 - f32::from((*level).min(4))).max(0.0) * 2.0;
                 ui.add_space(4.0);
-                show_inlines(ui, &items, size, pal.link);
+                show_inlines(ui, items, size, pal.link);
             }
-            Block::Paragraph(items) => show_inlines(ui, &items, base, pal.window_text),
+            Block::Paragraph(items) => show_inlines(ui, items, base, pal.window_text),
             Block::ListItem {
                 depth,
                 marker,
                 content,
             } => {
                 ui.horizontal(|ui| {
-                    ui.add_space(8.0 + depth as f32 * 16.0);
-                    ui.label(RichText::new(marker).color(pal.window_text));
-                    show_inlines(ui, &content, base, pal.window_text);
+                    ui.add_space(8.0 + *depth as f32 * 16.0);
+                    ui.label(RichText::new(marker.as_str()).color(pal.window_text));
+                    show_inlines(ui, content, base, pal.window_text);
                 });
             }
             Block::Code(code) => {
@@ -302,7 +372,7 @@ pub fn markdown_view(ui: &mut Ui, text: &str) {
                     .show(ui, |ui| {
                         ui.add(
                             egui::Label::new(
-                                RichText::new(code)
+                                RichText::new(code.as_str())
                                     .font(egui::FontId::monospace(base))
                                     .color(pal.window_text),
                             )
@@ -313,7 +383,7 @@ pub fn markdown_view(ui: &mut Ui, text: &str) {
             Block::Quote(items) => {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("|").color(pal.gray_text));
-                    show_inlines(ui, &items, base, pal.gray_text);
+                    show_inlines(ui, items, base, pal.gray_text);
                 });
             }
             Block::Rule => {

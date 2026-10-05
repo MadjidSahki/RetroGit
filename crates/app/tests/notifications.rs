@@ -130,6 +130,7 @@ fn signing_in_as_someone_else_starts_a_new_reference() {
         url: "u".into(),
         state: github::PrState::Open,
         merged_by: None,
+        closed_by: None,
         head: "h".into(),
         checks,
         failed_checks: 0,
@@ -318,8 +319,33 @@ fn notification_links_survive_any_repository_name() {
         "retrogit://pull?repo=o/r",
         "retrogit://pull?repo=o/r&number=x",
         "retrogit://other?number=1",
+        "retrogit://pull?repo=a%2Fb%2Fc&number=1",
+        "retrogit://pull?repo=%2Fr&number=1",
+        "retrogit://pull?repo=o%2F&number=1",
+        "retrogit://pull?repo=o%2Fr%3Fx&number=1",
+        "retrogit://pull?repo=..%2Fx&number=1",
+        "retrogit://pull?repo=o%2F..&number=1",
+        "retrogit://pull?repo=o%2F.&number=1",
+        "retrogit://pull?repo=o.x%2Fr&number=1",
+        "retrogit://pull?repo=o%2Fr%20x&number=1",
+        "retrogit://pull?repo=o%2Fr&number=0",
     ] {
         assert_eq!(parse_pull_link(bad), None, "{bad}");
+    }
+    let long = |n: usize| "x".repeat(n);
+    for (repo, ok) in [
+        ("my-org/my.repo_1".to_string(), true),
+        (format!("{}/r", long(39)), true),
+        (format!("{}/r", long(40)), false),
+        (format!("o/{}", long(100)), true),
+        (format!("o/{}", long(101)), false),
+    ] {
+        let url = pull_link(&PullLink {
+            repo: repo.clone(),
+            number: 1,
+            account: "a".into(),
+        });
+        assert_eq!(parse_pull_link(&url).is_some(), ok, "{repo}");
     }
     let e = event("o/r", 7);
     assert_eq!(

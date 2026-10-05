@@ -93,8 +93,15 @@ pub fn init() {
     center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     // The center keeps a weak reference: the delegate lives as long as the app.
     std::mem::forget(delegate);
-    let done = RcBlock::new(|granted: Bool, _err: *mut NSError| {
-        log::info!("notification permission granted: {}", granted.as_bool());
+    let done = RcBlock::new(|granted: Bool, err: *mut NSError| {
+        if let Some(e) = error_text(err) {
+            log::warn!("notification permission request failed: {e}");
+        }
+        if granted.as_bool() {
+            log::info!("notification permission granted");
+        } else {
+            log::warn!("notification permission not granted: notifications will not show");
+        }
     });
     center.requestAuthorizationWithOptions_completionHandler(
         UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
@@ -143,9 +150,21 @@ pub fn send(title: &str, body: &str, link: Option<&str>) -> Result<(), String> {
         std::process::id() as u64 ^ now_nanos()
     ));
     let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&id, &content, None);
+    let done = RcBlock::new(|err: *mut NSError| {
+        if let Some(e) = error_text(err) {
+            log::warn!("notification not delivered: {e}");
+        }
+    });
     UNUserNotificationCenter::currentNotificationCenter()
-        .addNotificationRequest_withCompletionHandler(&request, None);
+        .addNotificationRequest_withCompletionHandler(&request, Some(&done));
     Ok(())
+}
+
+/// Text of the error a completion handler received (`None`: no error).
+fn error_text(err: *mut NSError) -> Option<String> {
+    // SAFETY: the frameworks pass either null or a valid NSError, alive during the call.
+    let err = unsafe { err.as_ref() }?;
+    Some(err.localizedDescription().to_string())
 }
 
 fn now_nanos() -> u64 {

@@ -44,10 +44,15 @@ pub enum PullDialog {
         publish: bool,
     },
     Labels {
+        /// Labels when the window opened.
+        old: Vec<String>,
         checked: Vec<String>,
     },
     /// New line comment, queued in the pending review.
     LineComment {
+        /// Pull request and head commit when the window opened (the selection may change).
+        number: u64,
+        head_sha: String,
         path: String,
         line: u32,
         side: github::DiffSide,
@@ -58,11 +63,15 @@ pub enum PullDialog {
         body: String,
     },
     Reply {
+        /// Pull request when the window opened.
+        number: u64,
         comment_id: u64,
         body: String,
     },
     /// Title and description of the pull request.
     EditPull {
+        /// The pull request it was opened on (the selection may change meanwhile).
+        number: u64,
         title: String,
         body: String,
     },
@@ -80,6 +89,8 @@ pub struct PullsView {
     pub slug: Option<Slug>,
     pub filter: PrFilter,
     pub list: Vec<PrSummary>,
+    /// Pull requests matching the filter (GitHub sends at most 50 of them).
+    pub total: u32,
     pub loading: bool,
     /// The list must be (re)loaded when the tab is shown.
     pub stale: bool,
@@ -334,9 +345,15 @@ impl AppState {
     pub(super) fn apply_pulls(&mut self, event: Event) {
         let p = &mut self.pulls;
         match event {
-            Event::PullsLoaded { slug, filter, list } => {
+            Event::PullsLoaded {
+                slug,
+                filter,
+                list,
+                total,
+            } => {
                 if p.slug.as_ref() == Some(&slug) && p.filter == filter {
                     let old = std::mem::replace(&mut p.list, list);
+                    p.total = total;
                     p.loading = false;
                     if let Some(n) = p.created {
                         if p.list.iter().any(|r| r.number == n) {
@@ -426,7 +443,11 @@ impl AppState {
                     p.assignable = users;
                 }
             }
-            Event::PullActionDone { number, note } => {
+            Event::PullActionDone { slug, number, note } => {
+                // Another repository's answer: not this view's.
+                if p.slug.as_ref() != Some(&slug) {
+                    return;
+                }
                 p.busy = false;
                 p.note = Some(note);
                 p.stale = true;
@@ -441,16 +462,22 @@ impl AppState {
                     }
                     p.dialog = None;
                 }
+                // A comment window keeps its pull request while another one is shown.
+                if matches!(p.dialog,
+                    Some(PullDialog::LineComment { number: n, .. } | PullDialog::Reply { number: n, .. })
+                        if n == number)
+                {
+                    p.dialog = None;
+                }
             }
             _ => {}
         }
     }
 
-    /// Queue a line comment in the pending review (from the line comment dialog).
-    pub fn queue_line_comment(&mut self, comment: LineComment) {
-        if let Some(n) = self.pulls.selected {
-            self.pulls.pending.entry(n).or_default().push(comment);
-        }
+    /// Queue a line comment in the pending review of `number` (from the line comment
+    /// dialog, which keeps the pull request it was opened on).
+    pub fn queue_line_comment(&mut self, number: u64, comment: LineComment) {
+        self.pulls.pending.entry(number).or_default().push(comment);
     }
 }
 

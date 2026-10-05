@@ -137,14 +137,20 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
             &slug,
             (title, body, base, draft, labels, publish),
         ),
-        PullDialog::Labels { checked } => labels(egui_ctx, cx, &slug, checked),
-        PullDialog::EditPull { title, body } => edit_pull(egui_ctx, cx, &slug, title, body),
+        PullDialog::Labels { old, checked } => labels(egui_ctx, cx, &slug, old, checked),
+        PullDialog::EditPull {
+            number,
+            title,
+            body,
+        } => edit_pull(egui_ctx, cx, &slug, number, title, body),
         PullDialog::People {
             kind,
             checked,
             filter,
         } => people(egui_ctx, cx, &slug, kind, checked, filter),
         PullDialog::LineComment {
+            number: opened_on,
+            head_sha: opened_head,
             path,
             line,
             side,
@@ -154,13 +160,15 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
         } => {
             let mut body = body;
             let busy = cx.state.pulls.busy;
-            let head = cx.state.pulls.detail.as_ref().map(|d| d.head_sha.clone());
-            let number = cx.state.pulls.selected.unwrap_or_default();
-            // Like github.com: post it now, or keep it for the review being written.
-            let choices: &[&str] = if busy {
+            // Like github.com: post it now (on the commit shown when the window opened), or
+            // keep it for the review being written.
+            let choices: &[(&str, bool)] = if busy {
                 &[]
             } else {
-                &[s::ADD_SINGLE_COMMENT, s::ADD_TO_REVIEW]
+                &[
+                    (s::ADD_SINGLE_COMMENT, !opened_head.is_empty()),
+                    (s::ADD_TO_REVIEW, true),
+                ]
             };
             let comment = |body: String| LineComment {
                 path: path.clone(),
@@ -174,6 +182,8 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                 None => line.to_string(),
             };
             let keep = |body: String| PullDialog::LineComment {
+                number: opened_on,
+                head_sha: opened_head.clone(),
                 path: path.clone(),
                 line,
                 side,
@@ -188,26 +198,29 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                 &mut body,
                 choices,
             ) {
-                Some(Some(0)) if head.is_some() => Outcome::Send(
+                Some(Some(0)) => Outcome::Send(
                     Command::AddLineComment {
                         slug: slug.clone(),
-                        number,
-                        commit_id: head.unwrap_or_default(),
+                        number: opened_on,
+                        commit_id: opened_head.clone(),
                         comment: comment(body.clone()),
                     },
                     keep(body),
                 ),
                 Some(Some(_)) => {
-                    cx.state.queue_line_comment(comment(body));
+                    cx.state.queue_line_comment(opened_on, comment(body));
                     Outcome::Close
                 }
                 Some(None) => Outcome::Close,
                 None => Outcome::Keep(keep(body)),
             }
         }
-        PullDialog::Reply { comment_id, body } => {
+        PullDialog::Reply {
+            number: opened_on,
+            comment_id,
+            body,
+        } => {
             let mut body = body;
-            let number = cx.state.pulls.selected.unwrap_or_default();
             let thread = cx
                 .state
                 .pulls
@@ -226,21 +239,35 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
                         .join("\n\n")
                 })
                 .unwrap_or_default();
-            match text_dialog(egui_ctx, s::REPLY_TITLE, &thread, &mut body, &[s::SEND]) {
+            match text_dialog(
+                egui_ctx,
+                s::REPLY_TITLE,
+                &thread,
+                &mut body,
+                &[(s::SEND, true)],
+            ) {
                 Some(Some(_)) => {
                     cx.state.pulls.busy = true;
                     Outcome::Send(
                         Command::ReplyToThread {
                             slug: slug.clone(),
-                            number,
+                            number: opened_on,
                             comment_id,
                             body: body.clone(),
                         },
-                        PullDialog::Reply { comment_id, body },
+                        PullDialog::Reply {
+                            number: opened_on,
+                            comment_id,
+                            body,
+                        },
                     )
                 }
                 Some(None) => Outcome::Close,
-                None => Outcome::Keep(PullDialog::Reply { comment_id, body }),
+                None => Outcome::Keep(PullDialog::Reply {
+                    number: opened_on,
+                    comment_id,
+                    body,
+                }),
             }
         }
     };
@@ -255,14 +282,15 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
     }
 }
 
-/// Context text, a text box, one button per choice (enabled with some text) and Cancel.
-/// `Some(Some(i))` = choice `i`, `Some(None)` = cancelled, `None` = still open.
+/// Context text, a text box, one button per choice (enabled with some text, if its flag
+/// allows) and Cancel. `Some(Some(i))` = choice `i`, `Some(None)` = cancelled, `None` = still
+/// open.
 fn text_dialog(
     egui_ctx: &egui::Context,
     title: &str,
     context: &str,
     body: &mut String,
-    choices: &[&str],
+    choices: &[(&str, bool)],
 ) -> Option<Option<usize>> {
     let mut result = None;
     let r = Dialog::new(("pull_text", title), title)
@@ -277,12 +305,12 @@ fn text_dialog(
             text_area(ui, body, 460.0, 5);
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                for (i, choice) in choices.iter().enumerate() {
+                for (i, (choice, enabled)) in choices.iter().enumerate() {
                     if ui
                         .add(
                             Button95::new(*choice)
                                 .min_size(egui::vec2(140.0, 23.0))
-                                .enabled(!body.trim().is_empty()),
+                                .enabled(*enabled && !body.trim().is_empty()),
                         )
                         .clicked()
                     {
@@ -602,12 +630,10 @@ fn edit_pull(
     egui_ctx: &egui::Context,
     cx: &mut Ctx<'_>,
     slug: &Slug,
+    number: u64,
     mut title: String,
     mut body: String,
 ) -> Outcome {
-    let Some(number) = cx.state.pulls.selected else {
-        return Outcome::Close;
-    };
     let busy = cx.state.pulls.busy;
     let (mut save, mut cancel) = (false, false);
     let r = Dialog::new("pull_edit", s::EDIT_PULL_TITLE)
@@ -630,6 +656,7 @@ fn edit_pull(
         return Outcome::Close;
     }
     let keep = PullDialog::EditPull {
+        number,
         title: title.clone(),
         body: body.clone(),
     };
@@ -754,6 +781,7 @@ fn labels(
     egui_ctx: &egui::Context,
     cx: &mut Ctx<'_>,
     slug: &Slug,
+    old: Vec<String>,
     mut checked: Vec<String>,
 ) -> Outcome {
     let Some(d) = cx.state.pulls.detail.clone() else {
@@ -811,11 +839,12 @@ fn labels(
         let cmd = Command::SetLabels {
             slug: slug.clone(),
             number: d.summary.number,
+            old: old.clone(),
             labels: checked.clone(),
         };
-        return Outcome::Send(cmd, PullDialog::Labels { checked });
+        return Outcome::Send(cmd, PullDialog::Labels { old, checked });
     }
-    Outcome::Keep(PullDialog::Labels { checked })
+    Outcome::Keep(PullDialog::Labels { old, checked })
 }
 
 #[cfg(test)]

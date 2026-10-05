@@ -115,7 +115,7 @@ fn list_and_detail_are_loaded_for_the_repository() {
         .match_body(Matcher::PartialJson(json!({
             "variables": { "q": "repo:o/r is:pr is:open sort:updated-desc" }
         })))
-        .with_body(r#"{"data":{"search":{"nodes":[{"number":7,"title":"Fix"}]}}}"#)
+        .with_body(r#"{"data":{"search":{"issueCount":41,"nodes":[{"number":7,"title":"Fix"}]}}}"#)
         .create();
     w.send(Command::LoadPulls {
         slug: slug(),
@@ -124,7 +124,7 @@ fn list_and_detail_are_loaded_for_the_repository() {
     let evs = until(&w, |e| matches!(e, Event::PullsLoaded { .. }));
     assert!(matches!(
         evs.last(),
-        Some(Event::PullsLoaded { slug: s, filter: PrFilter::Open, list }) if *s == slug() && list[0].number == 7
+        Some(Event::PullsLoaded { slug: s, filter: PrFilter::Open, list, total: 41 }) if *s == slug() && list[0].number == 7
     ));
     let (_d, _f) = mock_detail(&mut server, 7);
     w.send(Command::LoadPull {
@@ -272,6 +272,31 @@ fn without_gh_the_restriction_is_explained_with_a_link() {
 }
 
 #[test]
+fn a_gh_too_old_to_choose_the_account_is_asked_to_be_updated() {
+    use retrogit::strings as s;
+    for body in [
+        r#"{"errors":[{"type":"FORBIDDEN","message":"the `o` organization has enabled OAuth App access restrictions"}]}"#,
+        r#"{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","path":["repository"],"message":"Could not resolve to a Repository with the name 'o/r'."}]}"#,
+    ] {
+        let mut server = mockito::Server::new();
+        let tokens = TokenProvider::from_gh(Arc::new(|_: &str| github::GhToken::TooOld));
+        let w = signed_in(&mut server, tokens);
+        server.mock("POST", "/graphql").with_body(body).create();
+        w.send(Command::LoadPulls {
+            slug: slug(),
+            filter: PrFilter::Open,
+        });
+        let evs = until(&w, |e| matches!(e, Event::Error { .. }));
+        let Some(Event::Error { error, .. }) = evs.last() else {
+            unreachable!()
+        };
+        assert!(error.message.contains(s::GH_TOO_OLD), "{}", error.message);
+        assert!(!error.message.contains("Install"), "{}", error.message);
+        assert!(error.link.is_some());
+    }
+}
+
+#[test]
 fn a_review_is_sent_then_the_pull_request_reloaded() {
     let mut server = mockito::Server::new();
     let w = signed_in(&mut server, TokenProvider::without_gh());
@@ -300,6 +325,37 @@ fn a_review_is_sent_then_the_pull_request_reloaded() {
             .any(|e| matches!(e, Event::PullActionDone { number: 7, .. }))
     );
     assert!(evs.iter().any(|e| matches!(e, Event::PullLoaded { .. })));
+}
+
+#[test]
+fn labels_are_changed_from_what_the_window_showed() {
+    let mut server = mockito::Server::new();
+    let w = signed_in(&mut server, TokenProvider::without_gh());
+    let add = server
+        .mock("POST", "/repos/o/r/issues/7/labels")
+        .match_body(Matcher::Json(json!({ "labels": ["c"] })))
+        .with_body("[]")
+        .create();
+    let remove = server
+        .mock("DELETE", "/repos/o/r/issues/7/labels/a")
+        .with_body("[]")
+        .create();
+    let put = server.mock("PUT", Matcher::Any).expect(0).create();
+    let (_d, _f) = mock_detail(&mut server, 7);
+    w.send(Command::SetLabels {
+        slug: slug(),
+        number: 7,
+        old: vec!["a".into(), "b".into()],
+        labels: vec!["b".into(), "c".into()],
+    });
+    let evs = until(&w, |e| matches!(e, Event::PullFilesLoaded { .. }));
+    add.assert();
+    remove.assert();
+    put.assert();
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, Event::PullActionDone { number: 7, .. }))
+    );
 }
 
 #[test]
@@ -463,6 +519,52 @@ fn creating_an_existing_pull_request_opens_it() {
         evs.iter()
             .any(|e| matches!(e, Event::Error { error, .. } if error.severity == Severity::Info))
     );
+}
+
+#[test]
+fn a_created_pull_request_opens_even_when_its_labels_fail() {
+    let mut server = mockito::Server::new();
+    let w = signed_in(&mut server, TokenProvider::without_gh());
+    server
+        .mock("POST", "/repos/o/r/pulls")
+        .with_status(201)
+        .with_body(r#"{"number":12}"#)
+        .create();
+    let labels = server
+        .mock("POST", "/repos/o/r/issues/12/labels")
+        .match_body(Matcher::Json(json!({ "labels": ["bug"] })))
+        .with_status(422)
+        .with_body(r#"{"message":"Label does not exist"}"#)
+        .create();
+    let (_d, _f) = mock_detail(&mut server, 12);
+    w.send(Command::CreatePull {
+        slug: slug(),
+        pull: NewPull {
+            title: "Fix".into(),
+            body: String::new(),
+            head: "feat/x".into(),
+            base: "main".into(),
+            draft: false,
+            labels: vec!["bug".into()],
+        },
+        publish: false,
+    });
+    let evs = until(&w, |e| matches!(e, Event::PullFilesLoaded { .. }));
+    labels.assert();
+    let created = evs
+        .iter()
+        .position(|e| matches!(e, Event::PullCreated { number: 12, .. }))
+        .unwrap();
+    let warned = evs
+        .iter()
+        .position(|e| {
+            matches!(e, Event::Error { error, .. }
+                if error.severity == Severity::Warning
+                    && error.message == retrogit::strings::PULL_LABELS_FAILED
+                    && error.detail.as_deref().is_some_and(|d| d.contains("Label does not exist")))
+        })
+        .unwrap();
+    assert!(created < warned, "{evs:?}");
 }
 
 #[test]
@@ -842,6 +944,60 @@ mod more {
         patch.assert();
         reviewers.assert();
         ready.assert();
+    }
+
+    #[test]
+    fn a_half_done_people_change_says_which_half() {
+        let mut server = mockito::Server::new();
+        let w = signed_in(&mut server, TokenProvider::without_gh());
+        let add = server
+            .mock("POST", "/repos/o/r/issues/7/assignees")
+            .match_body(Matcher::Json(json!({ "assignees": ["carol"] })))
+            .with_status(201)
+            .with_body("{}")
+            .create();
+        let remove = server
+            .mock("DELETE", "/repos/o/r/issues/7/assignees")
+            .with_status(422)
+            .with_body(r#"{"message":"Validation Failed"}"#)
+            .create();
+        let (_d, _f) = mock_detail(&mut server, 7);
+        w.send(Command::SetPeople {
+            slug: slug(),
+            number: 7,
+            kind: retrogit::state::PeopleKind::Assignees,
+            add: vec!["carol".into()],
+            remove: vec!["bob".into(), "dan".into()],
+        });
+        let evs = until(&w, |e| matches!(e, Event::PullFilesLoaded { .. }));
+        add.assert();
+        remove.assert();
+        let message = evs.iter().find_map(|e| match e {
+            Event::Error {
+                during: Op::PullAction,
+                error,
+            } => Some(error.message.clone()),
+            _ => None,
+        });
+        assert_eq!(
+            message.as_deref(),
+            Some("Assignees added, but @bob, @dan could not be removed.")
+        );
+        assert_eq!(
+            message.unwrap(),
+            retrogit::strings::people_partly(
+                retrogit::strings::PEOPLE_ASSIGNEES,
+                &["bob".to_string(), "dan".to_string()]
+            )
+        );
+        assert!(
+            evs.iter().any(|e| matches!(e, Event::PullLoaded { .. })),
+            "reloaded"
+        );
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, Event::PullActionDone { .. }))
+        );
     }
 
     #[test]

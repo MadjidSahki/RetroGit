@@ -289,9 +289,11 @@ pub enum Command {
         merge: Merge,
         delete_branch: Option<String>,
     },
+    /// `old`: the labels the window started from (only the differences are sent).
     SetLabels {
         slug: Slug,
         number: u64,
+        old: Vec<String>,
         labels: Vec<String>,
     },
     /// `head`: the head branch when it lives in this repository (checked out as a normal
@@ -432,6 +434,8 @@ pub enum Event {
         slug: Slug,
         filter: PrFilter,
         list: Vec<PrSummary>,
+        /// Pull requests matching the filter (the list has at most 50).
+        total: u32,
     },
     PullLoaded {
         slug: Slug,
@@ -453,6 +457,8 @@ pub enum Event {
     },
     /// A change went through; the pull request is reloaded. `note` goes to the status bar.
     PullActionDone {
+        /// Repository of the pull request: another one's answer is ignored.
+        slug: Slug,
         number: u64,
         note: String,
     },
@@ -540,8 +546,21 @@ impl AppError {
         }
     }
 
-    fn with_detail(mut self, detail: impl ToString) -> AppError {
+    pub(crate) fn with_detail(mut self, detail: impl ToString) -> AppError {
         self.detail = Some(detail.to_string());
+        self
+    }
+
+    /// The same error, asking to update the GitHub CLI instead of installing it (it is
+    /// too old to choose the account).
+    pub fn for_old_gh(mut self) -> AppError {
+        if self.message == s::ERR_PULLS_NOT_FOUND {
+            self.message = s::ERR_PULLS_NOT_FOUND_GH_OLD.to_string();
+        } else {
+            self.message = self
+                .message
+                .replace(s::ERR_OAUTH_RESTRICTED_HELP, s::ERR_OAUTH_RESTRICTED_GH_OLD);
+        }
         self
     }
 

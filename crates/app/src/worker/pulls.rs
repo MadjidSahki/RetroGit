@@ -15,12 +15,16 @@ impl Worker {
         slug: &Slug,
         call: impl Fn(&Client, &str, &str, &str) -> Result<T, GithubError>,
     ) -> Result<T, GithubError> {
-        let r = self.on_github_once(slug, &call);
+        let mut r = self.on_github_once(slug, &call);
         if matches!(&r, Err(e) if github::repository_missing(e))
             && let Some(failed) = self.last_account.clone()
             && self.replace_account(slug, &failed)
         {
-            return self.on_github_once(slug, &call);
+            r = self.on_github_once(slug, &call);
+        }
+        if r.is_ok() {
+            // GitHub answers again: check the accounts kept offline at startup.
+            self.recheck_unchecked();
         }
         r
     }
@@ -151,14 +155,32 @@ impl Worker {
                 kind,
                 add,
                 remove,
-            } => self.pull_action(&slug, number, s::NOTE_PEOPLE, |c, t, o, r| match kind {
-                crate::state::PeopleKind::Reviewers => {
-                    c.set_reviewers(t, o, r, number, &add, &remove)
-                }
-                crate::state::PeopleKind::Assignees => {
-                    c.set_assignees(t, o, r, number, &add, &remove)
-                }
-            }),
+            } => {
+                let result = self.on_github(&slug, |c, t, o, r| match kind {
+                    crate::state::PeopleKind::Reviewers => {
+                        c.set_reviewers(t, o, r, number, &add, &remove)
+                    }
+                    crate::state::PeopleKind::Assignees => {
+                        c.set_assignees(t, o, r, number, &add, &remove)
+                    }
+                });
+                self.pull_result(&slug, number, s::NOTE_PEOPLE, result, |e| match e {
+                    GithubError::PeopleHalf {
+                        not_removed,
+                        reason,
+                    } => {
+                        let what = match kind {
+                            crate::state::PeopleKind::Reviewers => s::PEOPLE_REVIEWERS,
+                            crate::state::PeopleKind::Assignees => s::PEOPLE_ASSIGNEES,
+                        };
+                        Some(
+                            AppError::new(Severity::Warning, &s::people_partly(what, not_removed))
+                                .with_detail(reason),
+                        )
+                    }
+                    _ => None,
+                });
+            }
             Command::SetDraft {
                 slug,
                 number,
@@ -200,9 +222,10 @@ impl Worker {
             Command::SetLabels {
                 slug,
                 number,
+                old,
                 labels,
             } => self.pull_action(&slug, number, s::NOTE_LABELS, |c, t, o, r| {
-                c.set_labels(t, o, r, number, &labels)
+                c.set_labels(t, o, r, number, &old, &labels)
             }),
             Command::MergePull {
                 slug,
@@ -217,7 +240,12 @@ impl Worker {
 
     fn load_pulls(&mut self, slug: Slug, filter: PrFilter) {
         match self.on_github(&slug, |c, t, o, r| c.list_pulls(t, o, r, filter)) {
-            Ok(list) => self.emit(Event::PullsLoaded { slug, filter, list }),
+            Ok((list, total)) => self.emit(Event::PullsLoaded {
+                slug,
+                filter,
+                list,
+                total,
+            }),
             Err(e) => self.github_failed(Op::Pulls, &e),
         }
     }
@@ -248,12 +276,30 @@ impl Worker {
         note: &str,
         call: impl Fn(&Client, &str, &str, &str) -> Result<(), GithubError>,
     ) {
-        match self.on_github(slug, call) {
+        let result = self.on_github(slug, call);
+        self.pull_result(slug, number, note, result, |_| None);
+    }
+
+    /// Report the `result` of an action on pull request `number` (`special` may word an
+    /// error its own way), then reload it.
+    fn pull_result(
+        &mut self,
+        slug: &Slug,
+        number: u64,
+        note: &str,
+        result: Result<(), GithubError>,
+        special: impl Fn(&GithubError) -> Option<AppError>,
+    ) {
+        match result {
             Ok(()) => self.emit(Event::PullActionDone {
+                slug: slug.clone(),
                 number,
                 note: note.to_string(),
             }),
-            Err(e) => self.github_failed(Op::PullAction, &e),
+            Err(e) => match special(&e) {
+                Some(error) => self.fail(Op::PullAction, error),
+                None => self.github_failed(Op::PullAction, &e),
+            },
         }
         self.load_pull(slug, number);
     }
@@ -308,10 +354,23 @@ impl Worker {
             }
             Err(e) => return self.github_failed(Op::PullAction, &e),
         };
+        // The pull request exists: labels that fail only warn.
+        let labelled = if pull.labels.is_empty() {
+            Ok(())
+        } else {
+            self.on_github(&slug, |c, t, o, r| {
+                c.set_labels(t, o, r, number, &[], &pull.labels)
+            })
+        };
         self.emit(Event::PullCreated {
             slug: slug.clone(),
             number,
         });
+        if let Err(e) = labelled {
+            let mut w = AppError::new(Severity::Warning, s::PULL_LABELS_FAILED);
+            w.detail = Some(e.to_string());
+            self.fail(Op::PullAction, w);
+        }
         self.load_pull(&slug, number);
     }
 
@@ -333,6 +392,7 @@ impl Worker {
                     self.fail(Op::PullAction, w);
                 }
                 self.emit(Event::PullActionDone {
+                    slug: slug.clone(),
                     number,
                     note: s::NOTE_MERGED.to_string(),
                 });
@@ -383,9 +443,10 @@ impl Worker {
                 AppError::new(Severity::Info, s::WHY_PULL_FIRST),
             );
         }
-        let viewer = repo
-            .github_slug()
-            .and_then(|slug| self.account_for(&slug))
+        let slug = repo.github_slug();
+        let viewer = slug
+            .as_ref()
+            .and_then(|slug| self.account_for(slug))
             .map(|a| a.login);
         let message = s::suggestion_commit(author, author_id, viewer.as_deref());
         let result = repo.apply_suggestion(
@@ -399,6 +460,8 @@ impl Worker {
         self.after_ref_change(&repo);
         match result {
             Ok(()) => self.emit(Event::PullActionDone {
+                // Not a github.com remote: no pull request view to answer.
+                slug: slug.unwrap_or_default(),
                 number,
                 note: s::NOTE_SUGGESTION_APPLIED.to_string(),
             }),
@@ -473,7 +536,12 @@ impl Worker {
                     AppError::new(Severity::Warning, &s::pr_branch_behind(branch)),
                 );
             }
+            let slug = repo
+                .as_ref()
+                .and_then(|r| r.github_slug())
+                .unwrap_or_default();
             self.emit(Event::PullActionDone {
+                slug,
                 number,
                 note: format!("{} {branch}", s::NOTE_CHECKED_OUT),
             });

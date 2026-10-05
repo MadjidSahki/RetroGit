@@ -26,6 +26,14 @@ fn the_toast_opens_its_link_and_escapes_text() {
     assert!(xml.contains("<text>it&apos;s done</text>"), "{xml}");
     let plain = toast_xml("t", "b", None);
     assert!(plain.starts_with("<toast>"), "{plain}");
+    let ctl = toast_xml("a\u{1}b\u{1b}c\td", "e\nf\rg\u{0}h\u{fffe}i\u{ffff}", None);
+    assert!(
+        !ctl.chars()
+            .any(|c| (c as u32) < 0x20 || c == '\u{fffe}' || c == '\u{ffff}'),
+        "{ctl:?}"
+    );
+    assert!(ctl.contains("<text>a b c d</text>"), "{ctl:?}");
+    assert!(ctl.contains("<text>e f g h i </text>"), "{ctl:?}");
 }
 
 #[test]

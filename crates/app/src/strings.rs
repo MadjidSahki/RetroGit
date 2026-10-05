@@ -250,6 +250,23 @@ pub const CHECKOUT: &str = "Checkout";
 pub const REVIEW: &str = "Review...";
 pub const MERGE_PULL: &str = "Merge...";
 pub const OPEN_ON_GITHUB: &str = "Open on GitHub";
+pub const TRUNCATED_COMMENTS: &str = "comments";
+pub const TRUNCATED_REVIEWS: &str = "reviews";
+pub const TRUNCATED_THREADS: &str = "review threads";
+
+/// Footer of a pull request list GitHub cut short.
+pub fn pulls_truncated(shown: usize, total: u32) -> String {
+    format!("Showing the {shown} most recently updated of {total}.")
+}
+
+/// A conversation shows only part of `what` (comments, reviews, review threads).
+pub fn detail_truncated(shown: usize, total: u32, what: &str) -> String {
+    format!("Showing {shown} of {total} {what}.")
+}
+
+pub fn commits_truncated(shown: usize, total: u32) -> String {
+    format!("Showing the first {shown} of {total} commits.")
+}
 pub const REVIEW_TITLE: &str = "Review";
 pub const REVIEW_COMMENT: &str = "Comment";
 pub const REVIEW_APPROVE: &str = "Approve";
@@ -312,6 +329,8 @@ pub const INFO_PULL_MOVED: &str =
 pub const ERR_OAUTH_RESTRICTED_HELP: &str = "Install the GitHub CLI and run 'gh auth login': RetroGit then uses it for this organization. Or ask an owner to approve RetroGit (link below).";
 pub const WARN_BRANCH_NOT_DELETED: &str =
     "The pull request was merged, but its branch could not be deleted.";
+pub const PULL_LABELS_FAILED: &str =
+    "The pull request was created, but its labels could not be set.";
 pub const ERR_FORK_GONE: &str =
     "The fork holding this pull request's branch was deleted: it cannot be checked out.";
 pub const NO_PATCH: &str = "Binary file, or a diff too large for GitHub to show.";
@@ -470,6 +489,15 @@ pub const EDIT_ASSIGNEES: &str = "Edit assignees";
 pub const REVIEWERS: &str = "Reviewers:";
 pub const ASSIGNEES: &str = "Assignees:";
 pub const NOBODY: &str = "nobody";
+pub const PEOPLE_REVIEWERS: &str = "Reviewers";
+pub const PEOPLE_ASSIGNEES: &str = "Assignees";
+
+/// People were added, then removing `who` failed: "Assignees added, but @bob could not be
+/// removed."
+pub fn people_partly(what: &str, who: &[String]) -> String {
+    let who: Vec<String> = who.iter().map(|w| format!("@{w}")).collect();
+    format!("{what} added, but {} could not be removed.", who.join(", "))
+}
 pub const READY_FOR_REVIEW: &str = "Ready for review";
 pub const CONVERT_TO_DRAFT: &str = "Convert to draft";
 pub const COMMENT_ON_LINES: &str = "Comment on lines {a}-{b}...";
@@ -478,6 +506,9 @@ pub const APPLY_SUGGESTION: &str = "Apply suggestion";
 pub const LINES_RANGE: &str = "lines {a}-{b}";
 /// A review thread on the old side of the diff, as in "path (old):12".
 pub const OLD_SIDE: &str = "old";
+pub const NEW_SIDE: &str = "new";
+/// A thread starting on one side of the diff and ending on the other: "old 2 - new 5".
+pub const MIXED_RANGE: &str = "{sa} {a} - {sb} {b}";
 pub const WHY_FORK_SUGGESTION: &str =
     "This pull request comes from a fork: apply its suggestions on github.com.";
 pub const WHY_CHECKS_RUNNING: &str = "Waiting for the required checks to finish.";
@@ -713,3 +744,15 @@ pub const ERR_UPDATE_NO_SUM: &str = "no checksum for {name}";
 pub const ERR_UPDATE_CHECKSUM: &str = "checksum mismatch for {name}";
 pub const ERR_UPDATE_SIGNATURE: &str = "the new app's signature does not hold: {why}";
 pub const ERR_UPDATE_VERSION: &str = "the downloaded app is {got}, not {want}";
+pub const GH_TOO_OLD: &str = "Update the GitHub CLI (2.40 or later), then run 'gh auth login'.";
+/// [`ERR_OAUTH_RESTRICTED_HELP`] when the GitHub CLI is too old to choose the account.
+pub const ERR_OAUTH_RESTRICTED_GH_OLD: &str = "Update the GitHub CLI (2.40 or later), then run 'gh auth login'. RetroGit then uses it for this organization. Or ask an owner to approve RetroGit (link below).";
+/// [`ERR_PULLS_NOT_FOUND`] when the GitHub CLI is too old to choose the account.
+pub const ERR_PULLS_NOT_FOUND_GH_OLD: &str = "GitHub does not show this repository to RetroGit. Its organization may restrict third-party applications. Update the GitHub CLI (2.40 or later), then run 'gh auth login'. RetroGit then uses it with the same account. Or ask an owner to approve RetroGit (link below).";
+pub const ERR_NO_ACCOUNT_SEES_REPO: &str = "No signed-in account can see this repository.";
+
+/// Detail of [`ERR_NO_ACCOUNT_SEES_REPO`]: `Tried: @a, @b`.
+pub fn tried_accounts(logins: &[String]) -> String {
+    let at: Vec<String> = logins.iter().map(|l| format!("@{l}")).collect();
+    format!("Tried: {}", at.join(", "))
+}

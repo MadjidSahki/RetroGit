@@ -3,7 +3,7 @@
 
 use github::{
     CheckStatus, ChecksState, Client, DiffSide, GithubError, MergeMethod, Mergeable, PrFilter,
-    PrState, ReviewDecision, ReviewState, TimelineItem, search_query,
+    PrState, ReviewDecision, ReviewState, TimelineItem, pulls_web_url, search_query,
 };
 use mockito::Matcher;
 use serde_json::json;
@@ -51,17 +51,33 @@ fn list_filters_build_the_search_query() {
 }
 
 #[test]
+fn the_web_list_url_carries_the_encoded_filter_query() {
+    assert_eq!(
+        pulls_web_url("o", "r", PrFilter::Mine),
+        "https://github.com/o/r/pulls?q=repo%3Ao%2Fr+is%3Apr+is%3Aopen+author%3A%40me+sort%3Aupdated-desc"
+    );
+    assert_eq!(
+        pulls_web_url("my-org", "a.b", PrFilter::Closed),
+        "https://github.com/my-org/a.b/pulls?q=repo%3Amy-org%2Fa.b+is%3Apr+is%3Aclosed+sort%3Aupdated-desc"
+    );
+}
+
+#[test]
 fn list_pulls_parses_checks_reviews_and_labels() {
     let mut server = mockito::Server::new();
     let m = server
         .mock("POST", "/graphql")
-        .match_body(Matcher::PartialJson(json!({
-            // `owner`/`name` let GitHub report an OAuth restriction (search alone hides it).
-            "variables": { "q": "repo:o/r is:pr is:open author:@me sort:updated-desc",
-                           "owner": "o", "name": "r" }
-        })))
+        // The query travels as a JSON string: its line breaks are `\n`.
+        .match_body(Matcher::AllOf(vec![
+            Matcher::PartialJson(json!({
+                // `owner`/`name` let GitHub report an OAuth restriction (search alone hides it).
+                "variables": { "q": "repo:o/r is:pr is:open author:@me sort:updated-desc",
+                               "owner": "o", "name": "r" }
+            })),
+            Matcher::Regex(r"first: 50\) \{(\\r|\\n|\s)+issueCount".into()),
+        ]))
         .with_body(
-            json!({ "data": { "search": { "nodes": [
+            json!({ "data": { "search": { "issueCount": 120, "nodes": [
                 list_node(1, Some("SUCCESS")),
                 list_node(2, Some("FAILURE")),
                 list_node(3, Some("PENDING")),
@@ -71,11 +87,12 @@ fn list_pulls_parses_checks_reviews_and_labels() {
             .to_string(),
         )
         .create();
-    let list = client(&server)
+    let (list, total) = client(&server)
         .list_pulls("t", "o", "r", PrFilter::Mine)
         .unwrap();
     m.assert();
     assert_eq!(list.len(), 4, "non-PR search results are skipped");
+    assert_eq!(total, 120, "every match, not only the first 50");
     let checks: Vec<_> = list.iter().map(|p| p.checks).collect();
     assert_eq!(
         checks,
@@ -98,6 +115,15 @@ fn list_pulls_parses_checks_reviews_and_labels() {
         ("feat/x", "main")
     );
     assert_eq!(list[0].state, PrState::Open);
+}
+
+/// `bug` first, then `l1`, `l2`...
+fn many_labels(n: usize) -> serde_json::Value {
+    let mut out = vec![json!({ "name": "bug", "color": "d73a4a", "description": null })];
+    out.extend(
+        (1..n).map(|i| json!({ "name": format!("l{i}"), "color": "ededed", "description": null })),
+    );
+    json!(out)
 }
 
 fn detail_json() -> serde_json::Value {
@@ -125,7 +151,7 @@ fn detail_json() -> serde_json::Value {
                 "mergeable": "CONFLICTING",
                 "mergeStateStatus": "DIRTY",
                 "viewerDidAuthor": false,
-                "labels": { "nodes": [ { "name": "bug", "color": "d73a4a", "description": null } ] },
+                "labels": { "nodes": many_labels(25) },
                 "commits": { "totalCount": 2, "nodes": [
                     { "commit": { "oid": "c1", "abbreviatedOid": "c1", "messageHeadline": "First",
                         "committedDate": "2026-10-01T07:00:00Z",
@@ -153,17 +179,17 @@ fn detail_json() -> serde_json::Value {
                           "targetUrl": "https://x/3" }
                     ] }
                 } } } ] },
-                "comments": { "nodes": [
+                "comments": { "totalCount": 130, "nodes": [
                     { "author": { "login": "carol" }, "body": "Later comment", "createdAt": "2026-10-01T08:30:00Z" },
                     { "author": null, "body": "From a deleted account", "createdAt": "2026-10-01T07:40:00Z" }
                 ] },
-                "reviews": { "nodes": [
+                "reviews": { "totalCount": 2, "nodes": [
                     { "author": { "login": "bob" }, "state": "CHANGES_REQUESTED", "body": "Please fix",
                       "submittedAt": "2026-10-01T08:00:00Z" },
                     { "author": { "login": "bob" }, "state": "PENDING", "body": "",
                       "submittedAt": null }
                 ] },
-                "reviewThreads": { "nodes": [
+                "reviewThreads": { "totalCount": 140, "nodes": [
                     { "id": "PRRT_1", "viewerCanResolve": true, "viewerCanUnresolve": false,
                       "isResolved": false, "isOutdated": false, "path": "src/a.rs",
                       "line": 12, "originalLine": 12, "diffSide": "RIGHT",
@@ -212,6 +238,11 @@ fn pull_detail_parses_timeline_threads_and_merge_options() {
                 "variables": { "owner": "o", "name": "r", "number": 7 }
             })),
             Matcher::Regex(r"author \{ login \.\.\. on User \{ databaseId \} \}".into()),
+            // Every label of the pull request, and the size of each truncated connection.
+            Matcher::Regex(r"viewerDidAuthor(\\r|\\n|\s)+labels\(first: 100\)".into()),
+            Matcher::Regex(r"comments\(last: 100\) \{ totalCount".into()),
+            Matcher::Regex(r"reviews\(last: 100\) \{ totalCount".into()),
+            Matcher::Regex(r"reviewThreads\(first: 100\) \{(\\r|\\n|\s)+totalCount".into()),
         ]))
         .with_body(detail_json().to_string())
         .create();
@@ -225,6 +256,11 @@ fn pull_detail_parses_timeline_threads_and_merge_options() {
     assert_eq!(d.head_repo, Some(("ada".into(), "r".into())));
     assert!(d.cross_repository);
     assert_eq!(d.commit_count, 2);
+    assert_eq!(
+        (d.comments_total, d.reviews_total, d.threads_total),
+        (130, 2, 140)
+    );
+    assert_eq!(d.summary.labels.len(), 25);
     assert_eq!(d.commits[0].author, "ada");
     assert_eq!(d.commits[1].author, "Someone", "no GitHub user: Git name");
     let statuses: Vec<_> = d.check_runs.iter().map(|c| c.status).collect();

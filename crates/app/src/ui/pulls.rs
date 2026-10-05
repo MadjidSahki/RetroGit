@@ -229,8 +229,13 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
                 .unwrap_or(0);
             let font = win95::theme::font(win95::theme::FONT_SIZE);
             let mut clicked = None;
+            // GitHub sends the first 50 matches; a late search index can count fewer.
+            let truncated = (p.list.len() as u64) < p.total as u64;
+            // Room for the note wrapped on two lines and the link.
+            let footer = if truncated { 56.0 } else { 0.0 };
             ScrollArea::vertical()
                 .auto_shrink([false, false])
+                .max_height(ui.available_height() - footer)
                 .show_rows_flat(ui, ROW_HEIGHT, p.list.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for pr in &p.list[range] {
@@ -288,6 +293,16 @@ fn list(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
                         }
                     }
                 });
+            if truncated {
+                ui.label(
+                    egui::RichText::new(s::pulls_truncated(p.list.len(), p.total))
+                        .color(win95::theme::palette(ui.ctx()).gray_text),
+                );
+                ui.hyperlink_to(
+                    s::OPEN_ON_GITHUB,
+                    github::pulls_web_url(&slug.0, &slug.1, p.filter),
+                );
+            }
             if let Some(number) = clicked {
                 cx.state.pulls.select(number);
                 cx.state.pulls.reload_selected();
