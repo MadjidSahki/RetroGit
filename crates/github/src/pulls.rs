@@ -636,10 +636,11 @@ fn parse_detail(data: &Value) -> Result<PrDetail, GithubError> {
         assignees: nodes(&p["assignees"])
             .filter_map(|a| a["login"].as_str().map(str::to_string))
             .collect(),
-        viewer_can_triage: matches!(
-            repo["viewerPermission"].as_str(),
-            Some("ADMIN" | "MAINTAIN" | "WRITE" | "TRIAGE")
-        ),
+        // A null permission (unknown to GitHub's token): who can edit it can triage it.
+        viewer_can_triage: match repo["viewerPermission"].as_str() {
+            Some(perm) => matches!(perm, "ADMIN" | "MAINTAIN" | "WRITE" | "TRIAGE"),
+            None => p["viewerCanUpdate"].as_bool().unwrap_or(false),
+        },
         team_reviewers: nodes(&p["reviewRequests"])
             .filter_map(|r| {
                 let team = &r["requestedReviewer"];

@@ -22,8 +22,12 @@ impl Worker {
         {
             r = self.on_github_once(slug, &call);
         }
-        if r.is_ok() {
-            // GitHub answers again: check the accounts kept offline at startup.
+        if r.is_ok()
+            && !self.unchecked.is_empty()
+            && self.recheck_throttle.ready(std::time::Instant::now())
+        {
+            // GitHub answers again: check the accounts kept offline at startup (at most
+            // every few minutes, each check is a `GET /user` per account).
             self.recheck_unchecked();
         }
         r

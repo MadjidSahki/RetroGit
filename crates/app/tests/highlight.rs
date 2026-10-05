@@ -54,3 +54,26 @@ fn the_same_diff_within_its_budget_is_colored() {
     let r = first_result(Duration::from_secs(3600));
     assert!(r.colors.is_some());
 }
+
+#[test]
+fn tab_goes_past_diff_rows_to_the_next_control() {
+    let mut h = egui_kittest::Harness::new_ui_state(
+        |ui, button: &mut Option<egui::Id>| {
+            for t in ["fn a() {}", "fn b() {}"] {
+                let job = egui::text::LayoutJob::simple_singleline(
+                    t.into(),
+                    egui::FontId::monospace(12.0),
+                    egui::Color32::BLACK,
+                );
+                retrogit::highlight::diff_row(ui, job, 16.0, egui::Color32::WHITE);
+            }
+            *button = Some(ui.button("Next").id);
+        },
+        None,
+    );
+    h.run();
+    h.key_press(egui::Key::Tab);
+    h.run();
+    let button = *h.state();
+    assert_eq!(h.ctx.memory(|m| m.focused()), button);
+}

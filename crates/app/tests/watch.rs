@@ -113,6 +113,18 @@ fn head_packed_refs_and_refs_are_ref_changes_the_rest_is_work() {
 }
 
 #[test]
+fn ref_lock_files_are_not_ref_changes() {
+    let root = Path::new("/r");
+    for p in [
+        "/r/.git/refs/heads/main.lock",
+        "/r/.git/HEAD.lock",
+        "/r/.git/packed-refs.lock",
+    ] {
+        assert!(!touches_refs(root, Path::new(p)), "{p} is a lock");
+    }
+}
+
+#[test]
 fn a_ref_written_outside_the_app_asks_for_a_refs_refresh() {
     let d = tempfile::tempdir().unwrap();
     git2::Repository::init(d.path()).unwrap();

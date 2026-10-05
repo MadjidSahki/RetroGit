@@ -736,3 +736,72 @@ fn a_rejected_token_tells_the_open_repository_its_account_changed() {
         "ada must sign in again: {evs:?}"
     );
 }
+
+#[test]
+fn a_rejected_token_does_not_probe_the_other_accounts() {
+    let mut server = mockito::Server::new();
+    let (w, _) = two_accounts(&mut server);
+    let (_d, before) = open_github_repo(&w, "corp/x");
+    assert_eq!(before.as_deref(), Some("ada"));
+    let bob_probe = probe(&mut server, "gho_bob", "corp", "x", true).expect(0);
+    server
+        .mock("POST", "/graphql")
+        .match_header("authorization", "Bearer gho_ada")
+        .with_status(401)
+        .create();
+    w.send(Command::LoadPulls {
+        slug: ("corp".into(), "x".into()),
+        filter: PrFilter::Open,
+    });
+    until(&w, |e| matches!(e, Event::Error { .. }));
+    until(&w, |e| matches!(e, Event::RepoAccount { .. }));
+    bob_probe.assert();
+}
+
+#[test]
+fn accounts_kept_offline_are_checked_again_at_most_every_few_minutes() {
+    let mut server = mockito::Server::new();
+    user(&mut server, "gho_ada", "ada", &[]);
+    // Startup, then the first GitHub call that works; not the second one.
+    let bob = server
+        .mock("GET", "/user")
+        .match_header("authorization", "Bearer gho_bob")
+        .with_status(500)
+        .expect(2)
+        .create();
+    let store = Arc::new(MemoryAccounts::with("ada", "gho_ada"));
+    store.save("bob", "gho_bob").unwrap();
+    let w = start(&server, store, &["ada", "bob"], &[]);
+    w.send(Command::ValidateToken);
+    until(&w, |e| matches!(e, Event::SignedIn(_)));
+    list(&mut server, "gho_ada");
+    for _ in 0..2 {
+        let evs = load_pulls(&w, "ada", "app");
+        assert!(
+            matches!(evs.last(), Some(Event::PullsLoaded { .. })),
+            "{evs:?}"
+        );
+    }
+    bob.assert();
+}
+
+#[test]
+fn a_clone_with_a_chosen_account_that_must_sign_in_says_so() {
+    use gitcore::GitError;
+    use retrogit::strings as s;
+    use retrogit::worker::clone_error;
+    let tried = ["ada".to_string(), "bob".to_string()];
+    let auth = GitError::Auth("could not read Username".into());
+    let err = clone_error(true, Some("carol"), &tried, &auth).unwrap();
+    assert_eq!(
+        err.message,
+        s::ERR_ACCOUNT_MUST_SIGN_IN.replace("{login}", "carol")
+    );
+    assert_eq!(err.detail, None, "no other account was tried");
+    let err = clone_error(true, None, &tried, &auth).unwrap();
+    assert_eq!(err.detail.as_deref(), Some("Tried: @ada, @bob"));
+    assert!(
+        clone_error(true, Some("carol"), &tried, &GitError::Network("x".into())).is_none(),
+        "only a refusal"
+    );
+}

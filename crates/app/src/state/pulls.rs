@@ -129,6 +129,9 @@ pub struct PullsView {
     pub assignable_query: Option<String>,
     /// Pull request created in this session, until GitHub's list has it (its search lags).
     pub created: Option<u64>,
+    /// Row of `created` once its detail loaded: put back on top of the Open and Mine lists
+    /// (a filter change clears the list) until GitHub's search has it.
+    pub created_row: Option<PrSummary>,
     /// The detail of this pull request failed to load, and why.
     pub load_error: Option<(u64, String)>,
 }
@@ -352,14 +355,15 @@ impl AppState {
                 total,
             } => {
                 if p.slug.as_ref() == Some(&slug) && p.filter == filter {
-                    let old = std::mem::replace(&mut p.list, list);
+                    p.list = list;
                     p.total = total;
                     p.loading = false;
                     if let Some(n) = p.created {
                         if p.list.iter().any(|r| r.number == n) {
                             p.created = None;
-                        } else if p.selected == Some(n)
-                            && let Some(row) = old.into_iter().find(|r| r.number == n)
+                            p.created_row = None;
+                        } else if matches!(filter, PrFilter::Open | PrFilter::Mine)
+                            && let Some(row) = p.created_row.clone()
                         {
                             // GitHub's search does not list it yet: keep it.
                             p.list.insert(0, row);
@@ -374,6 +378,10 @@ impl AppState {
                     {
                         // Merged or closed since: lists no longer keep it.
                         p.created = None;
+                        p.created_row = None;
+                    }
+                    if p.created == Some(detail.summary.number) {
+                        p.created_row = Some(detail.summary.clone());
                     }
                     // Keep the list in step with what the detail says.
                     if let Some(row) = p
@@ -434,6 +442,7 @@ impl AppState {
                     p.dialog = None;
                     p.select(number);
                     p.created = Some(number);
+                    p.created_row = None;
                     p.stale = true;
                     p.note = Some(s::NOTE_PULL_CREATED.to_string());
                 }

@@ -91,7 +91,11 @@ pub fn is_relevant(root: &Path, path: &Path) -> bool {
 /// Whether a change at `path` moves HEAD or a ref (branches and history must be reloaded).
 pub fn touches_refs(root: &Path, path: &Path) -> bool {
     in_dot_git(root, path).is_some_and(|rest| {
-        rest == Path::new("HEAD") || rest == Path::new("packed-refs") || under(&rest, "refs")
+        // `*.lock` files are git's writes in progress: the ref itself changes after.
+        rest.extension().is_none_or(|e| e != "lock")
+            && (rest == Path::new("HEAD")
+                || rest == Path::new("packed-refs")
+                || under(&rest, "refs"))
     })
 }
 

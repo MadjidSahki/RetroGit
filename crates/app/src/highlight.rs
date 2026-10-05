@@ -381,7 +381,8 @@ pub fn diff_row(
     let row = ui.interact(
         egui::Rect::from_min_size(rect.min, egui::vec2(row_width, height)),
         row.id,
-        egui::Sense::click(),
+        // Clicks only: a row is not a Tab stop (it would take the focus and drop it).
+        egui::Sense::CLICK,
     );
     resp.union(row)
 }

@@ -575,7 +575,7 @@ impl AppState {
         cmd: crate::protocol::Command,
     ) -> Option<crate::protocol::Command> {
         let same = matches!(&cmd, crate::protocol::Command::OpenRepo(path)
-            if self.current.as_ref().is_some_and(|c| &c.path == path));
+            if self.current.as_ref().is_some_and(|c| same_repo(&c.path, path)));
         if same || self.pulls.pending_total() == 0 {
             return Some(cmd);
         }
@@ -629,6 +629,19 @@ impl AppState {
         }
         self.config_dirty = true;
     }
+}
+
+/// Whether `a` and `b` are in the same repository: same working-tree root once links are
+/// resolved (a path outside any repository is compared as itself).
+fn same_repo(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    let root = |p: &Path| {
+        let found = gitcore::Repo::discover(p).unwrap_or_else(|_| p.to_path_buf());
+        crate::watch::canonical(&found)
+    };
+    root(a) == root(b)
 }
 
 /// Indexes of repos whose `owner/name` contains `filter` (case-insensitive).

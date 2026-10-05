@@ -1,7 +1,7 @@
 //! The single background thread doing all network and Git work.
 
 mod accounts;
-pub use accounts::clone_refused;
+pub use accounts::{clone_error, clone_refused};
 mod changes;
 mod conflicts;
 mod explore;
@@ -195,6 +195,7 @@ pub fn spawn(deps: WorkerDeps, notify: impl Fn() + Send + 'static) -> WorkerHand
         no_account: Default::default(),
         unchecked: Default::default(),
         offline: false,
+        recheck_throttle: Throttle::new(Duration::from_secs(5 * 60)),
         last_account: None,
         cancel_net: cancel_net.clone(),
         deps,
@@ -259,6 +260,8 @@ struct Worker {
     unchecked: std::collections::HashSet<String>,
     /// The app was told it is offline (no account checked at startup).
     offline: bool,
+    /// Checks of `unchecked` after a GitHub call that works (validate checks every time).
+    recheck_throttle: Throttle,
     /// Account used by the last GitHub call (to sign out the right one on a 401).
     last_account: Option<String>,
     deps: WorkerDeps,

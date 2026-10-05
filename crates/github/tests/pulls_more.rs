@@ -218,10 +218,9 @@ fn assignable_users_are_listed() {
     );
 }
 
-#[test]
-fn the_detail_gives_reviewers_assignees_and_ranges() {
-    let mut server = mockito::Server::new();
-    let body = json!({ "data": {
+/// `pull_detail` answer for #9 (WRITE permission, editable by the viewer).
+fn detail_body() -> serde_json::Value {
+    json!({ "data": {
         "viewer": { "login": "ada" },
         "repository": {
             "mergeCommitAllowed": true, "squashMergeAllowed": false, "rebaseMergeAllowed": false,
@@ -253,7 +252,36 @@ fn the_detail_gives_reviewers_assignees_and_ranges() {
                     "comments": { "nodes": [] } } ] }
             }
         }
-    } });
+    } })
+}
+
+#[test]
+fn an_unknown_permission_falls_back_to_who_can_update() {
+    let mut server = mockito::Server::new();
+    let mut body = detail_body();
+    body["data"]["repository"]["viewerPermission"] = json!(null);
+    server
+        .mock("POST", "/graphql")
+        .with_body(body.to_string())
+        .create();
+    let d = client(&server).pull_detail("t", "o", "r", 9).unwrap();
+    assert!(d.viewer_can_update);
+    assert!(d.viewer_can_triage, "can update: can triage");
+    assert!(!d.viewer_can_write);
+    server.reset();
+    body["data"]["repository"]["pullRequest"]["viewerCanUpdate"] = json!(false);
+    server
+        .mock("POST", "/graphql")
+        .with_body(body.to_string())
+        .create();
+    let d = client(&server).pull_detail("t", "o", "r", 9).unwrap();
+    assert!(!d.viewer_can_triage);
+}
+
+#[test]
+fn the_detail_gives_reviewers_assignees_and_ranges() {
+    let mut server = mockito::Server::new();
+    let body = detail_body();
     let mut triage = body.clone();
     triage["data"]["repository"]["viewerPermission"] = json!("TRIAGE");
     let mut read = body.clone();
