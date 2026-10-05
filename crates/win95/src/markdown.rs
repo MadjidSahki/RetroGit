@@ -394,7 +394,9 @@ pub fn markdown_view(ui: &mut Ui, text: &str) {
                                     .font(egui::FontId::monospace(base))
                                     .color(pal.window_text),
                             )
-                            .extend(),
+                            // Long lines wrap: an unbroken line would widen the whole
+                            // view and push what follows out of sight.
+                            .wrap(),
                         );
                     });
             }

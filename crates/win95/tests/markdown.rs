@@ -126,3 +126,26 @@ fn a_second_frame_does_not_parse_again() {
     }
     assert_eq!(markdown::PARSES.with(std::cell::Cell::get) - before, 1);
 }
+
+#[test]
+fn a_long_code_line_wraps_and_nothing_after_it_runs_off() {
+    let md = format!(
+        "```\n{}CODE_END\n```\n\nhttps://example.com/{}URL_END",
+        "x".repeat(300),
+        "y".repeat(300)
+    );
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(400.0, 900.0))
+        .build_ui(move |ui| {
+            win95::theme::install(ui.ctx());
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.set_width(300.0);
+                win95::markdown_view(ui, &md);
+            });
+        });
+    h.run();
+    for end in ["CODE_END", "URL_END"] {
+        let right = h.get_by_label_contains(end).rect().right();
+        assert!(right <= 320.0, "{end} runs off to x = {right}");
+    }
+}
