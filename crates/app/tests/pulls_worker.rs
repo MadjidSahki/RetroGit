@@ -785,9 +785,11 @@ mod checkout {
             matches!(
                 evs.last(),
                 Some(Event::Error { during: Op::PullAction, error })
-                    if error.message == s::ERR_WOULD_OVERWRITE
+                    if error.message == "These local changes would be overwritten by updating pr/1:"
+                        && error.message != s::ERR_WOULD_OVERWRITE
+                        && error.detail.as_deref() == Some("new.txt")
             ),
-            "{evs:?}"
+            "no branch switches here: {evs:?}"
         );
     }
 

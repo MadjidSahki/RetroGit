@@ -229,6 +229,11 @@ pub const ERR_MISSING_IDENTITY: &str = "Git does not know who you are. Run:\n  g
 pub const WARN_NO_GIT_CLI: &str = "git was not found: this commit was made without hooks and without signing. Install Git to enable them.";
 pub const ERR_WOULD_OVERWRITE: &str =
     "Your local changes to these files would be overwritten by switching branch:";
+
+/// The checked-out `pr/N` cannot follow its pull request (no branch switches).
+pub fn pr_branch_not_moved(branch: &str) -> String {
+    format!("These local changes would be overwritten by updating {branch}:")
+}
 pub const ERR_PUSH_REJECTED: &str =
     "The remote has changes you don't have. Pull first, then push again.";
 pub const ERR_STASH_CONFLICT: &str = "Re-applying your changes caused conflicts. Resolve them in the Changes tab; your changes are also kept in the stash.";
@@ -843,6 +848,10 @@ pub fn invalid_tag_name(name: &str) -> String {
 
 pub fn unknown_rev(rev: &str) -> String {
     format!("Unknown version {rev}.")
+}
+
+pub fn unknown_revision(rev: &str) -> String {
+    format!("Unknown revision {rev}.")
 }
 
 pub fn not_in_conflict(path: &str) -> String {

@@ -508,7 +508,16 @@ impl Worker {
                     op: SyncOp::Fetch,
                     ok: true,
                 });
-                return self.fail(Op::PullAction, AppError::from_git(&e));
+                let error = match e {
+                    // No branch switches: say which branch could not be updated.
+                    GitError::WouldOverwrite { files } => AppError::new(
+                        Severity::Warning,
+                        &s::pr_branch_not_moved(&format!("pr/{number}")),
+                    )
+                    .with_detail(files.join("\n")),
+                    e => AppError::from_git(&e),
+                };
+                return self.fail(Op::PullAction, error);
             }
             Err(e) => return self.net_failed(SyncOp::Fetch, false, &e),
         };

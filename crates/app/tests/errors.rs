@@ -48,6 +48,10 @@ fn each_refusal_is_a_warning_worded_by_strings() {
         (Refusal::BareRepository, s::ERR_BARE_REPOSITORY.into()),
         (Refusal::UnknownRev("v9".into()), s::unknown_rev("v9")),
         (
+            Refusal::UnknownRevision("v9".into()),
+            s::unknown_revision("v9"),
+        ),
+        (
             Refusal::NotInConflict("f.txt".into()),
             s::not_in_conflict("f.txt"),
         ),
@@ -83,6 +87,7 @@ fn texts_moved_from_gitcore_read_as_before() {
     );
     assert_eq!(s::invalid_tag_name("a b"), "'a b' is not a valid tag name.");
     assert_eq!(s::unknown_rev("v9"), "Unknown version v9.");
+    assert_eq!(s::unknown_revision("v9"), "Unknown revision v9.");
     assert_eq!(s::pull_not_fetched(7), "Pull request #7 was not fetched.");
     assert_eq!(
         s::todo_error(TodoError::NoKeptAbove),

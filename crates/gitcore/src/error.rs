@@ -81,7 +81,10 @@ pub enum Refusal {
     /// Interactive rebase of merge commits.
     MergesInRange,
     BareRepository,
+    /// A version gitcore could not resolve to a commit (file at, blame, tree...).
     UnknownRev(String),
+    /// A revision the Explore view could not resolve.
+    UnknownRevision(String),
     NotInConflict(String),
     PullNotFetched(u64),
     CommitNotFound,

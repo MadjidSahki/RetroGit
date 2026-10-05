@@ -676,6 +676,7 @@ fn refusal_text(r: &Refusal) -> String {
         Refusal::MergesInRange => s::ERR_MERGES_IN_RANGE.into(),
         Refusal::BareRepository => s::ERR_BARE_REPOSITORY.into(),
         Refusal::UnknownRev(rev) => s::unknown_rev(rev),
+        Refusal::UnknownRevision(rev) => s::unknown_revision(rev),
         Refusal::NotInConflict(path) => s::not_in_conflict(path),
         Refusal::PullNotFetched(n) => s::pull_not_fetched(*n),
         Refusal::CommitNotFound => s::ERR_COMMIT_NOT_FOUND.into(),

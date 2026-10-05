@@ -479,6 +479,8 @@ impl AppState {
                     // The review went through with its line comments.
                     if matches!(p.dialog, Some(PullDialog::Review { .. })) {
                         p.pending.remove(&number);
+                        // The next pending comment at index 0 must not open shown whole.
+                        p.expanded.retain(|k| !matches!(k, CommentKey::Pending(_)));
                     }
                     if p.comment_sent {
                         p.comment.clear();

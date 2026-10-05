@@ -575,9 +575,13 @@ impl AppState {
         &mut self,
         cmd: crate::protocol::Command,
     ) -> Option<crate::protocol::Command> {
+        // Nothing to lose: no need to look at the disk to compare the repositories.
+        if self.pulls.pending_total() == 0 {
+            return Some(cmd);
+        }
         let same = matches!(&cmd, crate::protocol::Command::OpenRepo(path)
             if self.current.as_ref().is_some_and(|c| same_repo(&c.path, path)));
-        if same || self.pulls.pending_total() == 0 {
+        if same {
             return Some(cmd);
         }
         self.repo_switch = Some(cmd);

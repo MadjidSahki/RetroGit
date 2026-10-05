@@ -278,7 +278,9 @@ fn reading_the_body_is_bounded_in_time() {
     let file = "RetroGit-windows-x64-setup.exe";
     let (_server, r) = stalling_server(file);
     let dir = tempfile::tempdir().unwrap();
-    let started = Instant::now();
+    // No clock: unbounded, the read would end after the server's 3 s pause with the right
+    // bytes and succeed; the stall guard (10 s) cannot fire first. Only the body timeout
+    // can make it fail, so the kind of error is the proof.
     let err = download_verified(
         &Fetcher::new(local_only)
             .with_stall(Duration::from_secs(10))
@@ -296,11 +298,6 @@ fn reading_the_body_is_bounded_in_time() {
         "the body timeout, not the stall"
     );
     assert!(err.to_lowercase().contains("timeout"), "{err}");
-    assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "failed after {:?}",
-        started.elapsed()
-    );
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
 

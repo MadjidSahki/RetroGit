@@ -580,6 +580,39 @@ fn pending_comments_are_cleared_only_when_the_review_went_through() {
 }
 
 #[test]
+fn a_sent_review_forgets_which_pending_comments_were_shown_whole() {
+    use retrogit::state::CommentKey;
+    let mut st = opened(Some("https://github.com/o/r"));
+    st.pulls.select(4);
+    st.queue_line_comment(4, line_comment("x"));
+    st.pulls.expanded.insert(CommentKey::Pending(0));
+    st.pulls.expanded.insert(CommentKey::Thread("T1".into(), 0));
+    st.pulls.dialog = Some(retrogit::state::PullDialog::Review {
+        event: ReviewEvent::Comment,
+        body: String::new(),
+    });
+    st.apply(Event::PullActionDone {
+        slug: slug(),
+        number: 4,
+        note: s::NOTE_REVIEW_SENT.into(),
+    });
+    assert!(
+        !st.pulls
+            .expanded
+            .iter()
+            .any(|k| matches!(k, CommentKey::Pending(_))),
+        "{:?}",
+        st.pulls.expanded
+    );
+    assert!(
+        st.pulls
+            .expanded
+            .contains(&CommentKey::Thread("T1".into(), 0)),
+        "threads stay as they were"
+    );
+}
+
+#[test]
 fn a_conversation_comment_is_kept_until_github_accepts_it() {
     let mut st = opened(Some("https://github.com/o/r"));
     st.pulls.select(4);
