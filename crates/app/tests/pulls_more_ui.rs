@@ -342,24 +342,144 @@ fn right_clicking_right_of_a_diff_line_text_offers_a_comment() {
     assert!(h.query_by_label(s::ADD_COMMENT).is_some());
 }
 
+/// Width of the test window: comment rows must fit in it.
+const WINDOW_RIGHT: f32 = 1200.0;
+
+/// A comment far wider than the window, on one line, ending with `ENDWORD`.
+fn long_comment() -> String {
+    let mut body = "lorem ipsum dolor sit amet ".repeat(8);
+    body.push_str("ENDWORD");
+    body
+}
+
+/// The Files tab of `a.rs`, its comment (on line 3 only) replaced by `body`.
+fn files_world_with_comment(body: &str) -> Harness<'static, World> {
+    let body = body.to_string();
+    let mut w = world_with(false, move |d| {
+        d.threads[0].start_line = None;
+        d.threads[0].comments[0].body = body;
+    });
+    w.state.pulls.sub_tab = PullTab::Files;
+    w.state.pulls.open_file("a.rs");
+    let mut h = harness(w);
+    h.run();
+    h
+}
+
+fn text_of(h: &Harness<'static, World>, containing: &str) -> String {
+    let node = h.get_by_label_contains(containing);
+    let node = node.accesskit_node();
+    node.value().or_else(|| node.label()).unwrap_or_default()
+}
+
+/// Rects of the labels containing `text`.
+fn rects_of(h: &Harness<'static, World>, text: &str) -> Vec<egui::Rect> {
+    h.query_all_by_label_contains(text)
+        .map(|n| n.rect())
+        .collect()
+}
+
+fn click_at(h: &mut Harness<'static, World>, pos: egui::Pos2, button: egui::PointerButton) {
+    h.hover_at(pos);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    h.run();
+}
+
+/// Left-click the comment row containing `text`.
+fn click_comment(h: &mut Harness<'static, World>, text: &str) {
+    let pos = h.get_by_label_contains(text).rect().center();
+    click_at(h, pos, egui::PointerButton::Primary);
+}
+
 #[test]
-fn hovering_a_multi_line_comment_shows_all_of_it() {
+fn a_long_comment_is_cut_to_the_visible_width() {
+    let h = files_world_with_comment(&long_comment());
+    let text = text_of(&h, "> carol:");
+    assert!(text.trim_end().ends_with(s::ELLIPSIS), "{text:?}");
+    assert!(text.starts_with(s::EXPAND_MARK), "{text:?}");
+    assert!(h.query_by_label_contains("ENDWORD").is_none(), "cut");
+    let rect = h.get_by_label_contains("> carol:").rect();
+    assert!(rect.right() <= WINDOW_RIGHT, "{rect:?}");
+}
+
+#[test]
+fn a_short_comment_has_no_marker() {
+    let h = files_world_with_comment("Looks good");
+    let text = text_of(&h, "> carol: Looks good");
+    assert!(!text.contains(s::EXPAND_MARK), "{text:?}");
+    assert!(!text.contains(s::ELLIPSIS), "{text:?}");
+}
+
+#[test]
+fn clicking_a_long_comment_shows_it_whole_then_cuts_it_again() {
+    let mut h = files_world_with_comment(&long_comment());
+    click_comment(&mut h, "> carol:");
+    let text = text_of(&h, "> carol:");
+    assert!(text.starts_with(s::COLLAPSE_MARK), "{text:?}");
+    assert!(!text.contains(s::ELLIPSIS), "{text:?}");
+    assert!(h.query_by_label_contains("ENDWORD").is_some(), "last word");
+    let rows = rects_of(&h, "lorem");
+    assert!(rows.len() >= 3, "wrapped on several rows: {rows:?}");
+    for r in &rows {
+        assert!(r.right() <= WINDOW_RIGHT, "{r:?}");
+    }
+    click_comment(&mut h, "> carol:");
+    assert!(h.query_by_label_contains("ENDWORD").is_none(), "cut again");
+    assert_eq!(rects_of(&h, "lorem").len(), 1, "continuation rows gone");
+    assert!(text_of(&h, "> carol:").starts_with(s::EXPAND_MARK));
+}
+
+#[test]
+fn clicking_a_multi_line_comment_shows_all_of_it() {
     let mut h = files_world();
     assert!(h.query_by_label_contains("```suggestion").is_none());
-    let rect = h.get_by_label_contains("> carol: Simpler:").rect();
-    // Right of the text (the row ends near the window edge).
-    h.hover_at(egui::pos2(rect.right() + 30.0, rect.center().y));
-    for _ in 0..10 {
-        h.run();
-    }
+    assert!(text_of(&h, "> carol: Simpler:").starts_with(s::EXPAND_MARK));
+    click_comment(&mut h, "> carol: Simpler:");
     assert!(
         h.query_by_label_contains("```suggestion").is_some(),
-        "full comment in a tooltip"
+        "full comment under its first line"
     );
 }
 
 #[test]
-fn hovering_a_multi_line_pending_comment_shows_all_of_it() {
+fn selecting_another_pull_request_forgets_expanded_comments() {
+    let mut h = files_world_with_comment(&long_comment());
+    click_comment(&mut h, "> carol:");
+    assert!(!h.state().state.pulls.expanded.is_empty());
+    h.state_mut().state.pulls.select(8);
+    assert!(h.state().state.pulls.expanded.is_empty());
+}
+
+#[test]
+fn an_expanded_comment_still_offers_reply() {
+    let mut h = files_world_with_comment(&long_comment());
+    click_comment(&mut h, "> carol:");
+    let pos = h.get_by_label_contains("ENDWORD").rect().center();
+    click_at(&mut h, pos, egui::PointerButton::Secondary);
+    assert!(
+        h.query_by_label(s::REPLY).is_some(),
+        "on a continuation row"
+    );
+    h.key_press(egui::Key::Escape);
+    h.run();
+    let pos = h.get_by_label_contains("> carol:").rect().center();
+    click_at(&mut h, pos, egui::PointerButton::Secondary);
+    assert!(h.query_by_label(s::REPLY).is_some(), "on the first row");
+    assert!(
+        h.query_by_label_contains("ENDWORD").is_some(),
+        "a right-click does not collapse"
+    );
+}
+
+#[test]
+fn a_multi_line_pending_comment_expands_on_click() {
     let mut w = world(false);
     w.state.pulls.sub_tab = PullTab::Files;
     w.state.pulls.open_file("a.rs");
@@ -376,13 +496,85 @@ fn hovering_a_multi_line_pending_comment_shows_all_of_it() {
     let mut h = harness(w);
     h.run();
     assert!(h.query_by_label_contains("second line here").is_none());
-    let rect = h.get_by_label_contains("First line").rect();
-    h.hover_at(egui::pos2(rect.right() + 100.0, rect.center().y));
-    for _ in 0..10 {
-        h.run();
-    }
+    assert!(text_of(&h, "First line").starts_with(s::EXPAND_MARK));
+    click_comment(&mut h, "First line");
     assert!(h.query_by_label_contains("second line here").is_some());
-    assert_eq!(retrogit::ui::pull_detail::comment_hover("one line\n"), None);
+    assert!(text_of(&h, "First line").starts_with(s::COLLAPSE_MARK));
+    click_comment(&mut h, "First line");
+    assert!(h.query_by_label_contains("second line here").is_none());
+}
+
+#[test]
+fn comments_wrap_on_words_and_break_long_ones() {
+    use retrogit::ui::pull_detail::wrap_text;
+    assert_eq!(wrap_text("aaa bbb ccc", 7), ["aaa bbb", "ccc"]);
+    assert_eq!(wrap_text("abcdefg", 7), ["abcdefg"], "exactly the limit");
+    assert_eq!(wrap_text("abcdefgh", 7), ["abcdefg", "h"]);
+    assert_eq!(wrap_text("abcdefghij", 4), ["abcd", "efgh", "ij"]);
+    assert_eq!(wrap_text("aa bbbbbbbbbb", 4), ["aa", "bbbb", "bbbb", "bb"]);
+    assert_eq!(wrap_text("one\n\ntwo\n", 10), ["one", "", "two"]);
+    assert_eq!(wrap_text("  indented", 20), ["  indented"], "kept");
+    for row in wrap_text(&long_comment(), 33) {
+        assert!(row.chars().count() <= 33, "{row:?}");
+    }
+}
+
+#[test]
+fn a_cut_line_ends_with_an_ellipsis_within_the_limit() {
+    use retrogit::ui::pull_detail::clip_line;
+    assert_eq!(clip_line("short", 10), ("short".to_string(), false));
+    assert_eq!(
+        clip_line("abcdefghij", 10),
+        ("abcdefghij".to_string(), false)
+    );
+    assert_eq!(
+        clip_line("abcdefghijk", 10),
+        ("abcdefg...".to_string(), true)
+    );
+}
+
+#[test]
+fn expanded_comments_get_continuation_rows() {
+    use retrogit::state::CommentKey;
+    use retrogit::ui::pull_detail::{FileRow, file_rows};
+    let w = world(false);
+    let p = &w.state.pulls;
+    let d = p.detail.as_ref().unwrap();
+    let diff = retrogit::pr_diff::parse_patch(
+        "a.rs",
+        Some("@@ -1,3 +1,4 @@\n a\n-b\n+let b = 2;\n+let c = 3;\n d"),
+    );
+    let pending = vec![github::LineComment {
+        path: "a.rs".into(),
+        line: 4,
+        side: DiffSide::Right,
+        start: None,
+        body: "one\ntwo\nthree".into(),
+    }];
+    let none = std::collections::HashSet::new();
+    let collapsed = file_rows(&diff, &d.threads, &pending, &none, 200);
+    assert!(
+        !collapsed
+            .iter()
+            .any(|r| matches!(r, FileRow::CommentMore(..) | FileRow::PendingMore(..)))
+    );
+    let expanded = [CommentKey::Thread("T1".into(), 0), CommentKey::Pending(0)]
+        .into_iter()
+        .collect();
+    let rows = file_rows(&diff, &d.threads, &pending, &expanded, 200);
+    let more = |r: &&FileRow| matches!(r, FileRow::CommentMore(0, 0, _));
+    // "Simpler:", "```suggestion", "let bc = 5;", "```": 3 rows under the first.
+    assert_eq!(rows.iter().filter(more).count(), 3, "{rows:?}");
+    let at = rows
+        .iter()
+        .position(|r| *r == FileRow::Comment(0, 0))
+        .unwrap();
+    assert_eq!(rows[at + 1], FileRow::CommentMore(0, 0, 1));
+    let at = rows.iter().position(|r| *r == FileRow::Pending(0)).unwrap();
+    assert_eq!(
+        rows[at + 1..at + 3],
+        [FileRow::PendingMore(0, 1), FileRow::PendingMore(0, 2)]
+    );
 }
 
 fn titled(line: Option<u32>, start: Option<u32>, side: DiffSide) -> ReviewThread {

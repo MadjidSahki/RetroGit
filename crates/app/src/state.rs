@@ -18,8 +18,9 @@ pub use explore::{
 pub use git_ops::{GitDialog, HistoryAction, StashesView, move_item, pick_action};
 pub use notifications::{MAX_NOTIFICATIONS, NotificationTarget, NotificationsView, split_repo};
 pub use pulls::{
-    CHECKS_REFRESH, PullDialog, PullTab, PullsView, default_merge_method, merge_defaults,
-    merge_disabled_reason, needs_auto_refresh, prefill_title, review_events_allowed,
+    CHECKS_REFRESH, CommentKey, PullDialog, PullTab, PullsView, default_merge_method,
+    merge_defaults, merge_disabled_reason, needs_auto_refresh, prefill_title,
+    review_events_allowed,
 };
 pub use pulls_more::{
     LineSelection, PeopleKind, SelectionTarget, apply_disabled_reason, apply_disabled_reason_for,

@@ -386,6 +386,12 @@ pub const CHECK_RUNNING: &str = "running";
 pub const CHECK_SKIPPED: &str = "skipped";
 pub const CHECK_DETAILS: &str = "details";
 pub const PENDING_TAG: &str = "(pending)";
+/// Start of a Files tab comment row that shows only part of the comment (click to read it).
+pub const EXPAND_MARK: &str = "[+]";
+/// Start of a Files tab comment shown whole (click to cut it again).
+pub const COLLAPSE_MARK: &str = "[-]";
+/// End of a comment line cut to the visible width.
+pub const ELLIPSIS: &str = "...";
 pub const SENDING: &str = "Sending to GitHub...";
 pub const NOTIFICATIONS: &str = "Notifications";
 pub const NOTIFICATIONS_TITLE: &str = "Pull request notifications";

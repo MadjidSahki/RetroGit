@@ -6,7 +6,7 @@ use github::{
     ReviewEvent,
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::AppState;
@@ -83,6 +83,15 @@ pub enum PullDialog {
     },
 }
 
+/// A comment of the Files tab, to remember it is shown whole.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum CommentKey {
+    /// Thread id, comment index.
+    Thread(String, usize),
+    /// Index in the pending review of the selected pull request.
+    Pending(usize),
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PullsView {
     /// Repository the list and detail belong to.
@@ -134,6 +143,8 @@ pub struct PullsView {
     pub created_row: Option<PrSummary>,
     /// The detail of this pull request failed to load, and why.
     pub load_error: Option<(u64, String)>,
+    /// Comments of the selected pull request shown whole in the Files tab (clicked).
+    pub expanded: HashSet<CommentKey>,
 }
 
 impl PullsView {
@@ -156,6 +167,7 @@ impl PullsView {
             self.file_colors = crate::highlight::Colors::NotRequested;
             self.selection = None;
             self.load_error = None;
+            self.expanded.clear();
             self.comment.clear();
             self.comment_sent = false;
             self.sub_tab = PullTab::Conversation;
@@ -208,6 +220,9 @@ impl PullsView {
             && i < list.len()
         {
             list.remove(i);
+            // The pending comments after it moved up: forget which were shown whole.
+            self.expanded
+                .retain(|k| !matches!(k, CommentKey::Pending(_)));
             if list.is_empty() {
                 self.pending.remove(&n);
             }

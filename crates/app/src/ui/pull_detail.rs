@@ -1,5 +1,7 @@
 //! Detail of the selected pull request: header, labels, actions and sub-tabs.
 
+use std::collections::HashSet;
+
 use egui::{Color32, RichText, ScrollArea};
 use gitcore::LineKind;
 use github::{CheckStatus, DiffSide, PrDetail, PrState, ReviewState, TimelineItem};
@@ -10,7 +12,7 @@ use super::Ctx;
 use super::diff_view::ROW_HEIGHT;
 use crate::protocol::{Command, Slug};
 use crate::state::{
-    PullDialog, PullTab, default_merge_method, merge_defaults, merge_disabled_reason,
+    CommentKey, PullDialog, PullTab, default_merge_method, merge_defaults, merge_disabled_reason,
     review_events_allowed,
 };
 use crate::strings as s;
@@ -80,11 +82,6 @@ fn loading(ui: &mut egui::Ui, p: &crate::state::PullsView) {
         }
         _ => ui.label(s::LOADING_PULL),
     };
-}
-
-/// The whole comment, shown on hover when only its first line fits in the row.
-pub fn comment_hover(body: &str) -> Option<&str> {
-    body.trim_end().contains('\n').then_some(body)
 }
 
 pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>, slug: &Slug) {
@@ -595,6 +592,147 @@ pub enum FileRow {
     SuggestionOld(usize, usize, usize),
     SuggestionNew(usize, usize, usize),
     SuggestionApply(usize, usize),
+    /// Row `k` (from 1) of a comment shown whole: thread index, comment index, row.
+    CommentMore(usize, usize, usize),
+    /// Row `k` (from 1) of a pending comment shown whole: pending index, row.
+    PendingMore(usize, usize),
+}
+
+/// Spaces before the `>` of a comment row; the marker is drawn at their start.
+const COMMENT_INDENT: usize = 14;
+/// Columns kept by a comment row however narrow the view (else nothing would be readable).
+const MIN_COMMENT_COLUMNS: usize = 8;
+
+/// Pure: `text` hard-wrapped to `columns` characters per row. Words are kept whole when
+/// they fit a row, longer ones are broken; each line of `text` starts a row.
+pub fn wrap_text(text: &str, columns: usize) -> Vec<String> {
+    let columns = columns.max(1);
+    let mut out = Vec::new();
+    for line in text.trim_end().lines() {
+        let chars: Vec<char> = line.replace('\t', "    ").trim_end().chars().collect();
+        if chars.is_empty() {
+            out.push(String::new());
+            continue;
+        }
+        let mut start = 0;
+        while chars.len() - start > columns {
+            // The character right after the limit counts: a space there ends a full row.
+            let window = &chars[start..=start + columns];
+            match window.iter().rposition(|c| *c == ' ').filter(|i| *i > 0) {
+                Some(i) => {
+                    let row: String = chars[start..start + i].iter().collect();
+                    out.push(row.trim_end().to_string());
+                    start += i;
+                    while start < chars.len() && chars[start] == ' ' {
+                        start += 1;
+                    }
+                }
+                None => {
+                    out.push(chars[start..start + columns].iter().collect());
+                    start += columns;
+                }
+            }
+        }
+        if start < chars.len() {
+            out.push(chars[start..].iter().collect());
+        }
+    }
+    out
+}
+
+/// Pure: `text` cut to `columns` characters, ending with an ellipsis when it was cut.
+pub fn clip_line(text: &str, columns: usize) -> (String, bool) {
+    let text = text.replace('\t', "    ");
+    let text = text.trim_end();
+    if text.chars().count() <= columns {
+        return (text.to_string(), false);
+    }
+    let keep = columns.saturating_sub(s::ELLIPSIS.chars().count());
+    let mut cut: String = text.chars().take(keep).collect();
+    cut.push_str(s::ELLIPSIS);
+    (cut, true)
+}
+
+/// What the rows of a comment show: the marker of its first row, then the text of each row
+/// (one row unless shown whole).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommentText {
+    pub marker: &'static str,
+    pub rows: Vec<String>,
+}
+
+/// Pure: the rows of a comment `body` in `columns` characters of text. A comment cut or on
+/// several lines gets a marker, and is shown whole (wrapped) when `expanded`.
+pub fn comment_text(body: &str, columns: usize, expanded: bool) -> CommentText {
+    let columns = columns.max(MIN_COMMENT_COLUMNS);
+    let first = body.lines().next().unwrap_or("");
+    let (clipped, cut) = clip_line(first, columns);
+    let more = cut || body.trim_end().contains('\n');
+    match (more, expanded) {
+        (false, _) => CommentText {
+            marker: "",
+            rows: vec![clipped],
+        },
+        (true, false) => CommentText {
+            marker: s::EXPAND_MARK,
+            rows: vec![clipped],
+        },
+        (true, true) => CommentText {
+            marker: s::COLLAPSE_MARK,
+            rows: wrap_text(body, columns),
+        },
+    }
+}
+
+/// Start of a comment's first row: its marker, then `> who: `.
+fn comment_prefix(marker: &str, who: &str) -> String {
+    format!("{marker:<COMMENT_INDENT$}> {who}: ")
+}
+
+/// Columns left for the text of a comment by `who` whose first row ends with `suffix`.
+fn comment_columns(columns: usize, who: &str, suffix: &str) -> usize {
+    columns.saturating_sub(comment_prefix("", who).chars().count() + suffix.chars().count())
+}
+
+/// Gray end of a thread comment's first row: the lines it is about, resolved.
+fn comment_suffix(thread: &github::ReviewThread, c: usize) -> String {
+    let mut suffix = String::new();
+    if c == 0
+        && let Some((a, b)) = thread_range(thread).filter(|(a, b)| a < b)
+    {
+        let range = s::LINES_RANGE
+            .replace("{a}", &a.to_string())
+            .replace("{b}", &b.to_string());
+        suffix = format!("  ({range})");
+    }
+    if thread.resolved {
+        suffix.push_str(&format!("  ({})", s::RESOLVED));
+    }
+    suffix
+}
+
+/// Rows of comment `c` of `thread` in a view `columns` characters wide.
+fn thread_comment_text(
+    thread: &github::ReviewThread,
+    c: usize,
+    expanded: &HashSet<CommentKey>,
+    columns: usize,
+) -> CommentText {
+    let comment = &thread.comments[c];
+    let width = comment_columns(columns, &comment.author, &comment_suffix(thread, c));
+    let key = CommentKey::Thread(thread.id.clone(), c);
+    comment_text(&comment.body, width, expanded.contains(&key))
+}
+
+/// Rows of pending comment `i` in a view `columns` characters wide.
+fn pending_text(
+    c: &github::LineComment,
+    i: usize,
+    expanded: &HashSet<CommentKey>,
+    columns: usize,
+) -> CommentText {
+    let width = comment_columns(columns, s::PENDING_TAG, "");
+    comment_text(&c.body, width, expanded.contains(&CommentKey::Pending(i)))
 }
 
 /// Title of a thread in the Conversation tab: `path:N` or `path lines a-b`, ` (old)`
@@ -676,11 +814,14 @@ pub fn new_side_lines(diff: &gitcore::FileDiff, start: u32, end: u32) -> Option<
     (found.len() as u32 == end - start + 1).then(|| found.into_iter().map(|(_, t)| t).collect())
 }
 
-/// Pure: lay out `diff` with the comments of `threads` and `pending` under their lines.
+/// Pure: lay out `diff` with the comments of `threads` and `pending` under their lines, in a
+/// view `columns` characters wide; the `expanded` comments take a row per wrapped line.
 pub fn file_rows(
     diff: &gitcore::FileDiff,
     threads: &[github::ReviewThread],
     pending: &[github::LineComment],
+    expanded: &HashSet<CommentKey>,
+    columns: usize,
 ) -> Vec<FileRow> {
     let mut out = Vec::new();
     for (h, hunk) in diff.hunks.iter().enumerate() {
@@ -691,6 +832,8 @@ pub fn file_rows(
                 let thread = &threads[t];
                 for (c, comment) in thread.comments.iter().enumerate() {
                     out.push(FileRow::Comment(t, c));
+                    let rows = thread_comment_text(thread, c, expanded, columns).rows.len();
+                    out.extend((1..rows).map(|k| FileRow::CommentMore(t, c, k)));
                     // Across both sides, the lines it replaces are not known: no Apply.
                     let Some(code) = github::suggestions(&comment.body)
                         .into_iter()
@@ -708,13 +851,13 @@ pub fn file_rows(
                 }
             }
             if let Some(target) = crate::pr_diff::line_target(line) {
-                out.extend(
-                    pending
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, c)| c.path == diff.path && (c.line, c.side) == target)
-                        .map(|(i, _)| FileRow::Pending(i)),
-                );
+                for (i, c) in pending.iter().enumerate() {
+                    if c.path == diff.path && (c.line, c.side) == target {
+                        out.push(FileRow::Pending(i));
+                        let rows = pending_text(c, i, expanded, columns).rows.len();
+                        out.extend((1..rows).map(|k| FileRow::PendingMore(i, k)));
+                    }
+                }
             }
         }
     }
@@ -794,7 +937,12 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
     }
     let can_comment = d.summary.state == PrState::Open;
     let mono = egui::FontId::monospace(win95::theme::FONT_SIZE);
-    let rows = file_rows(diff, &d.threads, p.selected_pending());
+    // Comments fit the visible width (the code lines scroll sideways).
+    let glyph = ui.fonts_mut(|f| f.glyph_width(&mono, 'x')).max(1.0);
+    let visible = ui.available_width() - ui.spacing().scroll.allocated_width();
+    let columns = ((visible / glyph).floor() as usize).saturating_sub(1);
+    let rows = file_rows(diff, &d.threads, p.selected_pending(), &p.expanded, columns);
+    let mut expand: Option<CommentKey> = None;
     let mut comment_on: Option<CommentOn> = None;
     let mut select: Option<(usize, usize, bool)> = None;
     let selection = p.selection;
@@ -918,26 +1066,27 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             }
                         }
                     }
-                    FileRow::Comment(t, c) => {
+                    FileRow::Comment(t, c) | FileRow::CommentMore(t, c, _) => {
+                        let k = match *row {
+                            FileRow::CommentMore(_, _, k) => k,
+                            _ => 0,
+                        };
                         let thread = &d.threads[t];
                         let comment = &thread.comments[c];
-                        let first = comment.body.lines().next().unwrap_or("");
-                        let mut suffix = String::new();
-                        if c == 0
-                            && let Some((a, b)) = thread_range(thread).filter(|(a, b)| a < b)
-                        {
-                            let range = s::LINES_RANGE
-                                .replace("{a}", &a.to_string())
-                                .replace("{b}", &b.to_string());
-                            suffix = format!("  ({range})");
-                        }
-                        if thread.resolved {
-                            suffix.push_str(&format!("  ({})", s::RESOLVED));
-                        }
+                        let text = thread_comment_text(thread, c, &p.expanded, columns);
+                        let (prefix, suffix) = if k == 0 {
+                            (
+                                comment_prefix(text.marker, &comment.author),
+                                comment_suffix(thread, c),
+                            )
+                        } else {
+                            let indent = comment_prefix("", &comment.author).chars().count();
+                            (" ".repeat(indent), String::new())
+                        };
                         let job = crate::highlight::colored_line(
                             &win95::theme::palette(ui.ctx()),
-                            &format!("              > {}: ", comment.author),
-                            first,
+                            &prefix,
+                            text.rows.get(k).map_or("", String::as_str),
                             None,
                             &suffix,
                             mono.clone(),
@@ -949,10 +1098,9 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             ROW_HEIGHT,
                             win95::theme::palette(ui.ctx()).comment_bg,
                         );
-                        let resp = match comment_hover(&comment.body) {
-                            Some(full) => resp.on_hover_text(full),
-                            None => resp,
-                        };
+                        if resp.clicked() && !text.marker.is_empty() {
+                            expand = Some(CommentKey::Thread(thread.id.clone(), c));
+                        }
                         // Resolve as in Conversation, whatever the state; Reply: open only.
                         let resolve_offer = resolve_action(thread);
                         if can_comment || resolve_offer.is_some() {
@@ -1060,13 +1208,21 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             }
                         });
                     }
-                    FileRow::Pending(i) => {
-                        let c = &p.selected_pending()[i];
-                        let first = c.body.lines().next().unwrap_or("");
+                    FileRow::Pending(i) | FileRow::PendingMore(i, _) => {
+                        let k = match *row {
+                            FileRow::PendingMore(_, k) => k,
+                            _ => 0,
+                        };
+                        let text = pending_text(&p.selected_pending()[i], i, &p.expanded, columns);
+                        let prefix = if k == 0 {
+                            comment_prefix(text.marker, s::PENDING_TAG)
+                        } else {
+                            " ".repeat(comment_prefix("", s::PENDING_TAG).chars().count())
+                        };
                         let job = crate::highlight::colored_line(
                             &win95::theme::palette(ui.ctx()),
-                            &format!("              > {}: ", s::PENDING_TAG),
-                            first,
+                            &prefix,
+                            text.rows.get(k).map_or("", String::as_str),
                             None,
                             "",
                             mono.clone(),
@@ -1078,10 +1234,9 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
                             ROW_HEIGHT,
                             win95::theme::palette(ui.ctx()).pending_bg,
                         );
-                        let resp = match comment_hover(&c.body) {
-                            Some(full) => resp.on_hover_text(full),
-                            None => resp,
-                        };
+                        if resp.clicked() && !text.marker.is_empty() {
+                            expand = Some(CommentKey::Pending(i));
+                        }
                         resp.context_menu(|ui| {
                             if ui.button(s::DISCARD_PENDING).clicked() {
                                 drop_pending = Some(i);
@@ -1132,6 +1287,11 @@ fn file_diff(ui: &mut egui::Ui, cx: &mut Ctx<'_>, d: &PrDetail) {
             comment_id,
             body: String::new(),
         });
+    }
+    if let Some(key) = expand
+        && !p.expanded.remove(&key)
+    {
+        p.expanded.insert(key);
     }
     if let Some(i) = drop_pending {
         p.drop_pending(i);
@@ -1185,7 +1345,7 @@ mod tests {
             body: "keep b".into(),
         }];
         assert_eq!(
-            file_rows(&diff, &[thread], &pending),
+            file_rows(&diff, &[thread], &pending, &Default::default(), 200),
             [
                 FileRow::Hunk(0),
                 FileRow::Line(0, 0),
