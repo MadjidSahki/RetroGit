@@ -3,7 +3,7 @@
 mod common;
 
 use common::remote::{Env, configure, git, no_cancel};
-use gitcore::NetAuth;
+use gitcore::{GitError, NetAuth};
 
 /// Another clone pushes a commit to `refs/pull/<n>/head` only (like a fork's PR), and
 /// returns its commit id.
@@ -70,6 +70,33 @@ fn fetch_pull_moves_an_existing_branch_forward_even_when_checked_out() {
     assert!(!behind, "moved forward");
     assert_eq!(rev(&env, "pr/2"), newer);
     assert!(env.work.join("b.txt").exists(), "working tree follows");
+}
+
+#[test]
+fn a_checked_out_pull_request_branch_blocked_by_local_changes_is_a_distinct_error() {
+    let Some(env) = Env::new() else { return };
+    push_pull_head(&env, 4, "a.txt", false);
+    let r = env.repo();
+    r.fetch_pull(4, &NetAuth::default(), |_| {}, &no_cancel())
+        .unwrap();
+    r.switch_branch("pr/4").unwrap();
+    let before = rev(&env, "pr/4");
+    // A local file the new head also brings.
+    std::fs::write(env.work.join("b.txt"), "local\n").unwrap();
+    let newer = push_pull_head(&env, 4, "b.txt", false);
+    let err = r
+        .fetch_pull(4, &NetAuth::default(), |_| {}, &no_cancel())
+        .unwrap_err();
+    assert!(
+        matches!(&err, GitError::WouldOverwrite { files } if files == &["b.txt".to_string()]),
+        "{err:?}"
+    );
+    assert_eq!(rev(&env, "pr/4"), before, "not moved");
+    assert_eq!(rev(&env, "refs/retrogit/pull/4"), newer, "but fetched");
+    assert_eq!(
+        std::fs::read_to_string(env.work.join("b.txt")).unwrap(),
+        "local\n"
+    );
 }
 
 #[test]

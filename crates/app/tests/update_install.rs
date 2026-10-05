@@ -274,6 +274,37 @@ fn a_download_that_stops_receiving_data_fails() {
 }
 
 #[test]
+fn reading_the_body_is_bounded_in_time() {
+    let file = "RetroGit-windows-x64-setup.exe";
+    let (_server, r) = stalling_server(file);
+    let dir = tempfile::tempdir().unwrap();
+    let started = Instant::now();
+    let err = download_verified(
+        &Fetcher::new(local_only)
+            .with_stall(Duration::from_secs(10))
+            .with_body_timeout(Duration::from_millis(300)),
+        &r,
+        &InstallKind::WindowsInstalled,
+        dir.path(),
+        &NO,
+        |_, _| {},
+    )
+    .unwrap_err();
+    assert_ne!(
+        err,
+        retrogit::strings::ERR_UPDATE_STALLED,
+        "the body timeout, not the stall"
+    );
+    assert!(err.to_lowercase().contains("timeout"), "{err}");
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "failed after {:?}",
+        started.elapsed()
+    );
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
 fn redirects_outside_the_allowed_hosts_and_missing_checksums_are_refused() {
     let mut server = mockito::Server::new();
     let file = "RetroGit-windows-x64.zip";

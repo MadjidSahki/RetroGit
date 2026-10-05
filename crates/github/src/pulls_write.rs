@@ -104,8 +104,12 @@ struct Created {
 }
 
 /// Percent-encode a path segment (branch or label names: spaces, `#`, `%`...). `/` is
-/// kept when `keep_slash` (Git ref paths).
+/// kept when `keep_slash` (Git ref paths). A whole segment `.` or `..` is encoded too
+/// (`%2E`, `%2E%2E`): never taken as a path step.
 pub fn encode_segment(s: &str, keep_slash: bool) -> String {
+    if !keep_slash && (s == "." || s == "..") {
+        return "%2E".repeat(s.len());
+    }
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         let plain = b.is_ascii_alphanumeric()

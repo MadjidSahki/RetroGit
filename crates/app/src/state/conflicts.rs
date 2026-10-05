@@ -119,6 +119,22 @@ fn to_crlf(text: &str) -> String {
     out
 }
 
+/// Every `\n` of `text` is preceded by `\r` (and there is at least one): a CRLF file. Mixed
+/// files are not, and are edited and written byte for byte.
+fn uniform_crlf(text: &str) -> bool {
+    let b = text.as_bytes();
+    let mut any = false;
+    for (i, &c) in b.iter().enumerate() {
+        if c == b'\n' {
+            if i == 0 || b[i - 1] != b'\r' {
+                return false;
+            }
+            any = true;
+        }
+    }
+    any
+}
+
 impl ConflictEditor {
     /// Send `cmd` (a resolution): the buttons stay greyed until Git answers.
     pub fn resolve(&mut self, cmd: Command) -> Command {
@@ -126,13 +142,10 @@ impl ConflictEditor {
         cmd
     }
 
-    /// The working file uses CRLF line endings: edited as plain `\n` (so Enter, Backspace and
+    /// The working file uses CRLF line endings only: edited as plain `\n` (so Enter, Backspace and
     /// Delete act on whole line breaks), written back as CRLF by [`Self::content`].
     pub fn crlf(&self) -> bool {
-        self.file
-            .working
-            .as_deref()
-            .is_some_and(|w| w.contains("\r\n"))
+        self.file.working.as_deref().is_some_and(uniform_crlf)
     }
 
     /// What Mark resolved writes: `result` with the file's own line endings back.
@@ -146,7 +159,7 @@ impl ConflictEditor {
 
     pub fn new(file: ConflictFile) -> ConflictEditor {
         let working = file.working.as_deref().unwrap_or_default();
-        let crlf = working.contains("\r\n");
+        let crlf = uniform_crlf(working);
         let lf = |t: &str| {
             if crlf {
                 t.replace("\r\n", "\n")

@@ -1,5 +1,6 @@
 //! Worker side of sub-project 4: pull requests through the GitHub API.
 
+use gitcore::{GitError, Refusal};
 use github::{Client, GithubError, NewPull, PrFilter};
 
 use super::Worker;
@@ -497,6 +498,18 @@ impl Worker {
         drop(repo);
         let (name, mut behind) = match fetched {
             Ok(target) => target,
+            // Fetched, but local changes keep the checked-out `pr/N` from moving: the fetch
+            // worked, the checkout did not.
+            Err(
+                e @ (GitError::WouldOverwrite { .. }
+                | GitError::Refused(Refusal::LocalChangesFirst)),
+            ) => {
+                self.emit(Event::SyncFinished {
+                    op: SyncOp::Fetch,
+                    ok: true,
+                });
+                return self.fail(Op::PullAction, AppError::from_git(&e));
+            }
             Err(e) => return self.net_failed(SyncOp::Fetch, false, &e),
         };
         self.emit(Event::SyncFinished {

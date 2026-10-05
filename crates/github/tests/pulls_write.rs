@@ -101,6 +101,30 @@ fn removing_labels_only_posts_nothing() {
 }
 
 #[test]
+fn dot_labels_are_encoded_not_taken_as_path_steps() {
+    let mut server = mockito::Server::new();
+    let dot = server
+        .mock("DELETE", "/repos/o/r/issues/7/labels/%2E")
+        .with_body("[]")
+        .create();
+    let dots = server
+        .mock("DELETE", "/repos/o/r/issues/7/labels/%2E%2E")
+        .with_body("[]")
+        .create();
+    let other = server
+        .mock("DELETE", Matcher::Any)
+        .with_status(404)
+        .expect(0)
+        .create();
+    client(&server)
+        .set_labels("t", "o", "r", 7, &[".".to_string(), "..".into()], &[])
+        .unwrap();
+    dot.assert();
+    dots.assert();
+    other.assert();
+}
+
+#[test]
 fn existing_pull_is_reported_and_can_be_found() {
     let mut server = mockito::Server::new();
     server

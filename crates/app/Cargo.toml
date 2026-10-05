@@ -31,6 +31,7 @@ notify.workspace = true
 getrandom.workspace = true
 syntect.workspace = true
 two-face.workspace = true
+url.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true

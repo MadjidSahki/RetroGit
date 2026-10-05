@@ -404,6 +404,22 @@ fn a_crlf_file_is_edited_with_plain_line_breaks_and_resolved_with_crlf() {
 }
 
 #[test]
+fn a_mixed_line_ending_file_is_edited_and_written_byte_for_byte() {
+    let mut st = state();
+    assert!(st.changes.open_conflict("a.rs"));
+    // CRLF on the first lines only, lone '\n' after.
+    let mixed = MARKED.replacen('\n', "\r\n", 3);
+    assert!(mixed.contains("\r\n") && mixed.contains("x\nb\n"));
+    st.apply(Event::ConflictLoaded(Box::new(file("a.rs", &mixed))));
+    let ed = st.changes.conflict.as_mut().unwrap();
+    assert!(!ed.crlf(), "mixed is not CRLF");
+    assert_eq!(ed.result, mixed, "edited as is");
+    assert_eq!(ed.content(), mixed, "written as is");
+    ed.typed("a\r\nb\nc".into());
+    assert_eq!(ed.content(), "a\r\nb\nc", "no conversion");
+}
+
+#[test]
 fn a_theme_change_recolors_the_result_shown() {
     use retrogit::highlight::Colors;
     let mut st = state();

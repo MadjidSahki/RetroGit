@@ -735,6 +735,62 @@ mod checkout {
         );
     }
 
+    #[test]
+    fn a_pull_request_branch_blocked_by_local_changes_is_not_a_failed_fetch() {
+        use retrogit::protocol::SyncOp;
+        use retrogit::strings as s;
+        let Some((_tmp, work)) = env() else { return };
+        let seed = work.parent().unwrap().join("seed");
+        let server = mockito::Server::new();
+        let w = start(&server, TokenProvider::without_gh());
+        w.send(Command::OpenRepo(work.clone()));
+        until(&w, |e| matches!(e, Event::SyncFinished { .. }));
+        w.send(Command::CheckoutPull {
+            number: 1,
+            head: None,
+        });
+        until(&w, |e| matches!(e, Event::PullActionDone { .. }));
+        // A local file the pull request's next commit also brings.
+        std::fs::write(work.join("new.txt"), "local\n").unwrap();
+        std::fs::write(seed.join("new.txt"), "fork\n").unwrap();
+        git(&seed, &["add", "new.txt"]);
+        git(&seed, &["commit", "-q", "-m", "new"]);
+        git(&seed, &["push", "-q", "origin", "HEAD:refs/pull/1/head"]);
+        w.send(Command::CheckoutPull {
+            number: 1,
+            head: None,
+        });
+        let evs = until(&w, |e| matches!(e, Event::Error { .. }));
+        assert!(
+            !evs.iter().any(|e| matches!(
+                e,
+                Event::SyncFinished {
+                    op: SyncOp::Fetch,
+                    ok: false
+                }
+            )),
+            "{evs:?}"
+        );
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                Event::SyncFinished {
+                    op: SyncOp::Fetch,
+                    ok: true
+                }
+            )),
+            "{evs:?}"
+        );
+        assert!(
+            matches!(
+                evs.last(),
+                Some(Event::Error { during: Op::PullAction, error })
+                    if error.message == s::ERR_WOULD_OVERWRITE
+            ),
+            "{evs:?}"
+        );
+    }
+
     fn fetch_shown(evs: &[Event]) -> bool {
         use retrogit::protocol::SyncOp;
         evs.iter().any(|e| {

@@ -3226,6 +3226,7 @@ dependencies = [
  "tempfile",
  "two-face",
  "ureq",
+ "url",
  "win95",
  "windows",
  "winresource",

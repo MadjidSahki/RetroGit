@@ -230,6 +230,16 @@ fn redirect_locations_are_resolved_against_the_current_url() {
         resolve_location("https://github.com", "y.zip"),
         "https://github.com/y.zip"
     );
+    // RFC 3986: query only, dot segments, fragment only.
+    assert_eq!(
+        resolve_location("https://h/a/v1/x.zip?a=1", "?q=1"),
+        "https://h/a/v1/x.zip?q=1"
+    );
+    assert_eq!(
+        resolve_location("https://h/a/v1/x.zip", "../x"),
+        "https://h/a/x"
+    );
+    assert_eq!(resolve_location("https://h/a/b", "#f"), "https://h/a/b#f");
 }
 
 #[test]

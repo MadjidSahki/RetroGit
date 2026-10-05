@@ -10,8 +10,12 @@ use super::{REPO, Release, parse_release};
 
 /// Shared by the check and the download: the OS trust store (corporate proxies), no
 /// automatic redirects (each one is checked), RetroGit's user agent. `global`: the whole
-/// call; `recv_response`: waiting for the answer's headers.
-pub(crate) fn agent(global: Option<Duration>, recv_response: Option<Duration>) -> Agent {
+/// call; `recv_response`: waiting for the answer's headers; `recv_body`: reading the body.
+pub(crate) fn agent(
+    global: Option<Duration>,
+    recv_response: Option<Duration>,
+    recv_body: Option<Duration>,
+) -> Agent {
     Agent::config_builder()
         .http_status_as_error(false)
         .max_redirects(0)
@@ -19,6 +23,7 @@ pub(crate) fn agent(global: Option<Duration>, recv_response: Option<Duration>) -
         .timeout_connect(Some(Duration::from_secs(10)))
         .timeout_global(global)
         .timeout_recv_response(recv_response)
+        .timeout_recv_body(recv_body)
         .tls_config(
             TlsConfig::builder()
                 .root_certs(RootCerts::PlatformVerifier)
@@ -31,7 +36,7 @@ pub(crate) fn agent(global: Option<Duration>, recv_response: Option<Duration>) -
 /// `GET {api}/repos/MadjidSahki/RetroGit/releases/latest` (no token: public repository).
 pub fn fetch_latest(api: &str) -> Result<Release, String> {
     let url = format!("{}/repos/{REPO}/releases/latest", api.trim_end_matches('/'));
-    let mut resp = agent(Some(Duration::from_secs(15)), None)
+    let mut resp = agent(Some(Duration::from_secs(15)), None, None)
         .get(&url)
         .header("Accept", "application/vnd.github+json")
         .call()

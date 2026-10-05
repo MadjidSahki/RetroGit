@@ -100,7 +100,8 @@ impl Repo {
     /// the local branch `pr/N`, without switching to it. An existing `pr/N` moves forward;
     /// after a force-push it follows the pull request only if it has no commits of its own.
     /// Returns the branch name, and whether commits of its own kept it from moving to
-    /// the pull request's latest commit.
+    /// the pull request's latest commit. A checked-out `pr/N` that local changes keep from
+    /// moving: `WouldOverwrite` (or `Refused(LocalChangesFirst)`), after a successful fetch.
     pub fn fetch_pull(
         &self,
         number: u64,
@@ -135,11 +136,26 @@ impl Repo {
         let checked_out = self.current_branch().is_some_and(|b| b.name == branch);
         if !checked_out {
             self.git_ok(&["branch", "-f", &branch, &new])?;
-        } else if forward {
-            self.git_ok(&["merge", "--ff-only", &new])?;
+            return Ok((branch, false));
+        }
+        let out = if forward {
+            self.run_git(&["merge", "--ff-only", &new])?
         } else {
             // Force-pushed pull request, no local work: follow it, keeping local changes.
-            self.git_ok(&["reset", "--keep", &new])?;
+            self.run_git(&["reset", "--keep", &new])?
+        };
+        if !out.success {
+            // Fetched, but local changes keep the checked-out branch from moving.
+            let files = crate::parse_overwritten_files(&out.text);
+            let lower = out.text.to_lowercase();
+            return Err(if !files.is_empty() {
+                GitError::WouldOverwrite { files }
+            } else if lower.contains("not uptodate") || lower.contains("would be overwritten") {
+                // `reset --keep`: "Entry 'f' not uptodate. Cannot merge."
+                GitError::Refused(Refusal::LocalChangesFirst)
+            } else {
+                GitError::Other(out.text)
+            });
         }
         Ok((branch, false))
     }
