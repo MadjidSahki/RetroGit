@@ -127,22 +127,33 @@ pub fn with_palette<R>(
     let ctx = ui.ctx().clone();
     let before = ctx.data(|d| d.get_temp::<Palette>(override_id()));
     ctx.data_mut(|d| d.insert_temp(override_id(), palette));
-    let r = ui
-        .scope(|ui| {
-            let mut style = (**ui.style()).clone();
-            apply_style(&mut style, &palette);
-            ui.set_style(style);
-            add(ui)
-        })
-        .inner;
-    ctx.data_mut(|d| {
-        if let Some(p) = before {
-            d.insert_temp(override_id(), p);
-        } else {
-            d.remove::<Palette>(override_id());
-        }
-    });
-    r
+    // Restores the previous palette even if `add` panics.
+    let _restore = Restore { ctx, before };
+    ui.scope(|ui| {
+        let mut style = (**ui.style()).clone();
+        apply_style(&mut style, &palette);
+        ui.set_style(style);
+        add(ui)
+    })
+    .inner
+}
+
+struct Restore {
+    ctx: egui::Context,
+    before: Option<Palette>,
+}
+
+impl Drop for Restore {
+    fn drop(&mut self) {
+        let before = self.before.take();
+        self.ctx.data_mut(|d| {
+            if let Some(p) = before {
+                d.insert_temp(override_id(), p);
+            } else {
+                d.remove::<Palette>(override_id());
+            }
+        });
+    }
 }
 
 fn set_fonts(ctx: &egui::Context, first: Font) {

@@ -165,9 +165,16 @@ fn highlight_lines(
     Some(out)
 }
 
+thread_local! {
+    /// Number of [`highlight`] calls on this thread (tests check the preview cache).
+    #[doc(hidden)]
+    pub static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Highlight consecutive lines of one file (each line may end with its newline).
 /// `None` when the language is unknown or the input is too large.
 pub fn highlight(path: &str, lines: &[&str], dark: bool) -> Option<Vec<Vec<Span>>> {
+    CALLS.with(|c| c.set(c.get() + 1));
     if lines.len() > MAX_LINES {
         return None;
     }

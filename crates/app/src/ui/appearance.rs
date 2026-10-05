@@ -1,5 +1,7 @@
 //! View > Appearance: color scheme, interface font and size, with a live preview.
 
+use std::sync::Arc;
+
 use egui::{RichText, Vec2};
 use win95::theme::{self, Font};
 use win95::{Bevel, Button95, Dialog, Scheme, TitleBar, bevel_frame, combo_box};
@@ -91,6 +93,7 @@ fn preview(ui: &mut egui::Ui, scheme: Scheme, font: Font) {
                     TitleBar::new(s::PREVIEW_INACTIVE)
                         .active(false)
                         .close_only()
+                        .decorative()
                         .show(ui)
                 });
             });
@@ -98,7 +101,10 @@ fn preview(ui: &mut egui::Ui, scheme: Scheme, font: Font) {
             bevel_frame(ui, Bevel::Window, pal.face, 1, |ui| {
                 ui.set_width(ui.available_width());
                 ui.push_id("preview_active", |ui| {
-                    TitleBar::new(s::PREVIEW_ACTIVE).close_only().show(ui)
+                    TitleBar::new(s::PREVIEW_ACTIVE)
+                        .close_only()
+                        .decorative()
+                        .show(ui)
                 });
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(s::PREVIEW_NORMAL).color(pal.text));
@@ -135,20 +141,33 @@ fn code_lines(ui: &mut egui::Ui, pal: &win95::Palette) {
         ("-", "    println!(\"old\");", pal.removed),
         ("+", "    println!(\"new\");", pal.added),
     ];
-    let texts: Vec<String> = lines.iter().map(|(_, t, _)| format!("{t}\n")).collect();
-    let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
-    let spans = crate::highlight::highlight("preview.rs", &refs, pal.dark);
+    let spans = preview_spans(ui.ctx(), &lines.map(|(_, t, _)| t), pal.dark);
     ui.spacing_mut().item_spacing.y = 0.0;
     for (i, (sign, text, bg)) in lines.iter().enumerate() {
         let job = crate::highlight::colored_line(
             pal,
             &format!("{sign} "),
             text,
-            spans.as_ref().and_then(|s| s.get(i)).map(Vec::as_slice),
+            spans.as_deref().and_then(|s| s.get(i)).map(Vec::as_slice),
             "",
             mono.clone(),
             egui::Color32::TRANSPARENT,
         );
         crate::highlight::diff_row(ui, job, 17.0, *bg);
     }
+}
+
+type Spans = Option<Vec<Vec<crate::highlight::Span>>>;
+
+/// The preview's code colors, computed once per light or dark theme (kept in egui's data).
+fn preview_spans(ctx: &egui::Context, lines: &[&str], dark: bool) -> Arc<Spans> {
+    let id = egui::Id::new(("appearance_preview_spans", dark));
+    if let Some(spans) = ctx.data(|d| d.get_temp::<Arc<Spans>>(id)) {
+        return spans;
+    }
+    let texts: Vec<String> = lines.iter().map(|t| format!("{t}\n")).collect();
+    let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+    let spans = Arc::new(crate::highlight::highlight("preview.rs", &refs, dark));
+    ctx.data_mut(|d| d.insert_temp(id, Arc::clone(&spans)));
+    spans
 }

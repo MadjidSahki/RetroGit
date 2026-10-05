@@ -340,3 +340,33 @@ fn a_zoom_key_while_appearance_is_open_survives_ok_and_cancel() {
     st.appearance_cancel();
     assert_eq!(st.config.appearance.zoom, 1.2, "Cancel keeps it");
 }
+
+#[test]
+fn the_preview_title_bars_are_pictures_not_buttons() {
+    let mut h = harness();
+    h.run();
+    // Only the dialog's own close button: the preview ones cannot be clicked or announced.
+    assert_eq!(h.query_all_by_label("Close").count(), 1);
+}
+
+#[test]
+fn the_preview_code_is_colored_once_per_light_or_dark() {
+    let calls = || retrogit::highlight::CALLS.with(std::cell::Cell::get);
+    // The builder already draws a first frame.
+    let before = calls();
+    let mut h = harness();
+    for _ in 0..3 {
+        h.run();
+    }
+    assert_eq!(calls() - before, 1, "light preview colored once");
+    h.state_mut()
+        .state
+        .appearance_dialog
+        .as_mut()
+        .unwrap()
+        .scheme = Scheme::Dark;
+    for _ in 0..3 {
+        h.run();
+    }
+    assert_eq!(calls() - before, 2, "dark preview colored once");
+}
