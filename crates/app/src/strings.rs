@@ -100,6 +100,9 @@ pub const STAGED_CHANGES: &str = "Staged changes";
 pub const CHANGES: &str = "Changes";
 pub const STAGE_ALL: &str = "Stage all";
 pub const DISCARD_ALL: &str = "Discard all";
+pub const RESET_ALL: &str = "Reset all";
+pub const RESET_ALL_NEW_NOTE: &str =
+    "Files that are not in the last commit are moved to the trash.";
 pub const DISCARD_MENU: &str = "Discard changes...";
 pub const DISCARD_HUNK: &str = "Discard hunk";
 pub const DISCARD_LINES: &str = "Discard selected lines";

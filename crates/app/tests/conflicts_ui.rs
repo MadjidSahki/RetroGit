@@ -565,3 +565,113 @@ fn cancelling_the_pending_comments_question_keeps_the_edited_conflict() {
     assert!(ed.edited);
     assert_eq!(ed.result, edited);
 }
+
+fn file(path: &str, staged: Option<Change>, unstaged: Option<Change>) -> FileStatus {
+    FileStatus {
+        path: path.into(),
+        staged,
+        unstaged,
+    }
+}
+
+/// No conflict editor: `files` changed on `head`, with `op` in progress.
+fn changes_world(head: Head, op: Option<Operation>, files: Vec<FileStatus>) -> World {
+    let mut w = world(ConflictKind::Content);
+    w.state.apply(Event::RepoOpened(RepoSummary {
+        name: "r".into(),
+        path: PathBuf::from("/tmp/r"),
+        head,
+        origin_url: None,
+        last_commit: None,
+    }));
+    w.state.apply(Event::OperationChanged(op));
+    w.state.apply(Event::StatusLoaded(files));
+    w
+}
+
+fn main_branch() -> Head {
+    Head::Branch("main".into())
+}
+
+#[test]
+fn reset_all_asks_before_throwing_away_staged_changes_too() {
+    let files = vec![
+        file("a.txt", Some(Change::Modified), None),
+        file("new.txt", Some(Change::Added), None),
+    ];
+    let mut h = harness(changes_world(main_branch(), None, files));
+    h.run();
+    assert!(!disabled(&h, s::RESET_ALL));
+    h.get_by_label(s::RESET_ALL).click();
+    h.run();
+    let pending = h.state().state.changes.pending_discard.clone().unwrap();
+    assert_eq!(pending.command, retrogit::protocol::Command::ResetChanges);
+    assert_eq!(
+        pending.question,
+        "Throw away all staged and unstaged changes (2 files)?\n\n\
+         Files that are not in the last commit are moved to the trash."
+    );
+}
+
+#[test]
+fn reset_all_is_on_with_only_unstaged_changes() {
+    let files = vec![file("a.txt", None, Some(Change::Modified))];
+    let mut h = harness(changes_world(main_branch(), None, files));
+    h.run();
+    assert!(!disabled(&h, s::RESET_ALL));
+}
+
+#[test]
+fn reset_all_is_off_without_changes() {
+    let mut h = harness(changes_world(main_branch(), None, Vec::new()));
+    h.run();
+    assert!(disabled(&h, s::RESET_ALL));
+}
+
+#[test]
+fn reset_all_is_off_while_an_operation_is_in_progress() {
+    let files = vec![file("a.txt", Some(Change::Modified), None)];
+    let mut h = harness(changes_world(main_branch(), Some(Operation::Merge), files));
+    h.run();
+    assert!(disabled(&h, s::RESET_ALL));
+}
+
+#[test]
+fn reset_all_is_off_before_the_first_commit() {
+    let files = vec![file("a.txt", Some(Change::Added), None)];
+    let mut h = harness(changes_world(Head::Unborn("main".into()), None, files));
+    h.run();
+    assert!(disabled(&h, s::RESET_ALL));
+}
+
+#[test]
+fn reset_all_is_off_while_conflicts_remain() {
+    let mut h = harness(world(ConflictKind::Content));
+    h.run();
+    assert!(disabled(&h, s::RESET_ALL));
+}
+
+#[test]
+fn list_header_buttons_never_cover_the_title() {
+    use egui_kittest::kittest::NodeT;
+    let files = vec![file("a.txt", None, Some(Change::Modified))];
+    let mut h = harness(changes_world(main_branch(), None, files));
+    h.run();
+    let rect = |label: &str| {
+        h.get_by_label(label)
+            .accesskit_node()
+            .bounding_box()
+            .unwrap()
+    };
+    for (title, buttons) in [
+        ("Staged changes (0)", [s::UNSTAGE_ALL, s::RESET_ALL]),
+        ("Changes (1)", [s::STAGE_ALL, s::DISCARD_ALL]),
+    ] {
+        let t = rect(title);
+        for b in buttons {
+            let r = rect(b);
+            let overlap = r.x0 < t.x1 && t.x0 < r.x1 && r.y0 < t.y1 && t.y0 < r.y1;
+            assert!(!overlap, "{b} {r:?} covers {title} {t:?}");
+        }
+    }
+}

@@ -1,4 +1,4 @@
-//! Throwing away working-tree changes (the index is never touched).
+//! Throwing away working-tree changes (the index is only touched by `reset_changes`).
 
 use std::path::Path;
 
@@ -107,6 +107,87 @@ impl Repo {
             return self.git_on_paths(&["checkout"], &tracked);
         }
         self.discard_files_git2(&tracked)
+    }
+
+    /// Back to HEAD: staged and unstaged changes are thrown away. Files the last commit does
+    /// not hold as a file (`reset_trashes`) go to the OS trash instead of being deleted.
+    /// Refused during a merge, rebase, cherry-pick or revert (abort it instead).
+    pub fn reset_changes(&self) -> Result<(), GitError> {
+        if !crate::git_available() {
+            return self.reset_changes_git2();
+        }
+        self.prepare_reset()?;
+        // No recursion: submodule edits are not listed in the status, so not confirmed.
+        self.git_ok(&[
+            "-c",
+            "submodule.recurse=false",
+            "reset",
+            "-q",
+            "--hard",
+            "HEAD",
+            "--",
+        ])
+        .map(|_| ())
+    }
+
+    /// libgit2-only `reset_changes` (used when `git` is missing).
+    pub fn reset_changes_git2(&self) -> Result<(), GitError> {
+        let head = self.prepare_reset()?;
+        self.git()
+            .reset(head.as_object(), git2::ResetType::Hard, None)
+            .map_err(|e| GitError::from_git2(&e))
+    }
+
+    /// Changed paths `reset_changes` moves to the trash: present on disk, and not a file
+    /// (blob or symlink) in the last commit. A file where HEAD has a directory is one.
+    pub fn reset_trashes(&self) -> Result<Vec<String>, GitError> {
+        let tree = self
+            .head_commit_for_reset()?
+            .tree()
+            .map_err(|e| GitError::from_git2(&e))?;
+        let dir = self.workdir()?;
+        Ok(self
+            .status()?
+            .into_iter()
+            .filter(|f| {
+                tree.get_path(Path::new(&f.path))
+                    .ok()
+                    .and_then(|e| e.kind())
+                    != Some(git2::ObjectType::Blob)
+            })
+            .filter(|f| dir.join(&f.path).symlink_metadata().is_ok())
+            .map(|f| f.path)
+            .collect())
+    }
+
+    fn head_commit_for_reset(&self) -> Result<git2::Commit<'_>, GitError> {
+        self.git()
+            .head()
+            .and_then(|h| h.peel_to_commit())
+            .map_err(|_| GitError::Refused(Refusal::CommitNotFound))
+    }
+
+    /// Refusals, then the trash step. Returns the commit to reset to.
+    fn prepare_reset(&self) -> Result<git2::Commit<'_>, GitError> {
+        let head = self.head_commit_for_reset()?;
+        if self.operation_in_progress().is_some() {
+            return Err(GitError::Refused(Refusal::OperationInProgress));
+        }
+        if self
+            .status()?
+            .iter()
+            .any(|f| f.unstaged == Some(Change::Conflicted))
+        {
+            return Err(GitError::Refused(Refusal::ResolveConflictsFirst));
+        }
+        let dir = self.workdir()?;
+        let files: Vec<_> = self.reset_trashes()?.iter().map(|p| dir.join(p)).collect();
+        if !files.is_empty() {
+            trash_context()
+                .delete_all(&files)
+                .map_err(|e| GitError::Other(format!("cannot move to the trash: {e}")))?;
+        }
+        Ok(head)
     }
 
     /// libgit2-only restore of tracked files (used when `git` is missing).

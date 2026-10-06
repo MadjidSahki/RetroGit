@@ -673,6 +673,27 @@ fn discard_commands_revert_the_working_tree_and_refresh() {
     );
 }
 
+#[test]
+fn reset_changes_drops_staged_and_unstaged_changes_and_refreshes() {
+    let server = mockito::Server::new();
+    let d = repo_for_changes();
+    std::fs::write(d.path().join("README.md"), "hello\nstaged\n").unwrap();
+    let w = start(&server, Arc::new(MemoryAccounts::default()), "");
+    w.send(Command::OpenRepo(d.path().to_path_buf()));
+    until(&w, |e| matches!(e, Event::StatusLoaded(_)));
+    w.send(Command::StageFiles(vec!["README.md".into()]));
+    until(
+        &w,
+        |e| matches!(e, Event::StatusLoaded(f) if f.iter().any(|f| f.staged.is_some())),
+    );
+    w.send(Command::ResetChanges);
+    until(&w, |e| matches!(e, Event::StatusLoaded(f) if f.is_empty()));
+    assert_eq!(
+        std::fs::read_to_string(d.path().join("README.md")).unwrap(),
+        "hello\n"
+    );
+}
+
 mod sync {
     use super::*;
     use retrogit::protocol::SyncOp;

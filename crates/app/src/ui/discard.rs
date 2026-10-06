@@ -18,6 +18,26 @@ pub fn files_question(files: &[FileStatus]) -> String {
     q
 }
 
+/// Question for "Reset all": every changed file, staged or not, goes back to HEAD.
+pub fn reset_question(files: &[FileStatus]) -> String {
+    let plural = if files.len() == 1 { "" } else { "s" };
+    let mut q = format!(
+        "Throw away all staged and unstaged changes ({} file{plural})?",
+        files.len()
+    );
+    // The status cannot tell every such file (gitcore's `reset_trashes` decides), so the
+    // note names the rule rather than promising which files go.
+    let new_file = |f: &FileStatus| {
+        f.unstaged == Some(Change::Untracked)
+            || matches!(f.staged, Some(Change::Added | Change::Renamed { .. }))
+    };
+    if files.iter().any(new_file) {
+        q.push_str("\n\n");
+        q.push_str(s::RESET_ALL_NEW_NOTE);
+    }
+    q
+}
+
 pub fn lines_question(path: &str, n: usize) -> String {
     let plural = if n == 1 { "" } else { "s" };
     format!("Discard {n} selected line{plural} in {path}?")
@@ -100,5 +120,28 @@ mod tests {
             hunk_question("src/lib.rs"),
             "Discard this hunk of src/lib.rs?"
         );
+    }
+
+    #[test]
+    fn the_reset_question_counts_staged_files_and_warns_about_new_ones() {
+        let staged = FileStatus {
+            path: "a".into(),
+            staged: Some(Change::Modified),
+            unstaged: None,
+        };
+        assert_eq!(
+            reset_question(std::slice::from_ref(&staged)),
+            "Throw away all staged and unstaged changes (1 file)?"
+        );
+        let added = FileStatus {
+            path: "b".into(),
+            staged: Some(Change::Added),
+            unstaged: None,
+        };
+        assert_eq!(
+            reset_question(&[staged, added]),
+            "Throw away all staged and unstaged changes (2 files)?\n\nFiles that are not in the last commit are moved to the trash."
+        );
+        assert!(reset_question(&[f("c", Change::Untracked)]).ends_with(s::RESET_ALL_NEW_NOTE));
     }
 }

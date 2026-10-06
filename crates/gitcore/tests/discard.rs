@@ -216,6 +216,169 @@ fn libgit2_discard_treats_paths_literally() {
     );
 }
 
+/// `f.txt` committed with `a`, then staged `a\nstaged` and an unstaged line on top.
+fn staged_and_unstaged() -> (tempfile::TempDir, Repo) {
+    let (d, r) = setup(b"a\n", b"a\nstaged\n");
+    r.stage("f.txt", &Selection::All, None).unwrap();
+    std::fs::write(d.path().join("f.txt"), b"a\nstaged\nunstaged\n").unwrap();
+    (d, r)
+}
+
+#[test]
+fn reset_changes_throws_away_staged_unstaged_and_new_files() {
+    let (d, r) = staged_and_unstaged();
+    let pid = std::process::id();
+    let added = format!("retrogit-reset-added-{pid}.txt");
+    let untracked = format!("retrogit-reset-untracked-{pid}.txt");
+    std::fs::write(d.path().join(&added), b"new\n").unwrap();
+    r.stage_files(&[added.as_str()]).unwrap();
+    std::fs::write(d.path().join(&untracked), b"scratch\n").unwrap();
+
+    r.reset_changes().unwrap();
+
+    assert_eq!(read(d.path(), "f.txt"), b"a\n");
+    assert!(!d.path().join(&added).exists());
+    assert!(!d.path().join(&untracked).exists());
+    assert!(r.status().unwrap().is_empty());
+}
+
+#[test]
+fn libgit2_reset_changes_throws_away_staged_and_unstaged_changes() {
+    let (d, r) = staged_and_unstaged();
+    r.reset_changes_git2().unwrap();
+    assert_eq!(read(d.path(), "f.txt"), b"a\n");
+    assert!(r.status().unwrap().is_empty());
+}
+
+#[test]
+fn reset_trashes_every_file_the_last_commit_does_not_hold_as_a_file() {
+    let d = tempfile::tempdir().unwrap();
+    let repo = common::make_repo(d.path(), 1);
+    for (path, text) in [
+        ("kept.txt", "k\n"),
+        ("old.txt", "o\n"),
+        ("dir/x", "x\n"),
+        ("dir2/y", "y\n"),
+    ] {
+        std::fs::create_dir_all(d.path().join(path).parent().unwrap()).unwrap();
+        std::fs::write(d.path().join(path), text).unwrap();
+    }
+    let mut idx = repo.index().unwrap();
+    idx.add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    idx.write().unwrap();
+    let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+    let sig = git2::Signature::now("Ada", "ada@example.com").unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "files", &tree, &[&parent])
+        .unwrap();
+    let r = Repo::open(d.path()).unwrap();
+
+    std::fs::write(d.path().join("kept.txt"), "changed\n").unwrap();
+    std::fs::write(d.path().join("untracked.txt"), "u\n").unwrap();
+    std::fs::write(d.path().join("added.txt"), "a\n").unwrap();
+    std::fs::rename(d.path().join("old.txt"), d.path().join("new.txt")).unwrap();
+    // A file where the last commit has a directory: untracked, then staged.
+    std::fs::remove_dir_all(d.path().join("dir")).unwrap();
+    std::fs::write(d.path().join("dir"), "precious\n").unwrap();
+    std::fs::remove_dir_all(d.path().join("dir2")).unwrap();
+    std::fs::write(d.path().join("dir2"), "staged work\n").unwrap();
+    r.stage_files(&["added.txt", "old.txt", "new.txt", "dir2/y", "dir2"])
+        .unwrap();
+
+    let mut trashed = r.reset_trashes().unwrap();
+    trashed.sort();
+    assert_eq!(
+        trashed,
+        ["added.txt", "dir", "dir2", "new.txt", "untracked.txt"]
+    );
+}
+
+#[test]
+fn reset_changes_during_an_operation_is_refused_and_changes_nothing() {
+    let (d, r) = staged_and_unstaged();
+    let head = git2::Repository::open(d.path())
+        .unwrap()
+        .head()
+        .unwrap()
+        .target()
+        .unwrap();
+    std::fs::write(d.path().join(".git/MERGE_HEAD"), format!("{head}\n")).unwrap();
+    let refused = Some(GitError::Refused(Refusal::OperationInProgress));
+    assert_eq!(r.reset_changes().err(), refused);
+    assert_eq!(r.reset_changes_git2().err(), refused);
+    assert_eq!(read(d.path(), "f.txt"), b"a\nstaged\nunstaged\n");
+    assert!(d.path().join(".git/MERGE_HEAD").exists());
+}
+
+#[test]
+fn reset_changes_works_with_a_tracked_file_named_head() {
+    let (d, r) = setup(b"a\n", b"a\nX\n");
+    std::fs::write(d.path().join("HEAD"), b"h\n").unwrap();
+    r.stage_files(&["HEAD"]).unwrap();
+    let repo = git2::Repository::open(d.path()).unwrap();
+    let mut idx = repo.index().unwrap();
+    let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+    let sig = git2::Signature::now("Ada", "ada@example.com").unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "head file", &tree, &[&parent])
+        .unwrap();
+    std::fs::write(d.path().join("HEAD"), b"changed\n").unwrap();
+
+    r.reset_changes().unwrap();
+
+    assert_eq!(read(d.path(), "HEAD"), b"h\n");
+    assert_eq!(read(d.path(), "f.txt"), b"a\n");
+}
+
+#[test]
+fn reset_changes_leaves_submodule_edits_alone_even_with_submodule_recurse() {
+    use common::remote::{configure, git};
+    let root = tempfile::tempdir().unwrap();
+    let (lib, app) = (root.path().join("lib"), root.path().join("app"));
+    for dir in [&lib, &app] {
+        std::fs::create_dir(dir).unwrap();
+        git(dir, &["init", "-q"]);
+        configure(dir);
+    }
+    std::fs::write(lib.join("f"), "base\n").unwrap();
+    git(&lib, &["add", "f"]);
+    git(&lib, &["commit", "-qm", "lib"]);
+    git(
+        &app,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            lib.to_str().unwrap(),
+            "sub",
+        ],
+    );
+    git(&app, &["commit", "-qm", "sub"]);
+    git(&app, &["config", "submodule.recurse", "true"]);
+    std::fs::write(app.join("sub/f"), "dirty\n").unwrap();
+
+    Repo::open(&app).unwrap().reset_changes().unwrap();
+
+    assert_eq!(read(&app, "sub/f"), b"dirty\n");
+}
+
+#[test]
+fn reset_changes_without_a_commit_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    git2::Repository::init(d.path()).unwrap();
+    std::fs::write(d.path().join("f.txt"), b"keep\n").unwrap();
+    let r = Repo::open(d.path()).unwrap();
+    r.stage_files(&["f.txt"]).unwrap();
+    assert_eq!(
+        r.reset_changes().err(),
+        Some(GitError::Refused(Refusal::CommitNotFound))
+    );
+    assert_eq!(read(d.path(), "f.txt"), b"keep\n");
+}
+
 #[cfg(unix)]
 #[test]
 fn partial_discard_of_a_symlink_is_refused() {

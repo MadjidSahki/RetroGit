@@ -335,6 +335,7 @@ impl Worker {
                 shown,
             } => self.discard(&path, &selection, shown.as_ref()),
             Command::DiscardFiles(paths) => self.discard_files(&paths),
+            Command::ResetChanges => self.reset_changes(),
             Command::StageFiles(paths) => self.stage_files(&paths, true),
             Command::UnstageFiles(paths) => self.stage_files(&paths, false),
             Command::Commit { message, amend } => self.commit(&message, amend),

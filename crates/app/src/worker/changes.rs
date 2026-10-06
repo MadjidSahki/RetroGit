@@ -122,6 +122,16 @@ impl Worker {
         self.refresh();
     }
 
+    pub(super) fn reset_changes(&mut self) {
+        let Some(repo) = self.open_current(Op::Changes) else {
+            return;
+        };
+        if let Err(e) = repo.reset_changes() {
+            self.fail(Op::Changes, AppError::from_git(&e));
+        }
+        self.refresh();
+    }
+
     pub(super) fn stage_files(&mut self, paths: &[String], stage: bool) {
         let Some(repo) = self.open_current(Op::Changes) else {
             return;
