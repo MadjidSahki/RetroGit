@@ -61,6 +61,8 @@ pub enum Command {
     },
     /// Whole files back to their index version; untracked files go to the trash.
     DiscardFiles(Vec<String>),
+    /// Back to HEAD, staged changes included; new files go to the trash.
+    ResetChanges,
     /// Whole files, one index operation and one refresh (Stage all / Unstage all).
     StageFiles(Vec<String>),
     UnstageFiles(Vec<String>),

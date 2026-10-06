@@ -283,14 +283,53 @@ fn group(ui: &mut egui::Ui, cx: &mut Ctx<'_>, files: &[FileStatus], side: Side, 
         Side::Staged => (s::STAGED_CHANGES, s::UNSTAGE_ALL),
         Side::Unstaged => (s::CHANGES, s::STAGE_ALL),
     };
+    let title = format!("{title} ({})", files.len());
+    // egui never wraps a row: buttons short of room would be drawn over the title, so a
+    // narrow panel puts the title on its own line. Both headers hold two 80 px buttons.
+    let spacing = ui.spacing().item_spacing.x;
+    let title_width = ui
+        .painter()
+        .layout_no_wrap(
+            title.clone(),
+            egui::TextStyle::Body.resolve(ui.style()),
+            egui::Color32::PLACEHOLDER,
+        )
+        .size()
+        .x;
+    let fits = title_width + 2.0 * (80.0 + spacing) <= ui.available_width();
+    if !fits {
+        ui.label(&title);
+    }
     ui.horizontal(|ui| {
-        ui.label(format!("{title} ({})", files.len()));
+        if fits {
+            ui.label(&title);
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let b = Button95::new(all_label)
                 .min_size(egui::vec2(80.0, 20.0))
                 .enabled(!files.is_empty());
             if ui.add(b).clicked() {
                 cx.worker.send(all_files_command(files, side));
+            }
+            if side == Side::Staged {
+                let all = &cx.state.changes.files;
+                // gitcore refuses these too; abort the operation or commit first.
+                let conflicts = all.iter().any(|f| f.unstaged == Some(Change::Conflicted));
+                let unborn = cx
+                    .state
+                    .current
+                    .as_ref()
+                    .is_some_and(|c| matches!(c.head, Head::Unborn(_)));
+                let blocked = conflicts || unborn || cx.state.operation.is_some();
+                let b = Button95::new(s::RESET_ALL)
+                    .min_size(egui::vec2(80.0, 20.0))
+                    .enabled(!all.is_empty() && !blocked);
+                if ui.add(b).clicked() {
+                    let question = super::discard::reset_question(all);
+                    cx.state
+                        .changes
+                        .request_discard(Command::ResetChanges, question);
+                }
             }
             if side == Side::Unstaged {
                 let discardable = discardable(files);
