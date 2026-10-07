@@ -54,17 +54,7 @@ pub fn current_branch(branches: &[Branch]) -> Option<&Branch> {
     branches.iter().find(|b| b.is_head && !b.remote)
 }
 
-/// Remote branches worth offering (no local branch with the same short name).
-pub fn remote_only(branches: &[Branch]) -> Vec<&Branch> {
-    branches
-        .iter()
-        .filter(|b| b.remote)
-        .filter(|r| {
-            let short = r.name.split_once('/').map(|x| x.1).unwrap_or(&r.name);
-            !branches.iter().any(|l| !l.remote && l.name == short)
-        })
-        .collect()
-}
+pub use crate::state::repo_tree::remote_only;
 
 pub fn toolbar(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     let b = sync_buttons(cx.state);
@@ -156,6 +146,7 @@ pub fn toolbar(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     {
         cx.state.dialog = Some(PendingDialog::NewBranch {
             name: String::new(),
+            from: None,
             switch: true,
         });
     }
@@ -237,6 +228,7 @@ pub fn menu_entries(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
     {
         cx.state.dialog = Some(PendingDialog::NewBranch {
             name: String::new(),
+            from: None,
             switch: true,
         });
     }

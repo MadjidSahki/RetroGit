@@ -589,6 +589,10 @@ fn tags(
                 ui.label(text);
             }
             ui.add_space(6.0);
+            let has = selected.is_some();
+            // One network operation at a time (Cancel is in the progress window).
+            let idle = cx.state.sync.running.is_none();
+            // Two rows (local, then origin): six buttons do not fit the window's width.
             ui.horizontal(|ui| {
                 if ui.add(Button95::new(s::NEW_TAG).min_size(BUTTON)).clicked() {
                     next = Some(GitDialog::CreateTag {
@@ -599,9 +603,6 @@ fn tags(
                         back_to_tags: true,
                     });
                 }
-                let has = selected.is_some();
-                // One network operation at a time (Cancel is in the progress window).
-                let idle = cx.state.sync.running.is_none();
                 // Opens the delete dialog, local only by default (no network needed).
                 if ui
                     .add(Button95::new(s::DELETE).min_size(BUTTON).enabled(has))
@@ -613,6 +614,18 @@ fn tags(
                         remote: false,
                         back_to_tags: true,
                     });
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    close = ui.add(Button95::new(s::CLOSE).min_size(BUTTON)).clicked();
+                });
+            });
+            ui.horizontal(|ui| {
+                if ui
+                    .add(Button95::new(s::FETCH_TAGS).min_size(BUTTON).enabled(idle))
+                    .clicked()
+                {
+                    cx.worker.send(Command::FetchTags);
+                    status = Some(s::FETCHING_TAGS.to_string());
                 }
                 if ui
                     .add(
@@ -636,7 +649,6 @@ fn tags(
                     cx.worker.send(Command::PushTags(None));
                     status = Some(s::PUSHING_TAGS.to_string());
                 }
-                close = ui.add(Button95::new(s::CLOSE).min_size(BUTTON)).clicked();
             });
         });
     if close || r.close_requested {

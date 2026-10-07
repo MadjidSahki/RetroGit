@@ -58,6 +58,10 @@ pub enum GitError {
     /// the rebase is paused and continuing keeps the old message.
     #[error("the new commit message was refused")]
     MessageRefused { output: String },
+    /// `fetch_tags`: origin has other versions of these local tags; they were kept (the
+    /// other tags were fetched).
+    #[error("the remote has other versions of these tags")]
+    TagsDiffer(Vec<String>),
     #[error("{0}")]
     Other(String),
 }

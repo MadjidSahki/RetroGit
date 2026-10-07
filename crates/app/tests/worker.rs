@@ -958,6 +958,7 @@ mod sync {
 
         w.send(Command::CreateBranch {
             name: "side".into(),
+            from: None,
             switch: false,
         });
         until(
@@ -990,6 +991,76 @@ mod sync {
         assert_eq!(
             std::fs::read_to_string(work.join("new-untracked.txt")).unwrap(),
             "keep me\n"
+        );
+    }
+
+    #[test]
+    fn a_branch_created_from_another_starts_at_its_tip() {
+        let Some((_tmp, work)) = remote_env() else {
+            return;
+        };
+        git(&work, &["branch", "base"]);
+        git(&work, &["switch", "-q", "base"]);
+        std::fs::write(work.join("base.txt"), "base\n").unwrap();
+        git(&work, &["add", "base.txt"]);
+        git(&work, &["commit", "-q", "-m", "on base"]);
+        git(&work, &["switch", "-q", "main"]);
+        let server = mockito::Server::new();
+        let w = start(&server, Arc::new(MemoryAccounts::default()), "");
+        w.send(Command::OpenRepo(work.clone()));
+        until(&w, |e| matches!(e, Event::BranchesLoaded(_)));
+        w.send(Command::CreateBranch {
+            name: "feat/x".into(),
+            from: Some("base".into()),
+            switch: true,
+        });
+        until(
+            &w,
+            |e| matches!(e, Event::RepoOpened(s) if s.head == gitcore::Head::Branch("feat/x".into())),
+        );
+        assert!(work.join("base.txt").exists());
+    }
+
+    #[test]
+    fn switching_tells_local_and_remote_branches_by_their_refs() {
+        let Some((_tmp, work)) = remote_env() else {
+            return;
+        };
+        // A remote that is not `origin`, and a local branch whose name starts with it.
+        let url = String::from_utf8(
+            Cmd::new("git")
+                .current_dir(&work)
+                .args(["remote", "get-url", "origin"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
+        git(&work, &["remote", "add", "upstream", url.trim()]);
+        git(
+            &work,
+            &["update-ref", "refs/remotes/upstream/topic", "HEAD"],
+        );
+        git(&work, &["branch", "origin/local-thing"]);
+        let server = mockito::Server::new();
+        let w = start(&server, Arc::new(MemoryAccounts::default()), "");
+        w.send(Command::OpenRepo(work.clone()));
+        until(&w, |e| matches!(e, Event::BranchesLoaded(_)));
+        w.send(Command::SwitchBranch {
+            name: "upstream/topic".into(),
+            stash: false,
+        });
+        until(
+            &w,
+            |e| matches!(e, Event::RepoOpened(s) if s.head == gitcore::Head::Branch("topic".into())),
+        );
+        w.send(Command::SwitchBranch {
+            name: "origin/local-thing".into(),
+            stash: false,
+        });
+        until(
+            &w,
+            |e| matches!(e, Event::RepoOpened(s) if s.head == gitcore::Head::Branch("origin/local-thing".into())),
         );
     }
 

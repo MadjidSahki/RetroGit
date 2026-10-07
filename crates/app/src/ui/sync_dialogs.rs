@@ -24,12 +24,22 @@ pub fn show(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
         return;
     };
     let outcome = match dialog.clone() {
-        PendingDialog::NewBranch { name, switch } => {
-            name_dialog(egui_ctx, cx, s::NEW_BRANCH_TITLE, None, name, switch)
-        }
-        PendingDialog::RenameBranch { old, name } => {
-            name_dialog(egui_ctx, cx, s::RENAME_BRANCH_TITLE, Some(old), name, false)
-        }
+        PendingDialog::NewBranch { name, from, switch } => name_dialog(
+            egui_ctx,
+            cx,
+            s::NEW_BRANCH_TITLE,
+            NameFor::New { from },
+            name,
+            switch,
+        ),
+        PendingDialog::RenameBranch { old, name } => name_dialog(
+            egui_ctx,
+            cx,
+            s::RENAME_BRANCH_TITLE,
+            NameFor::Rename { old },
+            name,
+            false,
+        ),
         PendingDialog::DeleteBranch { name } => delete_dialog(egui_ctx, cx, name),
         PendingDialog::DeleteNotMerged { name } => choice(
             egui_ctx,
@@ -133,11 +143,17 @@ fn choice(
     }
 }
 
+/// What the branch name dialog names.
+enum NameFor {
+    New { from: Option<String> },
+    Rename { old: String },
+}
+
 fn name_dialog(
     egui_ctx: &egui::Context,
     cx: &mut Ctx<'_>,
     title: &str,
-    old: Option<String>,
+    target: NameFor,
     mut name: String,
     mut switch: bool,
 ) -> Outcome {
@@ -147,6 +163,10 @@ fn name_dialog(
     let r = Dialog::new(("branch_name", title), title)
         .width(360.0)
         .show(egui_ctx, |ui| {
+            if let NameFor::New { from: Some(from) } = &target {
+                ui.label(s::new_branch_from(from));
+                ui.add_space(4.0);
+            }
             ui.label(s::BRANCH_NAME);
             let resp = text_field(ui, &mut name, 320.0, false);
             if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -157,7 +177,7 @@ fn name_dialog(
             {
                 ui.label(egui::RichText::new(e).color(win95::theme::palette(ui.ctx()).error));
             }
-            if old.is_none() {
+            if matches!(target, NameFor::New { .. }) {
                 checkbox(ui, &mut switch, s::SWITCH_TO_IT);
             }
             ui.add_space(6.0);
@@ -173,14 +193,14 @@ fn name_dialog(
     }
     if ok && branch_name_error(&name, &cx.state.branches).is_none() {
         let name = name.trim().to_string();
-        return Outcome::Send(match old {
-            Some(old) => Command::RenameBranch { old, new: name },
-            None => Command::CreateBranch { name, switch },
+        return Outcome::Send(match target {
+            NameFor::Rename { old } => Command::RenameBranch { old, new: name },
+            NameFor::New { from } => Command::CreateBranch { name, from, switch },
         });
     }
-    Outcome::Keep(match old {
-        Some(old) => PendingDialog::RenameBranch { old, name },
-        None => PendingDialog::NewBranch { name, switch },
+    Outcome::Keep(match target {
+        NameFor::Rename { old } => PendingDialog::RenameBranch { old, name },
+        NameFor::New { from } => PendingDialog::NewBranch { name, from, switch },
     })
 }
 

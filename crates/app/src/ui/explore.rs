@@ -120,23 +120,9 @@ fn toolbar(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
 
 /// Small Win95 pictograms: closed or open folder, page.
 fn paint_icon(p: &egui::Painter, rect: Rect, kind: EntryKind, open: bool) {
-    let r = Rect::from_center_size(rect.center(), vec2(14.0, 11.0));
     let edge = Stroke::new(1.0, Color32::BLACK);
     match kind {
-        EntryKind::Dir => {
-            let yellow = Color32::from_rgb(0xFF, 0xE0, 0x60);
-            let tab = Rect::from_min_size(r.min, vec2(6.0, 3.0));
-            p.rect_filled(tab, 0.0, yellow);
-            p.rect_stroke(tab, 0.0, edge, egui::StrokeKind::Inside);
-            let body = Rect::from_min_max(pos2(r.min.x, r.min.y + 2.0), r.max);
-            p.rect_filled(body, 0.0, yellow);
-            p.rect_stroke(body, 0.0, edge, egui::StrokeKind::Inside);
-            if open {
-                let flap = Rect::from_min_max(pos2(r.min.x + 2.0, r.min.y + 5.0), r.max);
-                p.rect_filled(flap, 0.0, Color32::from_rgb(0xFF, 0xF0, 0xA0));
-                p.rect_stroke(flap, 0.0, edge, egui::StrokeKind::Inside);
-            }
-        }
+        EntryKind::Dir => win95::icon::folder(p, rect, open),
         _ => {
             let page = Rect::from_center_size(rect.center(), vec2(10.0, 13.0));
             p.rect_filled(page, 0.0, Color32::WHITE);

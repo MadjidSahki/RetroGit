@@ -66,6 +66,7 @@ impl WorkerHandle {
             | Command::Pull(_)
             | Command::Push(_)
             | Command::PushTags(_)
+            | Command::FetchTags
             | Command::DeleteTag { .. }
             | Command::CheckoutPull { .. } => self.cancel_net.store(false, Ordering::SeqCst),
             // At most one refresh of each kind waiting in the queue; a refs refresh also
@@ -353,7 +354,9 @@ impl Worker {
             Command::LoadCommit(id) => self.load_commit(&id),
             Command::LoadCommitFileDiff { id, path } => self.load_commit_file_diff(&id, &path),
             Command::LoadBranches => self.load_branches(),
-            Command::CreateBranch { name, switch } => self.create_branch(&name, switch),
+            Command::CreateBranch { name, from, switch } => {
+                self.create_branch(&name, from.as_deref(), switch)
+            }
             Command::SwitchBranch { name, stash } => self.switch_branch(&name, stash),
             Command::RenameBranch { old, new } => self.rename_branch(&old, &new),
             Command::DeleteBranch { name, force } => self.delete_branch(&name, force),
@@ -382,6 +385,7 @@ impl Worker {
             | Command::CreateTag { .. }
             | Command::DeleteTag { .. }
             | Command::PushTags(_)
+            | Command::FetchTags
             | Command::StashAndRetry { .. }) => self.handle_git_ops(op),
             pr @ (Command::LoadPulls { .. }
             | Command::LoadPull { .. }

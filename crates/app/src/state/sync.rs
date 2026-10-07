@@ -77,14 +77,34 @@ pub struct SyncView {
 /// Dialogs of sub-project 3 (the UI shows at most one).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingDialog {
-    NewBranch { name: String, switch: bool },
-    RenameBranch { old: String, name: String },
-    DeleteBranch { name: String },
-    DeleteNotMerged { name: String },
-    Diverged { ahead: usize, behind: usize },
-    PushRejected { can_force: bool },
+    /// `from`: start at this branch instead of HEAD (branch tree context menu).
+    NewBranch {
+        name: String,
+        from: Option<String>,
+        switch: bool,
+    },
+    RenameBranch {
+        old: String,
+        name: String,
+    },
+    DeleteBranch {
+        name: String,
+    },
+    DeleteNotMerged {
+        name: String,
+    },
+    Diverged {
+        ahead: usize,
+        behind: usize,
+    },
+    PushRejected {
+        can_force: bool,
+    },
     ConfirmForcePush,
-    WouldOverwrite { branch: String, files: Vec<String> },
+    WouldOverwrite {
+        branch: String,
+        files: Vec<String>,
+    },
 }
 
 impl AppState {
@@ -135,7 +155,21 @@ impl AppState {
                     h.detail_colors = crate::highlight::Colors::NotRequested;
                 }
             }
-            Event::BranchesLoaded(branches) => self.branches = branches,
+            Event::BranchesLoaded(branches) => {
+                let head = |b: &[gitcore::Branch]| {
+                    b.iter()
+                        .find(|b| b.is_head && !b.remote)
+                        .map(|b| b.name.clone())
+                };
+                let moved = head(&self.branches) != head(&branches);
+                let t = &mut self.repo_tree;
+                // Unfolded, or another branch checked out (maybe in a closed folder).
+                if t.expanded && (t.reveal_pending || moved) {
+                    t.reveal_current(&branches);
+                    t.reveal_pending = false;
+                }
+                self.branches = branches;
+            }
             Event::OperationChanged(op) => self.operation = op,
             Event::SigningLoaded(cfg) => self.signing = cfg,
             Event::SyncStarted { op, background } => {

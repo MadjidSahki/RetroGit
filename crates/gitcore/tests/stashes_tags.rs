@@ -157,3 +157,69 @@ fn deleting_on_origin_a_tag_never_pushed_succeeds() {
         "a real failure is still reported"
     );
 }
+
+#[test]
+fn fetch_tags_brings_tags_off_every_branch_and_never_overwrites_a_local_one() {
+    let Some(env) = Env::new() else { return };
+    let r = env.repo();
+    let origin = env.root.join("origin.git");
+    let auth = NetAuth::default();
+    // On origin: a tag on a commit no branch holds, and `moved` elsewhere than ours.
+    let off = git(
+        &origin,
+        // The bare origin has no identity of its own (CI runners have no global one).
+        &[
+            "-c",
+            "user.name=Ada",
+            "-c",
+            "user.email=ada@example.com",
+            "commit-tree",
+            "HEAD^{tree}",
+            "-m",
+            "off branch",
+        ],
+    );
+    git(&origin, &["tag", "off-branch", off.trim()]);
+    git(&origin, &["tag", "moved", "HEAD~1"]);
+    let head = git(&env.work, &["rev-parse", "HEAD"]).trim().to_string();
+    r.create_tag("moved", &head, None).unwrap();
+
+    r.fetch(&auth, |_| {}, &no_cancel()).unwrap();
+    assert!(
+        r.tags().unwrap().iter().all(|t| t.name != "off-branch"),
+        "plain fetch skips it"
+    );
+
+    assert_eq!(
+        r.fetch_tags(&auth, |_| {}, &no_cancel()),
+        Err(GitError::TagsDiffer(vec!["moved".into()]))
+    );
+    let tags = r.tags().unwrap();
+    assert!(
+        tags.iter().any(|t| t.name == "off-branch"),
+        "the other tags still arrive"
+    );
+    let moved = tags.iter().find(|t| t.name == "moved").unwrap();
+    assert_eq!(moved.commit, head, "the local tag is kept");
+
+    r.delete_tag("moved").unwrap();
+    r.fetch_tags(&auth, |_| {}, &no_cancel()).unwrap();
+}
+
+#[test]
+fn no_fetch_deletes_a_local_tag_even_with_prune_tags_configured() {
+    let Some(env) = Env::new() else { return };
+    let r = env.repo();
+    let auth = NetAuth::default();
+    for (k, v) in [("fetch.prune", "true"), ("fetch.pruneTags", "true")] {
+        git(&env.work, &["config", k, v]);
+    }
+    let head = git(&env.work, &["rev-parse", "HEAD"]).trim().to_string();
+    r.create_tag("local-only", &head, None).unwrap();
+    let kept = |r: &Repo| r.tags().unwrap().iter().any(|t| t.name == "local-only");
+
+    r.fetch_tags(&auth, |_| {}, &no_cancel()).unwrap();
+    assert!(kept(&r), "Fetch tags keeps unpushed tags");
+    r.fetch(&auth, |_| {}, &no_cancel()).unwrap();
+    assert!(kept(&r), "a plain Fetch keeps them too");
+}

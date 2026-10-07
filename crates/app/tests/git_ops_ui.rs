@@ -432,3 +432,66 @@ fn cherry_picking_a_merge_asks_for_the_parent() {
     h.run();
     assert!(h.state().state.git_dialog.is_none(), "sent and closed");
 }
+
+fn tags_window() -> GitDialog {
+    GitDialog::Tags {
+        filter: String::new(),
+        selected: None,
+        status: None,
+    }
+}
+
+#[test]
+fn fetch_tags_says_it_fetches_and_waits_for_other_network_operations() {
+    use egui_kittest::kittest::NodeT;
+    let mut w = tags_world();
+    w.state.git_dialog = Some(tags_window());
+    let mut h = harness(w);
+    h.run();
+    h.get_by_label(s::FETCH_TAGS).click();
+    h.run();
+    assert!(h.query_by_label(s::FETCHING_TAGS).is_some());
+
+    h.state_mut().state.sync.running = Some(retrogit::protocol::SyncOp::Push);
+    h.run();
+    assert!(h.get_by_label(s::FETCH_TAGS).accesskit_node().is_disabled());
+}
+
+#[test]
+fn the_tags_window_buttons_stay_inside_the_window() {
+    let mut w = tags_world();
+    w.state.git_dialog = Some(tags_window());
+    let mut h = harness(w);
+    h.run();
+    // The window's right edge: its title bar close box (the main window's is further right).
+    let right = h
+        .query_all_by_label(s::CLOSE)
+        .map(|n| n.rect())
+        .filter(|r| r.height() < 20.0)
+        .map(|r| r.right())
+        .fold(f32::MAX, f32::min);
+    for label in [
+        s::NEW_TAG,
+        s::DELETE,
+        s::FETCH_TAGS,
+        s::PUSH_TAG,
+        s::PUSH_ALL_TAGS,
+    ] {
+        // "Push" is also the toolbar's: the window's is the lowest.
+        let r = h
+            .query_all_by_label(label)
+            .map(|n| n.rect())
+            .max_by(|a, b| a.top().total_cmp(&b.top()))
+            .unwrap();
+        assert!(
+            r.right() <= right + 4.0,
+            "{label} {r:?} past the window edge {right}"
+        );
+    }
+    let close = h
+        .query_all_by_label(s::CLOSE)
+        .map(|n| n.rect())
+        .find(|r| r.height() >= 20.0)
+        .unwrap();
+    assert!(close.right() <= right + 4.0, "Close {close:?} past {right}");
+}
