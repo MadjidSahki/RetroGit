@@ -165,7 +165,20 @@ fn fetch_tags_brings_tags_off_every_branch_and_never_overwrites_a_local_one() {
     let origin = env.root.join("origin.git");
     let auth = NetAuth::default();
     // On origin: a tag on a commit no branch holds, and `moved` elsewhere than ours.
-    let off = git(&origin, &["commit-tree", "HEAD^{tree}", "-m", "off branch"]);
+    let off = git(
+        &origin,
+        // The bare origin has no identity of its own (CI runners have no global one).
+        &[
+            "-c",
+            "user.name=Ada",
+            "-c",
+            "user.email=ada@example.com",
+            "commit-tree",
+            "HEAD^{tree}",
+            "-m",
+            "off branch",
+        ],
+    );
     git(&origin, &["tag", "off-branch", off.trim()]);
     git(&origin, &["tag", "moved", "HEAD~1"]);
     let head = git(&env.work, &["rev-parse", "HEAD"]).trim().to_string();

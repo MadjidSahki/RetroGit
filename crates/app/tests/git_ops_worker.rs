@@ -552,7 +552,20 @@ fn fetching_tags_brings_those_off_every_branch_and_reports_in_the_tags_window() 
         ],
     );
     git(&dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
-    let off = git(&bare, &["commit-tree", "HEAD^{tree}", "-m", "off branch"]);
+    let off = git(
+        &bare,
+        // The bare origin has no identity of its own (CI runners have no global one).
+        &[
+            "-c",
+            "user.name=Ada",
+            "-c",
+            "user.email=ada@example.com",
+            "commit-tree",
+            "HEAD^{tree}",
+            "-m",
+            "off branch",
+        ],
+    );
     git(&bare, &["tag", "off-branch", off.trim()]);
     let w = start(&dir);
     w.send(Command::FetchTags);
@@ -593,7 +606,20 @@ fn tags_that_differ_on_origin_are_kept_and_the_rest_is_fetched_and_said_so() {
         ],
     );
     git(&dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
-    let off = git(&bare, &["commit-tree", "HEAD^{tree}", "-m", "off branch"]);
+    let off = git(
+        &bare,
+        // The bare origin has no identity of its own (CI runners have no global one).
+        &[
+            "-c",
+            "user.name=Ada",
+            "-c",
+            "user.email=ada@example.com",
+            "commit-tree",
+            "HEAD^{tree}",
+            "-m",
+            "off branch",
+        ],
+    );
     git(&bare, &["tag", "off-branch", off.trim()]);
     git(&bare, &["tag", "moved", off.trim()]);
     git(&dir, &["tag", "moved"]);
