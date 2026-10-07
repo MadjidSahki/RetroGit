@@ -39,6 +39,33 @@ fn branches_create_switch_rename_delete() {
 }
 
 #[test]
+fn a_branch_can_start_from_another_branch() {
+    let Some(env) = Env::new() else { return };
+    let r = env.repo();
+    r.create_branch("base", true).unwrap();
+    env.local_commit("base.txt", "on base\n");
+    let base_tip = git(&env.work, &["rev-parse", "base"]);
+    r.switch_branch("main").unwrap();
+
+    r.create_branch_from("topic", "base", false).unwrap();
+    assert_eq!(git(&env.work, &["rev-parse", "topic"]), base_tip);
+    assert_eq!(r.current_branch().unwrap().name, "main", "not switched");
+
+    r.create_branch_from("from-remote", "origin/main", true)
+        .unwrap();
+    let cur = r.current_branch().unwrap();
+    assert_eq!(cur.name, "from-remote");
+    assert_eq!(
+        cur.upstream, None,
+        "a new branch is published, not tracking its start"
+    );
+    assert_eq!(
+        git(&env.work, &["rev-parse", "HEAD"]),
+        git(&env.work, &["rev-parse", "origin/main"])
+    );
+}
+
+#[test]
 fn switching_with_conflicting_changes_reports_files_then_stash_switch_pop_works() {
     let Some(env) = Env::new() else { return };
     let r = env.repo();

@@ -1,7 +1,5 @@
 use egui::{Panel, UiBuilder, ViewportCommand};
-use win95::{
-    Bevel, Button95, Cell, Column, ListView, TitleAction, TitleBar, bevel_frame, status_bar,
-};
+use win95::{Bevel, Button95, TitleAction, TitleBar, bevel_frame, status_bar};
 
 use super::{Ctx, clone_dialog};
 use crate::protocol::Command;
@@ -30,7 +28,7 @@ pub fn show(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
             .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(2)))
             .resizable(true)
             .default_size(200.0)
-            .show(ui, |ui| recents(ui, cx));
+            .show(ui, |ui| super::repo_tree::show(ui, cx));
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(2)))
             .show(ui, |ui| {
@@ -266,43 +264,6 @@ fn toolbar(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
         super::notifications::toolbar_button(ui, cx);
         super::update::toolbar_button(ui, cx);
     });
-}
-
-const RECENT_COLUMNS: &[Column] = &[Column {
-    title: s::REPOSITORIES,
-    width: 400.0,
-}];
-
-fn recents(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {
-    ui.label(s::REPOSITORIES);
-    let recent = cx.state.recents_sorted();
-    let selected = cx.state.selected_recent();
-    let missing = &cx.state.missing;
-    let mut remove: Option<usize> = None;
-    let height = ui.available_height();
-    let resp = ListView::new("recents", RECENT_COLUMNS, recent.len())
-        .header(false)
-        .height(height)
-        .context_menu(|row, ui| {
-            if ui.button(s::REMOVE_FROM_LIST).clicked() {
-                remove = Some(row);
-            }
-        })
-        .show(ui, selected, |row, _| Cell {
-            text: recent[row].name.clone(),
-            dimmed: missing.contains(&recent[row].path),
-        });
-    if let Some(row) = resp.clicked
-        && cx.state.changes.request_open_repo(&recent[row].path)
-        && let Some(cmd) = cx
-            .state
-            .request_repo_switch(Command::OpenRepo(recent[row].path.clone()))
-    {
-        cx.worker.send(cmd);
-    }
-    if let Some(row) = remove {
-        cx.state.remove_recent(&recent[row].path);
-    }
 }
 
 fn status(ui: &mut egui::Ui, cx: &mut Ctx<'_>) {

@@ -7,6 +7,7 @@ mod git_ops;
 mod notifications;
 mod pulls;
 mod pulls_more;
+pub mod repo_tree;
 mod sync;
 mod update;
 
@@ -198,6 +199,8 @@ pub struct AppState {
     pub tab: Tab,
     pub history: HistoryView,
     pub branches: Vec<gitcore::Branch>,
+    /// The Repositories panel: which branches folders are unfolded.
+    pub repo_tree: repo_tree::RepoTree,
     pub sync: SyncView,
     /// At most one sub-project 3 dialog at a time.
     pub dialog: Option<PendingDialog>,
@@ -263,6 +266,7 @@ impl AppState {
             tab: Tab::default(),
             history: HistoryView::default(),
             branches: Vec::new(),
+            repo_tree: repo_tree::RepoTree::default(),
             sync: SyncView::default(),
             dialog: None,
             operation: None,
@@ -481,6 +485,9 @@ impl AppState {
                 }
             }
             Op::Open(path) => {
+                if self.repo_tree.expand_after_open.as_ref() == Some(&path) {
+                    self.repo_tree.expand_after_open = None;
+                }
                 if self.config.recent.iter().any(|r| r.path == path) && !path.exists() {
                     self.missing.insert(path);
                 }
@@ -542,6 +549,13 @@ impl AppState {
             };
             self.history = HistoryView::default();
             self.branches.clear();
+            let expand =
+                self.repo_tree.expand_after_open.as_deref() == Some(summary.path.as_path());
+            self.repo_tree = repo_tree::RepoTree {
+                expanded: expand,
+                reveal_pending: expand,
+                ..Default::default()
+            };
             self.sync = SyncView::default();
             self.dialog = None;
             self.operation = None;
@@ -588,6 +602,25 @@ impl AppState {
         None
     }
 
+    /// The arrow next to repository `path`: fold or unfold its branches. `false` when it is
+    /// not the open repository: the caller opens it, and it unfolds once open.
+    pub fn toggle_repo_branches(&mut self, path: &Path) -> bool {
+        if self.current.as_ref().is_none_or(|c| c.path != path) {
+            self.repo_tree.expand_after_open = Some(path.to_path_buf());
+            return false;
+        }
+        let t = &mut self.repo_tree;
+        t.expanded = !t.expanded;
+        if t.expanded {
+            if self.branches.is_empty() {
+                t.reveal_pending = true;
+            } else {
+                t.reveal_current(&self.branches);
+            }
+        }
+        true
+    }
+
     /// The user dropped the pending line comments: the repository command to send.
     pub fn confirm_repo_switch(&mut self) -> Option<crate::protocol::Command> {
         self.repo_switch.take()
@@ -596,6 +629,7 @@ impl AppState {
     /// The user kept the pending line comments: stay in this repository.
     pub fn cancel_repo_switch(&mut self) {
         self.repo_switch = None;
+        self.repo_tree.expand_after_open = None;
         self.pulls.open_after_switch = None;
     }
 

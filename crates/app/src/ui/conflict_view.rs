@@ -560,6 +560,8 @@ pub fn confirm_dialog(egui_ctx: &egui::Context, cx: &mut Ctx<'_>) {
         if let Some(ed) = c.conflict.as_mut() {
             ed.confirm = None;
         }
+        // An arrow of the Repositories panel asked to open (and unfold) another repo.
+        cx.state.repo_tree.expand_after_open = None;
         return;
     }
     if !yes {

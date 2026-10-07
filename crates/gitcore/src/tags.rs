@@ -96,6 +96,30 @@ impl Repo {
         retry_without_token(auth, |a| self.run_net(a, &args, &mut progress, cancel)).map(|_| ())
     }
 
+    /// Every tag of origin, also those on commits no branch holds (a plain fetch only
+    /// follows tags of the commits it brings). A local tag is never overwritten nor
+    /// deleted: tags that differ on origin give `TagsDiffer`, the others still arrive.
+    pub fn fetch_tags(
+        &self,
+        auth: &NetAuth,
+        mut progress: impl FnMut(NetProgress),
+        cancel: &AtomicBool,
+    ) -> Result<(), GitError> {
+        // `--no-prune`: a user's `fetch.pruneTags` would delete the tags never pushed.
+        let args = ["fetch", "--tags", "--no-prune", "--progress", "origin"];
+        retry_without_token(auth, |a| {
+            self.run_net(a, &args, &mut progress, cancel)
+                .map_err(|e| match e {
+                    GitError::Other(out) => match clobbered_tags(&out) {
+                        tags if tags.is_empty() => GitError::Other(out),
+                        tags => GitError::TagsDiffer(tags),
+                    },
+                    other => other,
+                })
+        })
+        .map(|_| ())
+    }
+
     pub fn delete_remote_tag(
         &self,
         auth: &NetAuth,
@@ -108,5 +132,30 @@ impl Repo {
             Err(GitError::Other(out)) if out.contains("remote ref does not exist") => Ok(()),
             other => other,
         }
+    }
+}
+
+/// Tags git refused to update: ` ! [rejected]  v1  -> v1  (would clobber existing tag)`.
+fn clobbered_tags(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter(|l| l.contains("would clobber existing tag"))
+        .filter_map(|l| {
+            let after = l.split_once(']')?.1;
+            // " -> " with spaces: a tag name may hold "->" but never a space.
+            let name = after.split_once(" -> ")?.0.trim();
+            (!name.is_empty()).then(|| name.to_string())
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clobbered_tags;
+
+    #[test]
+    fn rejected_tags_are_read_whole_even_with_an_arrow_in_their_name() {
+        let out = "From /origin\n * [new tag]  v2 -> v2\n ! [rejected]        x->y       -> x->y  (would clobber existing tag)\n ! [rejected]  v1 -> v1  (would clobber existing tag)\n";
+        assert_eq!(clobbered_tags(out), ["x->y", "v1"]);
     }
 }

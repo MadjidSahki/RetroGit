@@ -211,3 +211,11 @@ fn a_conflicted_file_is_marked_with_the_conflict_mark() {
     );
     assert_eq!(s::CONFLICT_MARK, "!");
 }
+
+#[test]
+fn tags_that_differ_on_origin_are_named_and_said_to_be_kept() {
+    let e = AppError::from_git(&GitError::TagsDiffer(vec!["v1".into(), "v2".into()]));
+    assert_eq!(e.severity, Severity::Warning);
+    assert_eq!(e.message, s::ERR_TAGS_DIFFER);
+    assert_eq!(e.detail.as_deref(), Some("v1\nv2"));
+}

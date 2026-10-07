@@ -536,3 +536,89 @@ fn deleting_on_origin_a_tag_never_pushed_deletes_it_locally() {
     );
     assert!(git(&dir, &["tag"]).contains("v2"));
 }
+
+#[test]
+fn fetching_tags_brings_those_off_every_branch_and_reports_in_the_tags_window() {
+    let Some((d, dir)) = repo() else { return };
+    let bare = d.path().join("origin.git");
+    git(
+        d.path(),
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            dir.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+    );
+    git(&dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    let off = git(&bare, &["commit-tree", "HEAD^{tree}", "-m", "off branch"]);
+    git(&bare, &["tag", "off-branch", off.trim()]);
+    let w = start(&dir);
+    w.send(Command::FetchTags);
+    let evs = until(
+        &w,
+        |e| matches!(e, Event::TagsLoaded(t) if t.iter().any(|t| t.name == "off-branch")),
+    );
+    assert!(
+        evs.iter().any(
+            |e| matches!(e, Event::TagsStatus(t) if t == retrogit::strings::TAGS_FETCHED_STATUS)
+        ),
+        "{evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            Event::SyncFinished {
+                op: SyncOp::Fetch,
+                ok: true
+            }
+        )),
+        "{evs:?}"
+    );
+}
+
+#[test]
+fn tags_that_differ_on_origin_are_kept_and_the_rest_is_fetched_and_said_so() {
+    let Some((d, dir)) = repo() else { return };
+    let bare = d.path().join("origin.git");
+    git(
+        d.path(),
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            dir.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+    );
+    git(&dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    let off = git(&bare, &["commit-tree", "HEAD^{tree}", "-m", "off branch"]);
+    git(&bare, &["tag", "off-branch", off.trim()]);
+    git(&bare, &["tag", "moved", off.trim()]);
+    git(&dir, &["tag", "moved"]);
+    let w = start(&dir);
+    w.send(Command::FetchTags);
+    let evs = until(
+        &w,
+        |e| matches!(e, Event::TagsLoaded(t) if t.iter().any(|t| t.name == "off-branch")),
+    );
+    assert!(
+        evs.iter().any(|e| matches!(e, Event::TagsStatus(t) if *t == retrogit::strings::tags_fetched_kept(&["moved".to_string()]))),
+        "the window says what was kept, not 'Failed': {evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(e, Event::Error { error, .. } if error.message == retrogit::strings::ERR_TAGS_DIFFER)),
+        "{evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            Event::SyncFinished {
+                op: SyncOp::Fetch,
+                ok: true
+            }
+        )),
+        "the fetch ran: {evs:?}"
+    );
+}

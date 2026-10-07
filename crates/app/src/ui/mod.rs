@@ -18,6 +18,7 @@ pub mod notifications;
 pub mod pull_detail;
 pub mod pull_dialogs;
 pub mod pulls;
+pub mod repo_tree;
 pub mod sign_in;
 pub mod stashes;
 pub mod sync_dialogs;

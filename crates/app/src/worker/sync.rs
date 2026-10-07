@@ -111,16 +111,24 @@ impl Worker {
         self.after_ref_change(&repo);
     }
 
-    pub(super) fn create_branch(&mut self, name: &str, switch: bool) {
+    pub(super) fn create_branch(&mut self, name: &str, from: Option<&str>, switch: bool) {
         let name = name.trim().to_string();
-        self.branch_op(|r| r.create_branch(&name, switch), &name.clone());
+        self.branch_op(
+            |r| match from {
+                Some(from) => r.create_branch_from(&name, from, switch),
+                None => r.create_branch(&name, switch),
+            },
+            &name.clone(),
+        );
     }
 
     pub(super) fn switch_branch(&mut self, name: &str, stash: bool) {
-        let remote = name.starts_with("origin/");
         let target = name.to_string();
         self.branch_op(
             |r| -> Result<(), BranchFail> {
+                // By the refs, not the name: `upstream/x` is remote, a local branch may be
+                // called `origin/x`.
+                let remote = !r.is_local_branch(&target);
                 let switch = |r: &Repo| {
                     if remote {
                         r.checkout_remote_branch(&target)

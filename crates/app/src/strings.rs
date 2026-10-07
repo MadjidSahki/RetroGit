@@ -154,6 +154,34 @@ pub const RENAME_BRANCH_TITLE: &str = "Rename branch";
 pub const DELETE_BRANCH_TITLE: &str = "Delete branch";
 pub const BRANCH_NAME: &str = "Branch name:";
 pub const SWITCH_TO_IT: &str = "Switch to it";
+pub const NEW_BRANCH_FROM_MENU: &str = "New branch from here...";
+pub const CHECKOUT_BRANCH_MENU: &str = "Checkout";
+
+pub fn show_branches(repo: &str) -> String {
+    format!("Show the branches of {repo}")
+}
+
+pub fn hide_branches(repo: &str) -> String {
+    format!("Hide the branches of {repo}")
+}
+
+/// Screen-reader (and test) name of a branch folder; `path` is unique per side.
+pub fn folder_label(path: &str, remote: bool) -> String {
+    if remote {
+        format!("{path} (remote folder)")
+    } else {
+        format!("{path} (folder)")
+    }
+}
+
+/// Screen-reader (and test) name of the checked-out branch row.
+pub fn current_branch_label(name: &str) -> String {
+    format!("{name} (current)")
+}
+
+pub fn new_branch_from(from: &str) -> String {
+    format!("Start from: {from}")
+}
 pub const DELETE: &str = "Delete";
 pub const DELETE_ANYWAY: &str = "Delete anyway";
 pub const CANNOT_DELETE_CURRENT: &str = "You are on this branch. Switch to another branch first.";
@@ -589,6 +617,7 @@ pub const NOTE_STASH_DROPPED: &str = "Stash dropped (id {id})";
 pub const NOTE_TAG_CREATED: &str = "Tag created";
 pub const NOTE_TAG_DELETED: &str = "Tag deleted";
 pub const NOTE_TAGS_PUSHED: &str = "Tags pushed";
+pub const NOTE_TAGS_FETCHED: &str = "Tags fetched";
 pub const INFO_EMPTY_COMMIT: &str =
     "This commit is already applied (nothing to commit): click Skip, or Abort.";
 pub const INFO_NOTHING_TO_STASH: &str = "There is nothing to stash.";
@@ -663,6 +692,7 @@ pub const TAG_LIGHT_SHORT: &str = "lightweight";
 pub const NEW_TAG: &str = "New tag...";
 pub const PUSH_TAG: &str = "Push";
 pub const PUSH_ALL_TAGS: &str = "Push all tags";
+pub const FETCH_TAGS: &str = "Fetch tags";
 pub const STASH_SAVE_TITLE: &str = "Stash changes";
 pub const STASH_MESSAGE: &str = "Message:";
 pub const STASH_UNTRACKED: &str = "Include untracked files";
@@ -702,6 +732,18 @@ pub const SKIP_TITLE: &str = "Skip this commit";
 pub const SKIP_CONFIRM: &str =
     "The commit being applied is left out, with any conflict resolution done on it. Skip it?";
 pub const PUSHING_TAGS: &str = "Pushing to origin...";
+pub const FETCHING_TAGS: &str = "Fetching the tags of origin...";
+pub const TAGS_FETCHED_STATUS: &str = "Fetched the tags of origin.";
+
+/// Fetch tags where origin has other versions of `kept`: the rest arrived.
+pub fn tags_fetched_kept(kept: &[String]) -> String {
+    format!(
+        "Fetched the tags of origin; kept yours: {}.",
+        kept.join(", ")
+    )
+}
+pub const ERR_TAGS_DIFFER: &str =
+    "origin has other versions of these tags. Your tags were kept; the others were fetched.";
 pub const WORKING: &str = "Working...";
 pub const TAG_PUSHED_STATUS: &str = "Pushed {name} to origin.";
 pub const TAGS_PUSHED_STATUS: &str = "Pushed all tags to origin.";

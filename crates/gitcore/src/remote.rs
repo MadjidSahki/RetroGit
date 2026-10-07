@@ -254,7 +254,15 @@ impl Repo {
         mut progress: impl FnMut(NetProgress),
         cancel: &AtomicBool,
     ) -> Result<(), GitError> {
-        let args = ["fetch", "--prune", "--progress", "origin"];
+        // Branches gone from origin are pruned, tags never: a user's `fetch.pruneTags` would
+        // delete the tags never pushed (no reflog to get them back).
+        let args = [
+            "fetch",
+            "--prune",
+            "--no-prune-tags",
+            "--progress",
+            "origin",
+        ];
         retry_without_token(auth, |a| self.run_net(a, &args, &mut progress, cancel)).map(|_| ())
     }
 

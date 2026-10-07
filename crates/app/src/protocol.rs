@@ -84,8 +84,10 @@ pub enum Command {
         path: String,
     },
     LoadBranches,
+    /// `from`: the branch to start at (local or `origin/x`); `None` = HEAD.
     CreateBranch {
         name: String,
+        from: Option<String>,
         switch: bool,
     },
     /// Local branch, or `origin/x` (creates the tracking branch). `stash`: put local changes
@@ -173,6 +175,8 @@ pub enum Command {
     },
     /// One tag, or all (`None`).
     PushTags(Option<String>),
+    /// Every tag of origin (a fetch only follows those of the commits it brings).
+    FetchTags,
     /// Stash the local changes (untracked included), then run the blocked command again.
     /// `files`: those git said were in the way (shown if nothing could be stashed).
     StashAndRetry {
@@ -641,6 +645,9 @@ impl AppError {
             }
             GitError::AccessDenied(d) => {
                 AppError::new(Severity::Warning, s::ERR_ACCESS_DENIED).with_detail(d)
+            }
+            GitError::TagsDiffer(tags) => {
+                AppError::new(Severity::Warning, s::ERR_TAGS_DIFFER).with_detail(tags.join("\n"))
             }
             // Technical (git's own output): not worded by RetroGit, shown as the detail.
             GitError::Other(d) => AppError::new(Severity::Error, s::ERR_GIT_FAILED).with_detail(d),

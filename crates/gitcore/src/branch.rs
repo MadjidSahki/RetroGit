@@ -135,6 +135,25 @@ impl Repo {
         self.git_ok(args).map(|_| ())
     }
 
+    /// Like `create_branch`, starting at branch `from` (local, or remote like `origin/x`).
+    /// The new branch tracks nothing: it is published under its own name later.
+    pub fn create_branch_from(&self, name: &str, from: &str, switch: bool) -> Result<(), GitError> {
+        // Both are valid branch names, which never start with '-'.
+        let args: &[&str] = if switch {
+            &["switch", "--no-track", "-c", name, from]
+        } else {
+            &["branch", "--no-track", name, from]
+        };
+        self.git_ok(args).map(|_| ())
+    }
+
+    /// `refs/heads/<name>` exists (as opposed to a remote branch like `upstream/x`).
+    pub fn is_local_branch(&self, name: &str) -> bool {
+        self.git()
+            .find_branch(name, git2::BranchType::Local)
+            .is_ok()
+    }
+
     /// `git switch <name>`; `WouldOverwrite` if local changes are in the way.
     pub fn switch_branch(&self, name: &str) -> Result<(), GitError> {
         let out = self.run_git(&["switch", name])?;

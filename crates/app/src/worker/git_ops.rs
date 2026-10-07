@@ -140,7 +140,7 @@ impl Worker {
                     };
                     // Origin refused or the network failed: the local tag is kept.
                     if let Err(e) = result {
-                        self.tag_net_failed(&e);
+                        self.tag_net_failed(SyncOp::Push, &e);
                         self.send_tags();
                         return;
                     }
@@ -192,21 +192,53 @@ impl Worker {
                         };
                         self.emit(Event::TagsStatus(text));
                     }
-                    Err(e) => self.tag_net_failed(&e),
+                    Err(e) => self.tag_net_failed(SyncOp::Push, &e),
                 }
+            }
+            Command::FetchTags => {
+                let Some((r, result)) =
+                    self.network(SyncOp::Fetch, false, |r, a, p, c| r.fetch_tags(a, p, c))
+                else {
+                    return;
+                };
+                match result {
+                    Ok(()) => {
+                        self.emit(Event::SyncFinished {
+                            op: SyncOp::Fetch,
+                            ok: true,
+                        });
+                        self.note(s::NOTE_TAGS_FETCHED);
+                        self.emit(Event::TagsStatus(s::TAGS_FETCHED_STATUS.into()));
+                    }
+                    // A partial success: the other tags arrived, yours were kept.
+                    Err(GitError::TagsDiffer(kept)) => {
+                        self.emit(Event::SyncFinished {
+                            op: SyncOp::Fetch,
+                            ok: true,
+                        });
+                        self.note(s::NOTE_TAGS_FETCHED);
+                        self.emit(Event::TagsStatus(s::tags_fetched_kept(&kept)));
+                        let e = GitError::TagsDiffer(kept);
+                        self.fail(Op::Sync, AppError::from_git(&e));
+                    }
+                    Err(e) => self.tag_net_failed(SyncOp::Fetch, &e),
+                }
+                // Even a partial fetch (tags that differ were kept) brings new tags.
+                self.after_ref_change(&r);
+                self.send_tags();
             }
             _ => {}
         }
     }
 
     /// A tag push or remote delete failed (or was cancelled): say so in the Tags window too.
-    fn tag_net_failed(&mut self, e: &GitError) {
+    fn tag_net_failed(&mut self, op: SyncOp, e: &GitError) {
         let status = match e {
             GitError::Cancelled => s::CANCELLED,
             _ => s::TAG_ACTION_FAILED,
         };
         self.emit(Event::TagsStatus(status.into()));
-        self.net_failed(SyncOp::Push, false, e);
+        self.net_failed(op, false, e);
     }
 
     fn note(&self, note: &str) {
